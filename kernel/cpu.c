@@ -391,6 +391,7 @@ static int __ref _cpu_down(unsigned int cpu, int tasks_frozen)
 	 *
 	 * Wait for the stop thread to go away.
 	 */
+	 
 	while (!idle_cpu(cpu))
 		cpu_relax();
 
