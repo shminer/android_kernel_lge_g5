@@ -12,7 +12,7 @@ ifneq ($(CONFIG_SCHED_OMIT_FRAME_POINTER),y)
 # me.  I suspect most platforms don't need this, but until we know that for sure
 # I turn this off for IA-64 only.  Andreas Schwab says it's also needed on m68k
 # to get a correct value for the wait-channel (WCHAN in ps). --davidm
-CFLAGS_core.o := $(PROFILING) -fno-omit-frame-pointer
+CFLAGS_core.o := $(PROFILING) -fno-omit-frame-pointer -fno-strict-aliasing
 endif
 
 obj-y += core.o loadavg.o clock.o cputime.o
