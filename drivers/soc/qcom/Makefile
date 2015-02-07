@@ -1,8 +1,9 @@
 KASAN_SANITIZE_scm.o := n
 
 CFLAGS_scm.o :=$(call as-instr,.arch_extension sec,-DREQUIRES_SEC=1)
-CFLAGS_KERNEL := -fno-strict-aliasing
 ccflags-$(CONFIG_MSM_REMOTEQDSS) += -Wno-frame-address
+CFLAGS_ipc_router_hsic_xprt.o := -fno-strict-aliasing
+CFLAGS_ipc_router_smd_xprt.o := -fno-strict-aliasing
 
 ccflags-$(CONFIG_MSM_QBT1000) += -Idrivers/misc/
 
