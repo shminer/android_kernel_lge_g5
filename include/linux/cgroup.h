@@ -956,6 +956,11 @@ static inline int cgroup_attach_task_to_root(struct task_struct *tsk, int wait)
 {
 	return 0;
 }
+
+static inline int cgroup_attach_task_to_root(struct task_struct *tsk, int wait)
+{
+	return 0;
+}
 #endif /* !CONFIG_CGROUPS */
 
 #endif /* _LINUX_CGROUP_H */
