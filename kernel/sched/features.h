@@ -31,16 +31,6 @@ SCHED_FEAT(LAST_BUDDY, true)
  */
 SCHED_FEAT(CACHE_HOT_BUDDY, true)
 
-/*
- * Allow wakeup-time preemption of the current task:
- */
-SCHED_FEAT(WAKEUP_PREEMPTION, true)
-
-/*
- * Use arch dependent cpu capacity functions
- */
-SCHED_FEAT(ARCH_CAPACITY, true)
-
 SCHED_FEAT(HRTICK, false)
 SCHED_FEAT(DOUBLE_TICK, false)
 SCHED_FEAT(LB_BIAS, true)
