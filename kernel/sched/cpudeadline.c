@@ -31,6 +31,16 @@ static inline int right_child(int i)
 	return (i << 1) + 2;
 }
 
+static void cpudl_exchange(struct cpudl *cp, int a, int b)
+{
+	int cpu_a = cp->elements[a].cpu, cpu_b = cp->elements[b].cpu;
+
+	swap(cp->elements[a].cpu, cp->elements[b].cpu);
+	swap(cp->elements[a].dl , cp->elements[b].dl );
+
+	swap(cp->elements[cpu_a].idx, cp->elements[cpu_b].idx);
+}
+
 static void cpudl_heapify_down(struct cpudl *cp, int idx)
 {
 	int l, r, largest;
