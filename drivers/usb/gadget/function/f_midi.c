@@ -232,6 +232,7 @@ static inline struct usb_request *midi_alloc_ep_req(struct usb_ep *ep,
 	return alloc_ep_req(ep, length, length);
 }
 
+
 static void midi_free_ep_req(struct usb_ep *ep, struct usb_request *req)
 {
 	kfree(req->buf);
