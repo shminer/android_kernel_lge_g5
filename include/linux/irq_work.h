@@ -1,6 +1,7 @@
 #ifndef _LINUX_IRQ_WORK_H
 #define _LINUX_IRQ_WORK_H
 
+#include <linux/bug.h>
 #include <linux/llist.h>
 
 /*
@@ -36,6 +37,12 @@ bool irq_work_queue(struct irq_work *work);
 
 #ifdef CONFIG_SMP
 bool irq_work_queue_on(struct irq_work *work, int cpu);
+#else
+static inline bool irq_work_queue_on(struct irq_work *work, int cpu)
+{
+	BUG_ON(cpu != 0);
+	return irq_work_queue(work);
+}
 #endif
 
 void irq_work_run(void);
