@@ -99,6 +99,7 @@ static void mdss_mdp_kcal_update_pcc(struct kcal_lut_data *lut_data)
 {
 	u32 copyback = 0;
 	struct mdp_pcc_cfg_data pcc_config;
+	struct mdp_pcc_data_v1_7 *payload;
 
 	memset(&pcc_config, 0, sizeof(struct mdp_pcc_cfg_data));
 
@@ -109,6 +110,7 @@ static void mdss_mdp_kcal_update_pcc(struct kcal_lut_data *lut_data)
 	lut_data->blue = lut_data->blue < lut_data->minimum ?
 		lut_data->minimum : lut_data->blue;
 
+	pcc_config.version = mdp_pcc_v1_7;
 	pcc_config.block = MDP_LOGICAL_BLOCK_DISP_0;
 	pcc_config.ops = lut_data->enable ?
 		MDP_PP_OPS_WRITE | MDP_PP_OPS_ENABLE :
@@ -125,9 +127,15 @@ static void mdss_mdp_kcal_update_pcc(struct kcal_lut_data *lut_data)
 		pcc_config.b.b |= (0xffff << 16);
 	}
 
+	payload = kzalloc(sizeof(struct mdp_pcc_data_v1_7),GFP_USER);
+	payload->r.r = pcc_config.r.r;
+	payload->g.g = pcc_config.g.g;
+	payload->b.b = pcc_config.b.b;
+	pcc_config.cfg_payload = payload;
+
 	if (!mdss_mdp_kcal_store_fb0_ctl()) return;
 	mdss_mdp_pcc_config(fb0_ctl->mfd, &pcc_config, &copyback);
-
+	kfree(payload);
 }
 
 static void mdss_mdp_kcal_read_pcc(struct kcal_lut_data *lut_data)
@@ -159,6 +167,7 @@ static void mdss_mdp_kcal_update_pa(struct kcal_lut_data *lut_data)
 	struct mdp_pa_cfg_data pa_config;
 	struct mdp_pa_v2_cfg_data pa_v2_config;
 	struct mdss_data_type *mdata = mdss_mdp_get_mdata();
+	struct mdp_pa_data_v1_7 *payload;
 
 	if (!mdss_mdp_kcal_store_fb0_ctl()) return;
 
@@ -178,6 +187,7 @@ static void mdss_mdp_kcal_update_pa(struct kcal_lut_data *lut_data)
 	} else {
 		memset(&pa_v2_config, 0, sizeof(struct mdp_pa_v2_cfg_data));
 
+		pa_v2_config.version = mdp_pa_v1_7;
 		pa_v2_config.block = MDP_LOGICAL_BLOCK_DISP_0;
 		pa_v2_config.pa_v2_data.flags = lut_data->enable ?
 			MDP_PP_OPS_WRITE | MDP_PP_OPS_ENABLE :
@@ -194,8 +204,18 @@ static void mdss_mdp_kcal_update_pa(struct kcal_lut_data *lut_data)
 		pa_v2_config.pa_v2_data.global_sat_adj = lut_data->sat;
 		pa_v2_config.pa_v2_data.global_val_adj = lut_data->val;
 		pa_v2_config.pa_v2_data.global_cont_adj = lut_data->cont;
+		pa_v2_config.flags = pa_v2_config.pa_v2_data.flags;
+
+		payload = kzalloc(sizeof(struct mdp_pa_data_v1_7),GFP_USER);
+		payload->mode = pa_v2_config.flags;
+		payload->global_hue_adj = lut_data->hue;
+		payload->global_sat_adj = lut_data->sat;
+		payload->global_val_adj = lut_data->val;
+		payload->global_cont_adj = lut_data->cont;
+		pa_v2_config.cfg_payload = payload;
 
 		mdss_mdp_pa_v2_config(fb0_ctl->mfd, &pa_v2_config, &copyback);
+		kfree(payload);
 	}
 }
 
