@@ -40,6 +40,40 @@ struct kcal_lut_data {
 	int cont;
 };
 
+struct mdss_mdp_ctl *fb0_ctl = 0;
+
+static int mdss_mdp_kcal_store_fb0_ctl(void)
+{
+	int i;
+	struct mdss_mdp_ctl *ctl;
+	struct mdss_data_type *mdata = mdss_mdp_get_mdata();
+
+	if (fb0_ctl) return 1;
+	if (!mdata) {
+		pr_err("%s mdata is NULL...",__func__);
+		return 0;
+	}
+
+	for (i = 0; i < mdata->nctl; i++) {
+		ctl = mdata->ctl_off + i;
+		if (!ctl) {
+			pr_err("%s ctl is NULL...\n",__func__);
+			return 0;
+		}
+		if (!(ctl->mfd)) {
+			pr_err("%s MFD is NULL...\n",__func__);
+			return 0;
+		}
+		pr_err("%s panel name %s\n",__func__,ctl->mfd->panel_info->panel_name);
+		if ( ctl->mfd->panel_info->fb_num  == 0 ) {
+			pr_err("%s panel found...\n",__func__);
+			fb0_ctl = ctl;
+			return 1;
+		}
+	}
+	return 0;
+}
+
 static int mdss_mdp_kcal_display_commit(void)
 {
 	int i;
@@ -91,7 +125,9 @@ static void mdss_mdp_kcal_update_pcc(struct kcal_lut_data *lut_data)
 		pcc_config.b.b |= (0xffff << 16);
 	}
 
-	mdss_mdp_pcc_config(&pcc_config, &copyback);
+	if (!mdss_mdp_kcal_store_fb0_ctl()) return;
+	mdss_mdp_pcc_config(fb0_ctl->mfd, &pcc_config, &copyback);
+
 }
 
 static void mdss_mdp_kcal_read_pcc(struct kcal_lut_data *lut_data)
@@ -104,7 +140,7 @@ static void mdss_mdp_kcal_read_pcc(struct kcal_lut_data *lut_data)
 	pcc_config.block = MDP_LOGICAL_BLOCK_DISP_0;
 	pcc_config.ops = MDP_PP_OPS_READ;
 
-	mdss_mdp_pcc_config(&pcc_config, &copyback);
+	mdss_mdp_pcc_config(fb0_ctl->mfd, &pcc_config, &copyback);
 
 	/* LiveDisplay disables pcc when using default values and regs
 	 * are zeroed on pp resume, so throw these values out.
@@ -124,6 +160,8 @@ static void mdss_mdp_kcal_update_pa(struct kcal_lut_data *lut_data)
 	struct mdp_pa_v2_cfg_data pa_v2_config;
 	struct mdss_data_type *mdata = mdss_mdp_get_mdata();
 
+	if (!mdss_mdp_kcal_store_fb0_ctl()) return;
+
 	if (mdata->mdp_rev < MDSS_MDP_HW_REV_103) {
 		memset(&pa_config, 0, sizeof(struct mdp_pa_cfg_data));
 
@@ -136,7 +174,7 @@ static void mdss_mdp_kcal_update_pa(struct kcal_lut_data *lut_data)
 		pa_config.pa_data.val_adj = lut_data->val;
 		pa_config.pa_data.cont_adj = lut_data->cont;
 
-		mdss_mdp_pa_config(&pa_config, &copyback);
+		mdss_mdp_pa_config(fb0_ctl->mfd, &pa_config, &copyback);
 	} else {
 		memset(&pa_v2_config, 0, sizeof(struct mdp_pa_v2_cfg_data));
 
@@ -157,7 +195,7 @@ static void mdss_mdp_kcal_update_pa(struct kcal_lut_data *lut_data)
 		pa_v2_config.pa_v2_data.global_val_adj = lut_data->val;
 		pa_v2_config.pa_v2_data.global_cont_adj = lut_data->cont;
 
-		mdss_mdp_pa_v2_config(&pa_v2_config, &copyback);
+		mdss_mdp_pa_v2_config(fb0_ctl->mfd, &pa_v2_config, &copyback);
 	}
 }
 
