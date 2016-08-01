@@ -273,8 +273,6 @@ struct hfi_buffer_info {
 	(HFI_PROPERTY_PARAM_COMMON_START + 0x00E)
 #define HFI_PROPERTY_PARAM_MVC_BUFFER_LAYOUT \
 	(HFI_PROPERTY_PARAM_COMMON_START + 0x00F)
-#define  HFI_PROPERTY_PARAM_MAX_SESSIONS_SUPPORTED	    \
-	(HFI_PROPERTY_PARAM_COMMON_START + 0x010)
 
 #define HFI_PROPERTY_CONFIG_COMMON_START				\
 	(HFI_DOMAIN_BASE_COMMON + HFI_ARCH_COMMON_OFFSET + 0x2000)
@@ -291,9 +289,6 @@ struct hfi_buffer_info {
 	(HFI_PROPERTY_PARAM_VDEC_COMMON_START + 0x003)
 #define  HFI_PROPERTY_PARAM_VDEC_PIXEL_BITDEPTH				\
 	(HFI_PROPERTY_PARAM_VDEC_COMMON_START + 0x007)
-#define  HFI_PROPERTY_PARAM_VDEC_PIC_STRUCT				\
-	(HFI_PROPERTY_PARAM_VDEC_COMMON_START + 0x009)
-
 
 #define HFI_PROPERTY_CONFIG_VDEC_COMMON_START				\
 	(HFI_DOMAIN_BASE_VDEC + HFI_ARCH_COMMON_OFFSET + 0x4000)
@@ -418,10 +413,6 @@ struct hfi_buffer_info {
 #define HFI_PROPERTY_CONFIG_VPE_OPERATIONS				\
 	(HFI_PROPERTY_CONFIG_VPE_COMMON_START + 0x002)
 
-struct hfi_pic_struct {
-	u32 progressive_only;
-};
-
 struct hfi_bitrate {
 	u32 bit_rate;
 	u32 layer_id;
@@ -436,14 +427,10 @@ struct hfi_bitrate {
 #define HFI_CAPABILITY_SCALE_Y				(HFI_COMMON_BASE + 0x7)
 #define HFI_CAPABILITY_BITRATE				(HFI_COMMON_BASE + 0x8)
 #define HFI_CAPABILITY_BFRAME				(HFI_COMMON_BASE + 0x9)
-#define HFI_CAPABILITY_PEAKBITRATE			(HFI_COMMON_BASE + 0xa)
 #define HFI_CAPABILITY_HIER_P_NUM_ENH_LAYERS		(HFI_COMMON_BASE + 0x10)
 #define HFI_CAPABILITY_ENC_LTR_COUNT			(HFI_COMMON_BASE + 0x11)
 #define HFI_CAPABILITY_CP_OUTPUT2_THRESH		(HFI_COMMON_BASE + 0x12)
-#define HFI_CAPABILITY_HIER_B_NUM_ENH_LAYERS	(HFI_COMMON_BASE + 0x13)
-#define HFI_CAPABILITY_LCU_SIZE				(HFI_COMMON_BASE + 0x14)
 #define HFI_CAPABILITY_HIER_P_HYBRID_NUM_ENH_LAYERS	(HFI_COMMON_BASE + 0x15)
-#define HFI_CAPABILITY_MBS_PER_SECOND_POWERSAVE		(HFI_COMMON_BASE + 0x16)
 
 struct hfi_capability_supported {
 	u32 capability_type;
@@ -764,10 +751,6 @@ struct hfi_codec_supported {
 struct hfi_properties_supported {
 	u32 num_properties;
 	u32 rg_properties[1];
-};
-
-struct hfi_max_sessions_supported {
-	u32 max_sessions;
 };
 
 struct hfi_vpe_color_space_conversion {
