@@ -31,42 +31,6 @@
 
 static DEFINE_MUTEX(l2bw_lock);
 
-
-static unsigned long arg_cpu_max_c1 = 1593600;
-
-static int __init cpufreq_read_cpu_max_c1(char *cpu_max_c1)
-{
-	unsigned long ui_khz;
-	int ret;
-
-	ret = kstrtoul(cpu_max_c1, 0, &ui_khz);
-	if (ret)
-		return -EINVAL;
-
-	arg_cpu_max_c1 = ui_khz;
-	printk("cpu_max_c1=%lu\n", arg_cpu_max_c1);
-	return ret;
-}
-__setup("cpu_max_c1=", cpufreq_read_cpu_max_c1);
-
-static unsigned long arg_cpu_max_c2 = 2150400;
-
-static int __init cpufreq_read_cpu_max_c2(char *cpu_max_c2)
-{
-	unsigned long ui_khz;
-	int ret;
-
-	ret = kstrtoul(cpu_max_c2, 0, &ui_khz);
-	if (ret)
-		return -EINVAL;
-
-	arg_cpu_max_c2 = ui_khz;
-	printk("cpu_max_c2=%lu\n", arg_cpu_max_c2);
-	return ret;
-}
-__setup("cpu_max_c2=", cpufreq_read_cpu_max_c2);
-
-
 static struct clk *cpu_clk[NR_CPUS];
 static struct clk *l2_clk;
 static DEFINE_PER_CPU(struct cpufreq_frequency_table *, freq_table);
@@ -193,6 +157,62 @@ void set_max_lock(unsigned int freq)
 	}
 }
 EXPORT_SYMBOL(set_max_lock);
+
+static ssize_t cpu_max_c1_show(struct device *dev,
+		struct device_attribute *attr, char *buf)
+{
+	return scnprintf(buf, PAGE_SIZE, "%d\n", get_cpu_max_lock(0));
+}
+
+static ssize_t cpu_max_c1_store(struct device *dev, struct device_attribute *attr,
+						const char *buf, size_t count)
+{
+	int ret;
+	unsigned int val, freq;
+
+	ret = sscanf(buf, "%u\n", &val);
+	if (ret != 1)
+		return -EINVAL;
+
+	freq = get_cpu_max_lock(0);
+
+	if (val == 0 || val == freq)
+		return count;
+
+	set_cpu_max_lock(0, val);
+	set_cpu_max_lock(1, val);
+
+	return count;
+}
+
+static ssize_t cpu_max_c2_show(struct device *dev,
+		struct device_attribute *attr, char *buf)
+{
+	return scnprintf(buf, PAGE_SIZE, "%d\n", get_cpu_max_lock(2));
+}
+
+static ssize_t cpu_max_c2_store(struct device *dev, struct device_attribute *attr,
+						const char *buf, size_t count)
+{
+	int ret;
+	unsigned int val, freq;
+
+	ret = sscanf(buf, "%u\n", &val);
+	if (ret != 1)
+		return -EINVAL;
+
+	freq = get_cpu_max_lock(2);
+
+	if (val == 0 || val == freq)
+		return count;
+
+	set_cpu_max_lock(2, val);
+	set_cpu_max_lock(3, val);
+
+	return count;
+}
+static DEVICE_ATTR(cpu_max_c1, S_IWUSR | S_IRUGO, cpu_max_c1_show, cpu_max_c1_store);
+static DEVICE_ATTR(cpu_max_c2, S_IWUSR | S_IRUGO, cpu_max_c2_show, cpu_max_c2_store);
 #endif
 
 static int set_cpu_freq(struct cpufreq_policy *policy, unsigned int new_freq,
@@ -553,13 +573,6 @@ static struct cpufreq_frequency_table *cpufreq_parse_dt(struct device *dev,
 		if (i > 0 && f <= ftbl[i-1].frequency)
 			break;
 
-		//Custom max freq
-		if ((cpu < 2 && f > arg_cpu_max_c1) ||
-				(cpu >= 2 && f > arg_cpu_max_c2)) {
-			nf = i;
-			break;
-		}
-
 		ftbl[i].driver_data = i;
 		ftbl[i].frequency = f;
 	}
@@ -579,6 +592,9 @@ static int __init msm_cpufreq_probe(struct platform_device *pdev)
 	char tbl_name[] = "qcom,cpufreq-table-??";
 	struct clk *c;
 	int cpu;
+#ifdef CONFIG_CPUFREQ_LIMITER
+	int ret;
+#endif
 	struct cpufreq_frequency_table *ftbl;
 
 	l2_clk = devm_clk_get(dev, "l2_clk");
@@ -642,6 +658,16 @@ static int __init msm_cpufreq_probe(struct platform_device *pdev)
 		}
 		per_cpu(freq_table, cpu) = ftbl;
 	}
+
+#ifdef CONFIG_CPUFREQ_LIMITER
+	ret = device_create_file(&pdev->dev, &dev_attr_cpu_max_c1);
+	ret |= device_create_file(&pdev->dev, &dev_attr_cpu_max_c2);
+
+	if (ret) {
+		pr_err("%s: unable to create sysfs entries\n", __func__);
+		return ret;
+	}
+#endif
 
 	return 0;
 }
