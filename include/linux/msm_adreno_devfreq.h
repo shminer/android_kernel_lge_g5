@@ -31,9 +31,8 @@ struct devfreq_msm_adreno_tz_data {
 		u32 ctxt_aware_target_pwrlevel;
 		u32 ctxt_aware_busy_penalty;
 #if 1
-		int cycles_without_boost;
-		int boost_period;
 		int last_level;
+		int cycles_keeping_level;
 #endif
 	} bin;
 	struct {
