@@ -2,7 +2,11 @@
  *
  * Copyright (C) 2008 Google, Inc.
  * Copyright (C) 2008 HTC Corporation
+<<<<<<< HEAD
  * Copyright (c) 2011-2016, The Linux Foundation. All rights reserved.
+=======
+ * Copyright (c) 2011-2014, The Linux Foundation. All rights reserved.
+>>>>>>> parent of 19a9abd... ASoC: msm: qdsp6v2: extend wakelock hook to all misc drivers
  *
  * This software is licensed under the terms of the GNU General Public
  * License version 2, as published by the Free Software Foundation, and
@@ -16,9 +20,6 @@
  */
 
 #include "audio_utils_aio.h"
-
-static struct miscdevice audio_amrwb_misc;
-static struct ws_mgr audio_amrwb_ws_mgr;
 
 #ifdef CONFIG_DEBUG_FS
 static const struct file_operations audio_amrwb_debug_fops = {
@@ -87,9 +88,6 @@ static int audio_open(struct inode *inode, struct file *file)
 		return -ENOMEM;
 	}
 	audio->pcm_cfg.buffer_size = PCM_BUFSZ_MIN;
-	audio->miscdevice = &audio_amrwb_misc;
-	audio->wakelock_voted = false;
-	audio->audio_ws_mgr = &audio_amrwb_ws_mgr;
 
 	init_waitqueue_head(&audio->event_wait);
 
@@ -163,7 +161,7 @@ static const struct file_operations audio_amrwb_fops = {
 	.fsync = audio_aio_fsync,
 };
 
-static struct miscdevice audio_amrwb_misc = {
+struct miscdevice audio_amrwb_misc = {
 	.minor = MISC_DYNAMIC_MINOR,
 	.name = "msm_amrwb",
 	.fops = &audio_amrwb_fops,
@@ -171,14 +169,7 @@ static struct miscdevice audio_amrwb_misc = {
 
 static int __init audio_amrwb_init(void)
 {
-	int ret = misc_register(&audio_amrwb_misc);
-
-	if (ret == 0)
-		device_init_wakeup(audio_amrwb_misc.this_device, true);
-	audio_amrwb_ws_mgr.ref_cnt = 0;
-	mutex_init(&audio_amrwb_ws_mgr.ws_lock);
-
-	return ret;
+	return misc_register(&audio_amrwb_misc);
 }
 
 device_initcall(audio_amrwb_init);

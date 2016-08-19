@@ -16,9 +16,6 @@
  */
 #include "audio_utils_aio.h"
 
-static struct miscdevice audio_amrnb_misc;
-static struct ws_mgr audio_amrnb_ws_mgr;
-
 #ifdef CONFIG_DEBUG_FS
 static const struct file_operations audio_amrnb_debug_fops = {
 	.read = audio_aio_debug_read,
@@ -85,9 +82,6 @@ static int audio_open(struct inode *inode, struct file *file)
 	}
 
 	audio->pcm_cfg.buffer_size = PCM_BUFSZ_MIN;
-	audio->miscdevice = &audio_amrnb_misc;
-	audio->wakelock_voted = false;
-	audio->audio_ws_mgr = &audio_amrnb_ws_mgr;
 
 	init_waitqueue_head(&audio->event_wait);
 
@@ -159,7 +153,7 @@ static const struct file_operations audio_amrnb_fops = {
 	.fsync = audio_aio_fsync,
 };
 
-static struct miscdevice audio_amrnb_misc = {
+struct miscdevice audio_amrnb_misc = {
 	.minor = MISC_DYNAMIC_MINOR,
 	.name = "msm_amrnb",
 	.fops = &audio_amrnb_fops,
@@ -167,14 +161,7 @@ static struct miscdevice audio_amrnb_misc = {
 
 static int __init audio_amrnb_init(void)
 {
-	int ret = misc_register(&audio_amrnb_misc);
-
-	if (ret == 0)
-		device_init_wakeup(audio_amrnb_misc.this_device, true);
-	audio_amrnb_ws_mgr.ref_cnt = 0;
-	mutex_init(&audio_amrnb_ws_mgr.ws_lock);
-
-	return ret;
+	return misc_register(&audio_amrnb_misc);
 }
 
 device_initcall(audio_amrnb_init);
