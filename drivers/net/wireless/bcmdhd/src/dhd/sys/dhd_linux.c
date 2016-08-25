@@ -11989,6 +11989,7 @@ dhd_wait_pend8021x(struct net_device *dev)
 }
 
 #ifdef DHD_DEBUG
+/*
 static void
 dhd_convert_memdump_type_to_str(uint32 type, char *buf)
 {
@@ -12021,7 +12022,7 @@ dhd_convert_memdump_type_to_str(uint32 type, char *buf)
 	strncpy(buf, type_str, strlen(type_str));
 	buf[strlen(type_str)] = 0;
 }
-
+*/
 int
 write_to_file(dhd_pub_t *dhd, uint8 *buf, int size)
 {
