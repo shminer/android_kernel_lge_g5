@@ -1,6 +1,7 @@
 /*
  * Copyright 2015 franciscofranco
  * Copyright 2016 Guneet Atwal
+ * Copyright 2016 JZshminer
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 as
@@ -8,48 +9,119 @@
  */
 #include <linux/init.h>
 #include <linux/device.h>
+
 #include <linux/miscdevice.h>
+#include <linux/sound_control.h>
+#include <linux/mfd/wcd9335/registers.h>
 
-#define SOUND_CONTROL_MAJOR_VERSION 3
-#define SOUND_CONTROL_MINOR_VERSION 1
+ #define HEADPHONE_BOOST_L_REG      WCD9335_CDC_RX1_RX_VOL_CTL
+ #define HEADPHONE_BOOST_MIX_L_REG      WCD9335_CDC_RX1_RX_VOL_MIX_CTL
+ #define HEADPHONE_BOOST_R_REG      WCD9335_CDC_RX2_RX_VOL_CTL
+ #define HEADPHONE_BOOST_MIX_R_REG      WCD9335_CDC_RX2_RX_VOL_MIX_CTL
+ #define SPEAKER_REG      WCD9335_CDC_RX7_RX_VOL_CTL
+ #define MIC_REG      WCD9335_CDC_RX0_RX_VOL_CTL
+ #define MIC_MIX_REG      WCD9335_CDC_RX0_RX_VOL_CTL
 
-extern void update_headphones_volume_boost(int vol_boost);
-extern void update_speaker_gain(int vol_boost);
-extern void update_mic_gain(int vol_boost);
+ #define HEADPHONE_BOOST_LIMIT 20
+ #define SPEAKER_BOOST_LIMIT 10
+ #define MIC_BOOST_LIMIT 10
+
+#define dprintk(msg...)		\
+do {				\
+		pr_info("[ sound_control ] BOOST STATE: "msg);	\
+} while (0)
 
 //Headphones
-int headphones_boost = 0;
-int headphones_boost_limit = 20;
+int headphones_boost_l = 0;
+int headphones_boost_l_ori = 0;
+int headphones_boost_r = 0;
+int headphones_boost_r_ori = 0;
+int headphones_boost_limit = HEADPHONE_BOOST_LIMIT;
 
 //Speakers
-
 int speaker_boost = 0;
-int speaker_boost_limit = 10;
+int speaker_boost_ori = 0;
+int speaker_boost_limit = SPEAKER_BOOST_LIMIT;
 
 //Micrphone/Earpiece
 int mic_boost = 0;
-int mic_boost_limit = 10;
+int mic_boost_ori = 0;
+int mic_boost_limit = MIC_BOOST_LIMIT;
 
+static void update_headphones_vol(int l, int r)
+{
+	int val_l, val_r;
+
+	sound_control_write(HEADPHONE_BOOST_L_REG, -headphones_boost_l_ori);
+	sound_control_write(HEADPHONE_BOOST_MIX_L_REG, -headphones_boost_l_ori);
+	sound_control_write(HEADPHONE_BOOST_R_REG, -headphones_boost_r_ori);
+	sound_control_write(HEADPHONE_BOOST_MIX_R_REG, -headphones_boost_r_ori);
+
+	val_l = sound_control_write(HEADPHONE_BOOST_L_REG, l);
+	sound_control_write(HEADPHONE_BOOST_MIX_L_REG, l);
+	val_r = sound_control_write(HEADPHONE_BOOST_R_REG, r);
+	sound_control_write(HEADPHONE_BOOST_MIX_R_REG, r);
+
+	headphones_boost_l_ori = l;
+	headphones_boost_r_ori = r;
+
+	dprintk("HEADPHONES L: [%d] R: [%d]  Volume: L: [%d] R: [%d] \n", l, r, val_l, val_r);
+}
+
+static void update_speaker_vol(int vol)
+{
+	int ret;
+
+	sound_control_write(SPEAKER_REG, -speaker_boost_ori);
+
+	ret = sound_control_write(SPEAKER_REG, vol);
+
+	speaker_boost_ori = vol;
+
+	dprintk("SPEAKER MONO: [%d] \
+		Volume: MONO: [%d] \n", vol, ret);
+}
+
+static void update_mic_vol(int vol)
+{
+	int ret;
+
+	sound_control_write(MIC_REG, -mic_boost_ori);
+	sound_control_write(MIC_MIX_REG, -mic_boost_ori);
+
+	ret = sound_control_write(MIC_REG, vol);
+	sound_control_write(MIC_MIX_REG, vol);
+
+	mic_boost_ori = vol;
+
+	dprintk("MIC MONO: [%d] \
+		Volume: MONO: [%d] \n", vol, ret);
+}
+
+/* misc sysfs*/
 static ssize_t headphones_boost_show(struct device *dev,
 		struct device_attribute *attr, char *buf)
 {
-	return sprintf(buf, "%d\n", headphones_boost);
+	return sprintf(buf, "%d %d\n", 
+		headphones_boost_l, headphones_boost_r );
 }
 
 static ssize_t headphones_boost_store(struct device *dev,
 		struct device_attribute *attr, const char *buf, size_t size)
 {
-	int new_val;
+	int val_l, val_r;
 
-	sscanf(buf, "%d", &new_val);
+	sscanf(buf, "%d %d", &val_l, &val_r);
 
-	if (new_val != headphones_boost) {
-		if (new_val >= headphones_boost_limit)
-			new_val = headphones_boost_limit;
-		pr_info("New headphones_boost: %d\n", new_val);
+	if (val_l != headphones_boost_l || val_r != headphones_boost_r) {
+		if (val_l >= headphones_boost_limit)
+			val_l = headphones_boost_limit;
+		if (val_r >= headphones_boost_limit)
+			val_r = headphones_boost_limit;
 
-		headphones_boost = new_val;
-		update_headphones_volume_boost(headphones_boost);
+		headphones_boost_l = val_l;
+		headphones_boost_r = val_r;
+		update_headphones_vol(val_l, val_r);
 	}
 
 	return size;
@@ -72,10 +144,8 @@ static ssize_t speaker_boost_store(struct device *dev,
 		if (new_val >= speaker_boost_limit)
 			new_val = speaker_boost_limit;
 
-		pr_info("New speaker_boost: %d\n", new_val);
-
 		speaker_boost = new_val;
-		update_speaker_gain(speaker_boost);
+		update_speaker_vol(new_val);
 	}
 
 	return size;
@@ -98,10 +168,8 @@ static ssize_t mic_boost_store(struct device *dev,
 		if (new_val >= mic_boost_limit)
 			new_val = mic_boost_limit;
 
-		pr_info("New mic_boost: %d\n", new_val);
-
 		speaker_boost = new_val;
-		update_mic_gain(mic_boost);
+		update_mic_vol(new_val);
 	}
 
 	return size;
