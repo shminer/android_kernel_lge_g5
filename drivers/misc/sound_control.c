@@ -9,7 +9,6 @@
  */
 #include <linux/init.h>
 #include <linux/device.h>
-
 #include <linux/miscdevice.h>
 #include <linux/sound_control.h>
 #include <linux/mfd/wcd9335/registers.h>
@@ -20,7 +19,9 @@
  #define HEADPHONE_BOOST_MIX_R_REG      WCD9335_CDC_RX2_RX_VOL_MIX_CTL
  #define SPEAKER_REG      WCD9335_CDC_RX7_RX_VOL_CTL
  #define MIC_REG      WCD9335_CDC_RX0_RX_VOL_CTL
- #define MIC_MIX_REG      WCD9335_CDC_RX0_RX_VOL_CTL
+ #define MIC_MIX_REG      WCD9335_CDC_RX0_RX_VOL_MIX_CTL
+ #define CAM_MIC_L_REG      WCD9335_CDC_TX7_TX_VOL_CTL
+ #define CAM_MIC_R_REG      WCD9335_CDC_TX8_TX_VOL_CTL
 
  #define HEADPHONE_BOOST_LIMIT 20
  #define SPEAKER_BOOST_LIMIT 10
@@ -47,6 +48,10 @@ int speaker_boost_limit = SPEAKER_BOOST_LIMIT;
 int mic_boost = 0;
 int mic_boost_ori = 0;
 int mic_boost_limit = MIC_BOOST_LIMIT;
+
+//Camera-micrphone
+int cam_mic_boost = 0;
+int cam_mic_boost_ori = 0;
 
 static void update_headphones_vol(int l, int r)
 {
@@ -78,8 +83,7 @@ static void update_speaker_vol(int vol)
 
 	speaker_boost_ori = vol;
 
-	dprintk("SPEAKER MONO: [%d] \
-		Volume: MONO: [%d] \n", vol, ret);
+	dprintk("SPEAKER MONO: [%d] Volume: MONO: [%d] \n", vol, ret);
 }
 
 static void update_mic_vol(int vol)
@@ -94,8 +98,22 @@ static void update_mic_vol(int vol)
 
 	mic_boost_ori = vol;
 
-	dprintk("MIC MONO: [%d] \
-		Volume: MONO: [%d] \n", vol, ret);
+	dprintk("MIC MONO: [%d] Volume: MONO: [%d] \n", vol, ret);
+}
+
+static void update_cam_mic_vol(int vol)
+{
+	int ret_l, ret_r;
+
+	sound_control_write(CAM_MIC_L_REG, -cam_mic_boost_ori);
+	sound_control_write(CAM_MIC_R_REG, -cam_mic_boost_ori);
+
+	ret_l = sound_control_write(CAM_MIC_L_REG, vol);
+	ret_r = sound_control_write(CAM_MIC_R_REG, vol);
+
+	cam_mic_boost_ori = vol;
+
+	dprintk("CAM MIC : [%d] Volume: L: [%d] R: [%d]\n", vol, ret_l, ret_r);
 }
 
 /* misc sysfs*/
@@ -109,10 +127,20 @@ static ssize_t headphones_boost_show(struct device *dev,
 static ssize_t headphones_boost_store(struct device *dev,
 		struct device_attribute *attr, const char *buf, size_t size)
 {
-	int val_l, val_r;
+	int val_l, val_r, ret;
 
-	sscanf(buf, "%d %d", &val_l, &val_r);
-
+	ret = sscanf(buf, "%d %d", &val_l, &val_r);
+	// For one argument
+	if (ret != 2){
+		if (val_l != headphones_boost_l || val_l != headphones_boost_r){
+			if (val_l >= headphones_boost_limit)
+				val_l = headphones_boost_limit;
+			headphones_boost_l = val_l;
+			headphones_boost_r = val_l;
+			update_headphones_vol(val_l, val_l);
+		} 
+		return size;
+	}
 	if (val_l != headphones_boost_l || val_r != headphones_boost_r) {
 		if (val_l >= headphones_boost_limit)
 			val_l = headphones_boost_limit;
@@ -168,8 +196,32 @@ static ssize_t mic_boost_store(struct device *dev,
 		if (new_val >= mic_boost_limit)
 			new_val = mic_boost_limit;
 
-		speaker_boost = new_val;
+		mic_boost = new_val;
 		update_mic_vol(new_val);
+	}
+
+	return size;
+}
+
+static ssize_t cam_mic_boost_show(struct device *dev,
+		struct device_attribute *attr, char *buf)
+{
+	return sprintf(buf, "%d\n", cam_mic_boost);
+}
+
+static ssize_t cam_mic_boost_store(struct device *dev,
+		struct device_attribute *attr, const char *buf, size_t size)
+{
+	int new_val;
+
+	sscanf(buf, "%d", &new_val);
+
+	if (new_val != cam_mic_boost) {
+		if (new_val >= mic_boost_limit)
+			new_val = mic_boost_limit;
+
+		cam_mic_boost = new_val;
+		update_cam_mic_vol(new_val);
 	}
 
 	return size;
@@ -178,6 +230,7 @@ static ssize_t mic_boost_store(struct device *dev,
 static DEVICE_ATTR(volume_boost, 0664, headphones_boost_show,headphones_boost_store);
 static DEVICE_ATTR(speaker_boost, 0664, speaker_boost_show, speaker_boost_store);
 static DEVICE_ATTR(mic_boost, 0664, mic_boost_show, mic_boost_store);
+static DEVICE_ATTR(cam_mic_boost, 0664, cam_mic_boost_show, cam_mic_boost_store);
 
 
 static struct attribute *soundcontrol_attributes[] =
@@ -185,6 +238,7 @@ static struct attribute *soundcontrol_attributes[] =
 	&dev_attr_volume_boost.attr,
 	&dev_attr_speaker_boost.attr,
 	&dev_attr_mic_boost.attr,
+	&dev_attr_cam_mic_boost.attr,
 	NULL
 };
 
