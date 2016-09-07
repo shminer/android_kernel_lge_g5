@@ -488,10 +488,11 @@ static int qpnp_hap_play(struct qpnp_hap *hap, int on)
 			QPNP_HAP_PLAY_REG(hap->base));
 	if (rc < 0)
 		return rc;
+#if 0
 #ifdef CONFIG_LGE_QPNP_HAPTIC_OV_RB
 	dev_info(&hap->spmi->dev, "qpnp_hap_play: on = %d, voltage = %d \n", on, hap->vmax_mv);
 #endif
-
+#endif
 	hap->reg_play = val;
 
 	return 0;
