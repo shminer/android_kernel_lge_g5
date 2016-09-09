@@ -210,17 +210,20 @@ static int boost_adjust_notify(struct notifier_block *nb, unsigned long val,
 	unsigned int cpu = policy->cpu;
 	struct cpu_sync *s = &per_cpu(sync_info, cpu);
 	unsigned int ib_min = s->input_boost_min;
+	unsigned int min;
 
 	switch (val) {
 	case CPUFREQ_ADJUST:
 		if (!ib_min)
 			break;
 
+		min = min(ib_min, policy->max);
+
 		pr_debug("CPU%u policy min before boost: %u kHz\n",
 			 cpu, policy->min);
-		pr_debug("CPU%u boost min: %u kHz\n", cpu, ib_min);
+		pr_debug("CPU%u boost min: %u kHz\n", cpu, min);
 
-		cpufreq_verify_within_limits(policy, ib_min, UINT_MAX);
+		cpufreq_verify_within_limits(policy, min, UINT_MAX);
 
 		pr_debug("CPU%u policy min after boost: %u kHz\n",
 			 cpu, policy->min);
