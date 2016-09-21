@@ -60,8 +60,8 @@ const unsigned long NOMINAL_BW_MBPS = 6000 /* ideally 320 Mhz */,
 	SVS_BW_MBPS = 2000 /* ideally 100 Mhz */;
 
 /* converts Mbps to bps (the "b" part can be bits or bytes based on context) */
-#define kbps(__mbps) ((__mbps) * U64_C(1000))
-#define bps(__mbps) (kbps(__mbps) * U64_C(1000))
+#define kbps(__mbps) ((__mbps) * 1000)
+#define bps(__mbps) (kbps(__mbps) * 1000)
 
 #define GENERATE_SCENARIO_PROFILE(__average, __worst) {                        \
 	[SCENARIO_AVERAGE] = (__average),                                      \
@@ -200,7 +200,7 @@ static fp_t __compression_ratio(struct lut const *entry, int bpp,
 struct dump {
 	char *key;
 	char *format;
-	int64_t val;
+	size_t val;
 };
 
 static void __dump(struct dump dump[], int len)
@@ -223,12 +223,12 @@ static void __dump(struct dump dump[], int len)
 				snprintf(formatted_line, sizeof(formatted_line),
 						format_line, dump[c].val);
 			} else {
-				int64_t integer_part, fractional_part;
+				size_t integer_part, fractional_part;
 
 				integer_part = fp_int(dump[c].val);
 				fractional_part = fp_frac(dump[c].val);
 				snprintf(formatted_line, sizeof(formatted_line),
-						"    %-35s: %lld + %lld/%lld\n",
+						"    %-35s: %zd + %zd/%zd\n",
 						dump[c].key, integer_part,
 						fractional_part,
 						fp_frac_base());
@@ -602,7 +602,6 @@ static unsigned long __calculate_decoder(struct vidc_bus_vote_data *d,
 		{"DPB read", DUMP_FP_FMT, vmem.dpb_read},
 		{"DPB write", DUMP_FP_FMT, vmem.dpb_write},
 		};
-
 		__dump(dump, ARRAY_SIZE(dump));
 	}
 
@@ -860,6 +859,7 @@ static unsigned long __calculate_encoder(struct vidc_bus_vote_data *d,
 		vmem.dpb_read = temp;
 	} else if (scenario != SCENARIO_AVERAGE) {
 		fp_t temp = fp_mult(one_frame_bw_dpb, FP_INT(2));
+
 		temp = fp_mult(temp, FP_INT(search_window_factor_bw_b *
 					available_vmem_b));
 		temp = fp_div(temp, FP_INT(6));
