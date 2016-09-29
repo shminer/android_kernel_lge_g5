@@ -387,13 +387,6 @@ static inline bool is_dynamic_output_buffer_mode(struct v4l2_buffer *b,
 }
 
 
-static inline bool is_encoder_input_buffer(struct v4l2_buffer *b,
-				struct msm_vidc_inst *inst)
-{
-	return b->type == V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE &&
-			inst->session_type == MSM_VIDC_ENCODER;
-}
-
 static inline void save_v4l2_buffer(struct v4l2_buffer *b,
 						struct buffer_info *binfo)
 {
@@ -1185,7 +1178,6 @@ void *msm_vidc_open(int core_id, int session_type)
 	inst->core = core;
 	inst->bit_depth = MSM_VIDC_BIT_DEPTH_8;
 	inst->instant_bitrate = 0;
-	inst->pic_struct = MSM_VIDC_PIC_STRUCT_PROGRESSIVE;
 
 	for (i = SESSION_MSG_INDEX(SESSION_MSG_START);
 		i <= SESSION_MSG_INDEX(SESSION_MSG_END); i++) {
