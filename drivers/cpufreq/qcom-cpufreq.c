@@ -43,178 +43,6 @@ struct cpufreq_suspend_t {
 
 static DEFINE_PER_CPU(struct cpufreq_suspend_t, suspend_data);
 
-#ifdef CONFIG_CPUFREQ_LIMITER
-struct cpufreq_limiter_t {
-	struct rw_semaphore	rwsem;
-	unsigned int upper_limit_freq;
-	unsigned int lower_limit_freq;
-};
-
-static DEFINE_PER_CPU(struct cpufreq_limiter_t, limiter_data);
-
-unsigned int get_cpu_min_lock(unsigned int cpu)
-{
-	unsigned int min;
-
-	down_read(&per_cpu(limiter_data, cpu).rwsem);
-	min = per_cpu(limiter_data, cpu).lower_limit_freq;
-	up_read(&per_cpu(limiter_data, cpu).rwsem);
-
-	return min;
-}
-EXPORT_SYMBOL(get_cpu_min_lock);
-
-unsigned int get_min_lock(void)
-{
-	unsigned int cpu;
-	unsigned int min = UINT_MAX;
-
-	for_each_possible_cpu(cpu) {
-		unsigned int ll_freq;
-
-		down_read(&per_cpu(limiter_data, cpu).rwsem);
-		ll_freq = per_cpu(limiter_data, cpu).lower_limit_freq;
-		up_read(&per_cpu(limiter_data, cpu).rwsem);
-
-		if (min > ll_freq && ll_freq > 0)
-			min = ll_freq;
-	}
-	if (min == UINT_MAX)
-		return 0;
-
-	return min;
-}
-EXPORT_SYMBOL(get_min_lock);
-
-unsigned int get_cpu_max_lock(unsigned int cpu)
-{
-	unsigned int max;
-
-	down_read(&per_cpu(limiter_data, cpu).rwsem);
-	max = per_cpu(limiter_data, cpu).upper_limit_freq;
-	up_read(&per_cpu(limiter_data, cpu).rwsem);
-
-	return max;
-}
-EXPORT_SYMBOL(get_cpu_max_lock);
-
-unsigned int get_max_lock(void)
-{
-	unsigned int cpu;
-	unsigned int max = 0;
-
-	for_each_possible_cpu(cpu) {
-		unsigned int hl_freq;
-
-		down_read(&per_cpu(limiter_data, cpu).rwsem);
-		hl_freq = per_cpu(limiter_data, cpu).upper_limit_freq;
-		up_read(&per_cpu(limiter_data, cpu).rwsem);
-
-		if (max < hl_freq)
-			max = hl_freq;
-	}
-
-	return max;
-}
-EXPORT_SYMBOL(get_max_lock);
-
-void set_cpu_min_lock(unsigned int cpu, unsigned int freq)
-{
-	down_write(&per_cpu(limiter_data, cpu).rwsem);
-	per_cpu(limiter_data, cpu).lower_limit_freq = freq;
-	up_write(&per_cpu(limiter_data, cpu).rwsem);
-}
-EXPORT_SYMBOL(set_cpu_min_lock);
-
-void set_min_lock(unsigned int freq)
-{
-	unsigned int cpu;
-
-	for_each_possible_cpu(cpu) {
-		down_write(&per_cpu(limiter_data, cpu).rwsem);
-		per_cpu(limiter_data, cpu).lower_limit_freq = freq;
-		up_write(&per_cpu(limiter_data, cpu).rwsem);
-	}
-}
-EXPORT_SYMBOL(set_min_lock);
-
-void set_cpu_max_lock(unsigned int cpu, unsigned int freq)
-{
-	down_write(&per_cpu(limiter_data, cpu).rwsem);
-	per_cpu(limiter_data, cpu).upper_limit_freq = freq;
-	up_write(&per_cpu(limiter_data, cpu).rwsem);
-}
-EXPORT_SYMBOL(set_cpu_max_lock);
-
-void set_max_lock(unsigned int freq)
-{
-	unsigned int cpu;
-
-	for_each_possible_cpu(cpu) {
-		down_write(&per_cpu(limiter_data, cpu).rwsem);
-		per_cpu(limiter_data, cpu).upper_limit_freq = freq;
-		up_write(&per_cpu(limiter_data, cpu).rwsem);
-	}
-}
-EXPORT_SYMBOL(set_max_lock);
-
-static ssize_t cpu_max_c1_show(struct device *dev,
-		struct device_attribute *attr, char *buf)
-{
-	return scnprintf(buf, PAGE_SIZE, "%d\n", get_cpu_max_lock(0));
-}
-
-static ssize_t cpu_max_c1_store(struct device *dev, struct device_attribute *attr,
-						const char *buf, size_t count)
-{
-	int ret;
-	unsigned int val, freq;
-
-	ret = sscanf(buf, "%u\n", &val);
-	if (ret != 1)
-		return -EINVAL;
-
-	freq = get_cpu_max_lock(0);
-
-	if (val == 0 || val == freq)
-		return count;
-
-	set_cpu_max_lock(0, val);
-	set_cpu_max_lock(1, val);
-
-	return count;
-}
-
-static ssize_t cpu_max_c2_show(struct device *dev,
-		struct device_attribute *attr, char *buf)
-{
-	return scnprintf(buf, PAGE_SIZE, "%d\n", get_cpu_max_lock(2));
-}
-
-static ssize_t cpu_max_c2_store(struct device *dev, struct device_attribute *attr,
-						const char *buf, size_t count)
-{
-	int ret;
-	unsigned int val, freq;
-
-	ret = sscanf(buf, "%u\n", &val);
-	if (ret != 1)
-		return -EINVAL;
-
-	freq = get_cpu_max_lock(2);
-
-	if (val == 0 || val == freq)
-		return count;
-
-	set_cpu_max_lock(2, val);
-	set_cpu_max_lock(3, val);
-
-	return count;
-}
-static DEVICE_ATTR(cpu_max_c1, S_IWUSR | S_IRUGO, cpu_max_c1_show, cpu_max_c1_store);
-static DEVICE_ATTR(cpu_max_c2, S_IWUSR | S_IRUGO, cpu_max_c2_show, cpu_max_c2_store);
-#endif
-
 static int set_cpu_freq(struct cpufreq_policy *policy, unsigned int new_freq,
 			unsigned int index)
 {
@@ -246,24 +74,8 @@ static int msm_cpufreq_target(struct cpufreq_policy *policy,
 	int ret = 0;
 	int index;
 	struct cpufreq_frequency_table *table;
-#ifdef CONFIG_CPUFREQ_LIMITER
-	unsigned int ll_freq, ul_freq;
-#endif
 
 	mutex_lock(&per_cpu(suspend_data, policy->cpu).suspend_mutex);
-#ifdef CONFIG_CPUFREQ_LIMITER
-	down_read(&per_cpu(limiter_data, policy->cpu).rwsem);
-	ll_freq =
-		per_cpu(limiter_data, policy->cpu).lower_limit_freq;
-	ul_freq =
-		per_cpu(limiter_data, policy->cpu).upper_limit_freq;
-	up_read(&per_cpu(limiter_data, policy->cpu).rwsem);
-
-	if (ul_freq > 0 && target_freq > ul_freq)
-		target_freq = ul_freq;
-	else if (ll_freq > 0 && target_freq < ll_freq)
-		target_freq = ll_freq;
-#endif
 
 	if (target_freq == policy->cur)
 		goto done;
@@ -315,9 +127,6 @@ static unsigned int msm_cpufreq_get_freq(unsigned int cpu)
 static int msm_cpufreq_init(struct cpufreq_policy *policy)
 {
 	int cur_freq;
-#ifdef CONFIG_CPUFREQ_LIMITER
-	unsigned int ll_freq, ul_freq;
-#endif
 	int index;
 	int ret = 0;
 	struct cpufreq_frequency_table *table =
@@ -338,20 +147,6 @@ static int msm_cpufreq_init(struct cpufreq_policy *policy)
 		pr_err("cpufreq: failed to get policy min/max\n");
 
 	cur_freq = clk_get_rate(cpu_clk[policy->cpu])/1000;
-
-#ifdef CONFIG_CPUFREQ_LIMITER
-	down_read(&per_cpu(limiter_data, policy->cpu).rwsem);
-	ll_freq =
-		per_cpu(limiter_data, policy->cpu).lower_limit_freq;
-	ul_freq =
-		per_cpu(limiter_data, policy->cpu).upper_limit_freq;
-	up_read(&per_cpu(limiter_data, policy->cpu).rwsem);
-
-	if (ul_freq > 0 && cur_freq > ul_freq)
-		cur_freq = ul_freq;
-	else if (ll_freq > 0 && cur_freq < ll_freq)
-		cur_freq = ll_freq;
-#endif
 
 	if (cpufreq_frequency_table_target(policy, table, cur_freq,
 	    CPUFREQ_RELATION_H, &index) &&
@@ -592,9 +387,6 @@ static int __init msm_cpufreq_probe(struct platform_device *pdev)
 	char tbl_name[] = "qcom,cpufreq-table-??";
 	struct clk *c;
 	int cpu;
-#ifdef CONFIG_CPUFREQ_LIMITER
-	int ret;
-#endif
 	struct cpufreq_frequency_table *ftbl;
 
 	l2_clk = devm_clk_get(dev, "l2_clk");
@@ -659,16 +451,6 @@ static int __init msm_cpufreq_probe(struct platform_device *pdev)
 		per_cpu(freq_table, cpu) = ftbl;
 	}
 
-#ifdef CONFIG_CPUFREQ_LIMITER
-	ret = device_create_file(&pdev->dev, &dev_attr_cpu_max_c1);
-	ret |= device_create_file(&pdev->dev, &dev_attr_cpu_max_c2);
-
-	if (ret) {
-		pr_err("%s: unable to create sysfs entries\n", __func__);
-		return ret;
-	}
-#endif
-
 	return 0;
 }
 
@@ -692,13 +474,6 @@ static int __init msm_cpufreq_register(void)
 	for_each_possible_cpu(cpu) {
 		mutex_init(&(per_cpu(suspend_data, cpu).suspend_mutex));
 		per_cpu(suspend_data, cpu).device_suspended = 0;
-#ifdef CONFIG_CPUFREQ_LIMITER
-		init_rwsem(&(per_cpu(limiter_data, cpu).rwsem));
-		down_write(&per_cpu(limiter_data, cpu).rwsem);
-		per_cpu(limiter_data, cpu).lower_limit_freq = 0;
-		per_cpu(limiter_data, cpu).upper_limit_freq = 0;
-		up_write(&per_cpu(limiter_data, cpu).rwsem);
-#endif
 	}
 
 	rc = platform_driver_probe(&msm_cpufreq_plat_driver,
