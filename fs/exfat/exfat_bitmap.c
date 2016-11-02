@@ -19,8 +19,8 @@
 /************************************************************************/
 /*                                                                      */
 /*  PROJECT : exFAT & FAT12/16/32 File System                           */
-/*  FILE    : exfat_blkdev.h                                            */
-/*  PURPOSE : Header File for exFAT Block Device Driver Glue Layer      */
+/*  FILE    : exfat_global.c                                            */
+/*  PURPOSE : exFAT Miscellaneous Functions                             */
 /*                                                                      */
 /*----------------------------------------------------------------------*/
 /*  NOTES                                                               */
@@ -32,42 +32,32 @@
 /*                                                                      */
 /************************************************************************/
 
-#ifndef _EXFAT_BLKDEV_H
-#define _EXFAT_BLKDEV_H
-
-#include <linux/fs.h>
 #include "exfat_config.h"
+#include "exfat_bitmap.h"
 
 /*----------------------------------------------------------------------*/
-/*  Constant & Macro Definitions (Non-Configurable)                     */
+/*  Bitmap Manipulation Functions                                       */
 /*----------------------------------------------------------------------*/
 
-/*----------------------------------------------------------------------*/
-/*  Type Definitions                                                    */
-/*----------------------------------------------------------------------*/
+#define BITMAP_LOC(v)           ((v) >> 3)
+#define BITMAP_SHIFT(v)         ((v) & 0x07)
 
-typedef struct __BD_INFO_T {
-	s32 sector_size;      /* in bytes */
-	s32 sector_size_bits;
-	s32 sector_size_mask;
-	s32 num_sectors;      /* total number of sectors in this block device */
-	bool  opened;           /* opened or not */
-} BD_INFO_T;
+s32 exfat_bitmap_test(u8 *bitmap, int i)
+{
+	u8 data;
 
-/*----------------------------------------------------------------------*/
-/*  External Variable Declarations                                      */
-/*----------------------------------------------------------------------*/
+	data = bitmap[BITMAP_LOC(i)];
+	if ((data >> BITMAP_SHIFT(i)) & 0x01)
+		return 1;
+	return 0;
+} /* end of Bitmap_test */
 
-/*----------------------------------------------------------------------*/
-/*  External Function Declarations                                      */
-/*----------------------------------------------------------------------*/
+void exfat_bitmap_set(u8 *bitmap, int i)
+{
+	bitmap[BITMAP_LOC(i)] |= (0x01 << BITMAP_SHIFT(i));
+} /* end of Bitmap_set */
 
-s32 bdev_init(void);
-s32 bdev_shutdown(void);
-s32 bdev_open(struct super_block *sb);
-s32 bdev_close(struct super_block *sb);
-s32 bdev_read(struct super_block *sb, u32 secno, struct buffer_head **bh, u32 num_secs, s32 read);
-s32 bdev_write(struct super_block *sb, u32 secno, struct buffer_head *bh, u32 num_secs, s32 sync);
-s32 bdev_sync(struct super_block *sb);
-
-#endif /* _EXFAT_BLKDEV_H */
+void exfat_bitmap_clear(u8 *bitmap, int i)
+{
+	bitmap[BITMAP_LOC(i)] &= ~(0x01 << BITMAP_SHIFT(i));
+} /* end of Bitmap_clear */
