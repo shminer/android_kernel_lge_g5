@@ -1504,6 +1504,7 @@ static long audio_aio_shared_ioctl(struct file *file, unsigned int cmd,
 			rc = -EACCES;
 			break;
 		}
+
 		pr_debug("%s[%pK]:AUDIO_PM_AWAKE\n", __func__, audio);
 		mutex_lock(&audio->lock);
 		if (!audio->wakelock_voted) {
@@ -1525,6 +1526,7 @@ static long audio_aio_shared_ioctl(struct file *file, unsigned int cmd,
 			break;
 		}
 		pr_debug("%s[%pK]:AUDIO_PM_RELAX\n", __func__, audio);
+
 		mutex_lock(&audio->lock);
 		if (audio->wakelock_voted) {
 			audio->wakelock_voted = false;
