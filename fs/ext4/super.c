@@ -304,8 +304,6 @@ static void __save_error_info(struct super_block *sb, const char *func,
 	struct ext4_super_block *es = EXT4_SB(sb)->s_es;
 
 	EXT4_SB(sb)->s_mount_state |= EXT4_ERROR_FS;
-	if (bdev_read_only(sb->s_bdev))
-		return;
 	es->s_state |= cpu_to_le16(EXT4_ERROR_FS);
 	es->s_last_error_time = cpu_to_le32(get_seconds());
 	strncpy(es->s_last_error_func, func, sizeof(es->s_last_error_func));
@@ -330,22 +328,8 @@ static void __save_error_info(struct super_block *sb, const char *func,
 static void save_error_info(struct super_block *sb, const char *func,
 			    unsigned int line)
 {
-#ifdef CONFIG_MACH_LGE
-	struct ext4_super_block *es = EXT4_SB(sb)->s_es;
-#endif
-
 	__save_error_info(sb, func, line);
-
-#ifdef CONFIG_MACH_LGE
-	if (!strncmp(es->s_volume_name, "system", 6) &&
-			sb->s_flags & MS_RDONLY) {
-		printk("EXT4-fs error from Read only system partiton, so skip ext4_commit_super\n");
-	} else {
-		ext4_commit_super(sb, 1);
-	}
-#else
 	ext4_commit_super(sb, 1);
-#endif
 }
 
 /*
@@ -419,19 +403,6 @@ static void ext4_handle_error(struct super_block *sb)
 		 */
 		smp_wmb();
 		sb->s_flags |= MS_RDONLY;
-#ifdef CONFIG_MACH_LGE
-		/* LGE_CHANGE, 2015-10-26, HPLUS-BSP-FS@lge.com
-		 * put panic when ext4 partition(data partition) is remounted as Read Only
-		 */
-		if(!strcmp(EXT4_SB(sb)->s_es->s_volume_name,"data") &&
-			system_state != SYSTEM_RESTART &&
-			system_state != SYSTEM_POWER_OFF) {
-			if (test_opt(sb, ACCEPT_RO))
-				printk("EXT4-fs panic skip even previous error occured in ext4_handle_error\n");
-			else
-				panic("EXT4-fs panic from previous error. remounted as RO. \n");
-		}
-#endif
 	}
 	if (test_opt(sb, ERRORS_PANIC)) {
 		if (EXT4_SB(sb)->s_journal &&
@@ -627,19 +598,6 @@ void __ext4_abort(struct super_block *sb, const char *function,
 		if (EXT4_SB(sb)->s_journal)
 			jbd2_journal_abort(EXT4_SB(sb)->s_journal, -EIO);
 		save_error_info(sb, function, line);
-#ifdef CONFIG_MACH_LGE
-		/* LGE_CHANGE, 2015-10-26, H1-BSP-FS@lge.com
-		 * put panic when ext4 partition(data partition) is remounted as Read Only
-		 */
-		if(!strcmp(EXT4_SB(sb)->s_es->s_volume_name,"data") &&
-			system_state != SYSTEM_RESTART &&
-			system_state != SYSTEM_POWER_OFF) {
-			if (test_opt(sb, ACCEPT_RO))
-				printk(KERN_CRIT "EXT4-fs panic skip even previous error occured in __ext4_abort\n");
-			else
-				panic("EXT4-fs panic from previous error. remounted as RO \n");
-		}
-#endif
 	}
 	if (test_opt(sb, ERRORS_PANIC)) {
 		if (EXT4_SB(sb)->s_journal &&
@@ -952,9 +910,7 @@ static struct inode *ext4_alloc_inode(struct super_block *sb)
 	atomic_set(&ei->i_ioend_count, 0);
 	atomic_set(&ei->i_unwritten, 0);
 	INIT_WORK(&ei->i_rsv_conversion_work, ext4_end_io_rsv_work);
-#ifdef CONFIG_EXT4_FS_ENCRYPTION
-	ei->i_crypt_info = NULL;
-#endif
+
 	return &ei->vfs_inode;
 }
 
@@ -1032,10 +988,6 @@ void ext4_clear_inode(struct inode *inode)
 		jbd2_free_inode(EXT4_I(inode)->jinode);
 		EXT4_I(inode)->jinode = NULL;
 	}
-#ifdef CONFIG_EXT4_FS_ENCRYPTION
-	if (EXT4_I(inode)->i_crypt_info)
-		ext4_free_encryption_info(inode, EXT4_I(inode)->i_crypt_info);
-#endif
 }
 
 static struct inode *ext4_nfs_get_inode(struct super_block *sb,
@@ -1193,7 +1145,7 @@ enum {
 	Opt_commit, Opt_min_batch_time, Opt_max_batch_time, Opt_journal_dev,
 	Opt_journal_path, Opt_journal_checksum, Opt_journal_async_commit,
 	Opt_abort, Opt_data_journal, Opt_data_ordered, Opt_data_writeback,
-	Opt_data_err_abort, Opt_data_err_ignore, Opt_test_dummy_encryption,
+	Opt_data_err_abort, Opt_data_err_ignore,
 	Opt_usrjquota, Opt_grpjquota, Opt_offusrjquota, Opt_offgrpjquota,
 	Opt_jqfmt_vfsold, Opt_jqfmt_vfsv0, Opt_jqfmt_vfsv1, Opt_quota,
 	Opt_noquota, Opt_barrier, Opt_nobarrier, Opt_err,
@@ -1204,9 +1156,6 @@ enum {
 	Opt_dioread_nolock, Opt_dioread_lock,
 	Opt_discard, Opt_nodiscard, Opt_init_itable, Opt_noinit_itable,
 	Opt_max_dir_size_kb,
-#ifdef CONFIG_MACH_LGE
-	Opt_acceptRO,
-#endif
 };
 
 static const match_table_t tokens = {
@@ -1282,15 +1231,11 @@ static const match_table_t tokens = {
 	{Opt_init_itable, "init_itable"},
 	{Opt_noinit_itable, "noinit_itable"},
 	{Opt_max_dir_size_kb, "max_dir_size_kb=%u"},
-	{Opt_test_dummy_encryption, "test_dummy_encryption"},
 	{Opt_removed, "check=none"},	/* mount option from ext2/3 */
 	{Opt_removed, "nocheck"},	/* mount option from ext2/3 */
 	{Opt_removed, "reservation"},	/* mount option from ext2/3 */
 	{Opt_removed, "noreservation"}, /* mount option from ext2/3 */
 	{Opt_removed, "journal=%u"},	/* mount option from ext2/3 */
-#ifdef CONFIG_MACH_LGE
-	{Opt_acceptRO, "acceptRO"},	/* mount option to accept RO remount on data before e2fsck */
-#endif
 	{Opt_err, NULL},
 };
 
@@ -1484,10 +1429,6 @@ static const struct mount_opts {
 	{Opt_jqfmt_vfsv0, QFMT_VFS_V0, MOPT_QFMT},
 	{Opt_jqfmt_vfsv1, QFMT_VFS_V1, MOPT_QFMT},
 	{Opt_max_dir_size_kb, 0, MOPT_GTE0},
-	{Opt_test_dummy_encryption, 0, MOPT_GTE0},
-#ifdef CONFIG_MACH_LGE
-	{Opt_acceptRO, EXT4_MOUNT_ACCEPT_RO,MOPT_SET},	/* mount option for e2fsck */
-#endif
 	{Opt_err, 0, 0}
 };
 
@@ -1658,15 +1599,6 @@ static int handle_mount_opt(struct super_block *sb, char *opt, int token,
 		}
 		*journal_ioprio =
 			IOPRIO_PRIO_VALUE(IOPRIO_CLASS_BE, arg);
-	} else if (token == Opt_test_dummy_encryption) {
-#ifdef CONFIG_EXT4_FS_ENCRYPTION
-		sbi->s_mount_flags |= EXT4_MF_TEST_DUMMY_ENCRYPTION;
-		ext4_msg(sb, KERN_WARNING,
-			 "Test dummy encryption mode enabled");
-#else
-		ext4_msg(sb, KERN_WARNING,
-			 "Test dummy encryption mount option ignored");
-#endif
 	} else if (m->flags & MOPT_DATAJ) {
 		if (is_remount) {
 			if (!sbi->s_journal)
@@ -2779,13 +2711,11 @@ static struct attribute *ext4_attrs[] = {
 EXT4_INFO_ATTR(lazy_itable_init);
 EXT4_INFO_ATTR(batched_discard);
 EXT4_INFO_ATTR(meta_bg_resize);
-EXT4_INFO_ATTR(encryption);
 
 static struct attribute *ext4_feat_attrs[] = {
 	ATTR_LIST(lazy_itable_init),
 	ATTR_LIST(batched_discard),
 	ATTR_LIST(meta_bg_resize),
-	ATTR_LIST(encryption),
 	NULL,
 };
 
@@ -3777,24 +3707,10 @@ static int ext4_fill_super(struct super_block *sb, void *data, int silent)
 		goto failed_mount;
 	}
 
-	if (EXT4_HAS_INCOMPAT_FEATURE(sb, EXT4_FEATURE_INCOMPAT_ENCRYPT) &&
-	    es->s_encryption_level) {
-		ext4_msg(sb, KERN_ERR, "Unsupported encryption level %d",
-			 es->s_encryption_level);
-		goto failed_mount;
-	}
-
 	if (le16_to_cpu(sbi->s_es->s_reserved_gdt_blocks) > (blocksize / 4)) {
 		ext4_msg(sb, KERN_ERR,
 			 "Number of reserved GDT blocks insanely large: %d",
 			 le16_to_cpu(sbi->s_es->s_reserved_gdt_blocks));
-		goto failed_mount;
-	}
-
-	if (EXT4_HAS_INCOMPAT_FEATURE(sb, EXT4_FEATURE_INCOMPAT_ENCRYPT) &&
-	    es->s_encryption_level) {
-		ext4_msg(sb, KERN_ERR, "Unsupported encryption level %d",
-			 es->s_encryption_level);
 		goto failed_mount;
 	}
 
@@ -4016,7 +3932,7 @@ static int ext4_fill_super(struct super_block *sb, void *data, int silent)
 	db_count = (sbi->s_groups_count + EXT4_DESC_PER_BLOCK(sb) - 1) /
 		   EXT4_DESC_PER_BLOCK(sb);
 	if (EXT4_HAS_INCOMPAT_FEATURE(sb, EXT4_FEATURE_INCOMPAT_META_BG)) {
-		if (le32_to_cpu(es->s_first_meta_bg) > db_count) {
+		if (le32_to_cpu(es->s_first_meta_bg) >= db_count) {
 			ext4_msg(sb, KERN_WARNING,
 				 "first meta block group too large: %u "
 				 "(group descriptor block count %u)",
@@ -4171,21 +4087,6 @@ no_journal:
 			ext4_msg(sb, KERN_ERR, "Failed to create an mb_cache");
 			goto failed_mount_wq;
 		}
-	}
-
-	if ((DUMMY_ENCRYPTION_ENABLED(sbi) ||
-	     EXT4_HAS_INCOMPAT_FEATURE(sb, EXT4_FEATURE_INCOMPAT_ENCRYPT)) &&
-	    (blocksize != PAGE_CACHE_SIZE)) {
-		ext4_msg(sb, KERN_ERR,
-			 "Unsupported blocksize for fs encryption");
-		goto failed_mount_wq;
-	}
-
-	if (DUMMY_ENCRYPTION_ENABLED(sbi) &&
-	    !(sb->s_flags & MS_RDONLY) &&
-	    !EXT4_HAS_INCOMPAT_FEATURE(sb, EXT4_FEATURE_INCOMPAT_ENCRYPT)) {
-		EXT4_SET_INCOMPAT_FEATURE(sb, EXT4_FEATURE_INCOMPAT_ENCRYPT);
-		ext4_commit_super(sb, 1);
 	}
 
 	/*
@@ -4380,12 +4281,6 @@ no_journal:
 cantfind_ext4:
 	if (!silent)
 		ext4_msg(sb, KERN_ERR, "VFS: Can't find ext4 filesystem");
-#ifdef CONFIG_MACH_LGE
-	/* LGE_CHANGE, 2015-10-26, H1-BSP-FS@lge.com
-	   add return code if ext4 superblock is damaged
-	*/
-	ret=-ESUPER;
-#endif
 	goto failed_mount;
 
 #ifdef CONFIG_QUOTA
@@ -5807,7 +5702,6 @@ out7:
 
 static void __exit ext4_exit_fs(void)
 {
-	ext4_exit_crypto();
 	ext4_destroy_lazyinit_thread();
 	unregister_as_ext2();
 	unregister_as_ext3();
