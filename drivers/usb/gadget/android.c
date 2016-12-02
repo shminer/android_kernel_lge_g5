@@ -752,6 +752,7 @@ static void android_disable(struct android_dev *dev)
 {
 	struct usb_composite_dev *cdev = dev->cdev;
 	struct android_configuration *conf;
+	bool do_put = false;
 
 #ifdef CONFIG_LGE_USB_FACTORY
 	if (dev->check_pif) {
@@ -774,8 +775,10 @@ static void android_disable(struct android_dev *dev)
 			goto skip_usb_daget_disconnect;
 		}
 #endif
-		usb_gadget_autopm_get(cdev->gadget);
-
+		if (cdev->suspended && cdev->config) {
+			usb_gadget_autopm_get(cdev->gadget);
+			do_put = true;
+		}
 		if (gadget_is_dwc3(cdev->gadget)) {
 			/* Cancel pending control requests */
 			usb_ep_dequeue(cdev->gadget->ep0, cdev->req);
@@ -795,7 +798,9 @@ static void android_disable(struct android_dev *dev)
 				usb_remove_config(cdev, &conf->usb_config);
 		}
 
-		usb_gadget_autopm_put_async(cdev->gadget);
+		if (do_put)
+			usb_gadget_autopm_put_async(cdev->gadget);
+			
 #ifdef CONFIG_LGE_USB_MAXIM_EVP
 skip_usb_daget_disconnect:
 #endif
