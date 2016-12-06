@@ -3651,16 +3651,17 @@ irqreturn_t dwc3_interrupt(int irq, void *_dwc)
 	int				i;
 	irqreturn_t			ret = IRQ_NONE;
 	unsigned			temp_cnt = 0;
+	unsigned long			flags;
 	ktime_t				start_time;
 
 	start_time = ktime_get();
-	spin_lock(&dwc->lock);
+	spin_lock_irqsave(&dwc->lock, flags);
 
 	dwc->irq_cnt++;
 
 	if (dwc->err_evt_seen) {
 		/* controller reset is still pending */
-		spin_unlock(&dwc->lock);
+		spin_unlock_irqrestore(&dwc->lock, flags);
 		return IRQ_HANDLED;
 	}
 
@@ -3674,7 +3675,7 @@ irqreturn_t dwc3_interrupt(int irq, void *_dwc)
 		temp_cnt += dwc->ev_buffs[i]->count;
 	}
 
-	spin_unlock(&dwc->lock);
+	spin_unlock_irqrestore(&dwc->lock, flags);
 
 	dwc->irq_start_time[dwc->irq_dbg_index] = start_time;
 	dwc->irq_completion_time[dwc->irq_dbg_index] =
