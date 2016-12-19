@@ -685,7 +685,7 @@ static ssize_t rmidev_read(struct file *filp, char __user *buf,
 	struct rmidev_data *dev_data = filp->private_data;
 
 	ssize_t ret;
-	unsigned char *tmpbuf;
+	unsigned char tmpbuf[count + 1];
 
 	if (IS_ERR(dev_data)) {
 		TOUCH_RMIDEV_MSG("Pointer of char device data is invalid\n");
@@ -697,10 +697,6 @@ static ssize_t rmidev_read(struct file *filp, char __user *buf,
 
 	if (count > (REG_ADDR_LIMIT - *f_pos))
 		count = REG_ADDR_LIMIT - *f_pos;
-
-	tmpbuf = kzalloc(count + 1, GFP_KERNEL);
-	if (!tmpbuf)
-		return -ENOMEM;
 
 	mutex_lock(&(dev_data->file_mutex));
 
@@ -717,7 +713,6 @@ static ssize_t rmidev_read(struct file *filp, char __user *buf,
 clean_up:
 	mutex_unlock(&(dev_data->file_mutex));
 
-	kfree(tmpbuf);
 	return ret;
 }
 
@@ -735,8 +730,8 @@ static ssize_t rmidev_write(struct file *filp, const char __user *buf,
 	struct touch_core_data *ts = rmidev->c_data;
 	struct rmidev_data *dev_data = filp->private_data;
 
+	unsigned char tmpbuf[count + 1];
 	ssize_t ret;
-	unsigned char *tmpbuf;
 
 	if (IS_ERR(dev_data)) {
 		TOUCH_RMIDEV_MSG("Pointer of char device data is invalid\n");
@@ -749,14 +744,8 @@ static ssize_t rmidev_write(struct file *filp, const char __user *buf,
 	if (count > (REG_ADDR_LIMIT - *f_pos))
 		count = REG_ADDR_LIMIT - *f_pos;
 
-	tmpbuf = kzalloc(count + 1, GFP_KERNEL);
-	if (!tmpbuf)
-		return -ENOMEM;
-
-	if (copy_from_user(tmpbuf, buf, count)) {
-		kfree(tmpbuf);
+	if (copy_from_user(tmpbuf, buf, count))
 		return -EFAULT;
-	}
 
 	mutex_lock(&(dev_data->file_mutex));
 
@@ -766,7 +755,7 @@ static ssize_t rmidev_write(struct file *filp, const char __user *buf,
 		*f_pos += ret;
 
 	mutex_unlock(&(dev_data->file_mutex));
-	kfree(tmpbuf);
+
 	return ret;
 }
 
