@@ -135,6 +135,11 @@ config CPU_FREQ_DEFAULT_GOV_ALUCARD
 	select CPU_FREQ_GOV_ALUCARD
 	help
 
+config CPU_FREQ_DEFAULT_GOV_ALUCARD_OLD
+	bool "alucard_old"
+	select CPU_FREQ_GOV_ALUCARD_OLD
+	help
+
 endchoice
 
 config CPU_FREQ_GOV_PERFORMANCE
@@ -262,6 +267,12 @@ config CPU_FREQ_GOV_ALUCARD
 	tristate "'alucard' cpufreq governor"
 	depends on CPU_FREQ
 	select CPU_FREQ_GOV_COMMON
+
+config CPU_FREQ_GOV_ALUCARD_OLD
+	tristate "'alucard_old' cpufreq governor"
+	depends on CPU_FREQ
+	select CPU_FREQ_GOV_COMMON
+
 
 config CPUFREQ_DT
 	tristate "Generic DT based cpufreq driver"
