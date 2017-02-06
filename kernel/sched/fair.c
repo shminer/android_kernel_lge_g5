@@ -4021,7 +4021,7 @@ static inline unsigned long boosted_cpu_util(int cpu);
 #define boosted_cpu_util(cpu) cpu_util(cpu, UTIL_EST)
 #endif
 
-#ifdef CONFIG_CPU_FREQ_GOV_SCHED
+#ifdef CONFIG_SMP
 static void update_capacity_of(int cpu)
 {
 	unsigned long req_cap;
@@ -4088,6 +4088,25 @@ enqueue_task_fair(struct rq *rq, struct task_struct *p, int flags)
 
 #ifdef CONFIG_SMP
 
+	/*
+	 * Update SchedTune accounting.
+	 *
+	 * We do it before updating the CPU capacity to ensure the
+	 * boost value of the current task is accounted for in the
+	 * selection of the OPP.
+	 *
+	 * We do it also in the case where we enqueue a throttled task;
+	 * we could argue that a throttled task should not boost a CPU,
+	 * however:
+	 * a) properly implementing CPU boosting considering throttled
+	 *    tasks will increase a lot the complexity of the solution
+	 * b) it's not easy to quantify the benefits introduced by
+	 *    such a more complex solution.
+	 * Thus, for the time being we go for the simple solution and boost
+	 * also for throttled RQs.
+	 */
+	schedtune_enqueue_task(p, cpu_of(rq));
+
 	if (!se) {
 		walt_inc_cumulative_runnable_avg(rq, p);
 		if (!task_new && !rq->rd->overutilized &&
@@ -4113,11 +4132,7 @@ enqueue_task_fair(struct rq *rq, struct task_struct *p, int flags)
 	/* Update RQ estimated utilization */
 	cfs_rq->avg.util_est += task_util_est(p);
 
-	/* Update SchedTune accouting */
-	schedtune_enqueue_task(p, cpu_of(rq));
-
 #endif /* CONFIG_SMP */
-
 	hrtick_update(rq);
 }
 
@@ -4182,6 +4197,15 @@ static void dequeue_task_fair(struct rq *rq, struct task_struct *p, int flags)
 
 #ifdef CONFIG_SMP
 
+	/*
+	 * Update SchedTune accounting
+	 *
+	 * We do it before updating the CPU capacity to ensure the
+	 * boost value of the current task is accounted for in the
+	 * selection of the OPP.
+	 */
+	schedtune_dequeue_task(p, cpu_of(rq));
+
 	if (!se) {
 		walt_dec_cumulative_runnable_avg(rq, p);
 
@@ -4214,9 +4238,6 @@ static void dequeue_task_fair(struct rq *rq, struct task_struct *p, int flags)
 	/* Update estimated utilization */
 	if (task_sleep)
 		p->se.avg.util_est = p->se.avg.util_avg;
-
-	/* Update SchedTune accouting */
-	schedtune_dequeue_task(p, cpu_of(rq));
 
 #endif /* CONFIG_SMP */
 
@@ -5452,7 +5473,6 @@ next:
 			sg = sg->next;
 		} while (sg != sd->groups);
 	}
-
 	if (best_idle > 0)
 		target = best_idle;
 
@@ -5521,17 +5541,19 @@ static inline int find_best_target(struct task_struct *p, bool boosted, bool pre
 
 		if (new_util < cur_capacity) {
 			if (cpu_rq(i)->nr_running) {
-				if(prefer_idle) {
-					// Find a target cpu with lowest
-					// utilization.
+				if (prefer_idle) {
+					/* Find a target cpu with highest
+					 * utilization.
+					 */
 					if (target_util == 0 ||
 						target_util < new_util) {
 						target_cpu = i;
 						target_util = new_util;
 					}
 				} else {
-					// Find a target cpu with highest
-					// utilization.
+					/* Find a target cpu with lowest
+					 * utilization.
+					 */
 					if (target_util == 0 ||
 						target_util > new_util) {
 						target_cpu = i;
@@ -5541,7 +5563,7 @@ static inline int find_best_target(struct task_struct *p, bool boosted, bool pre
 			} else if (!prefer_idle) {
 				if (best_idle_cpu < 0 ||
 					(sysctl_sched_cstate_aware &&
-					 	best_idle_cstate > idle_idx)) {
+						best_idle_cstate > idle_idx)) {
 					best_idle_cstate = idle_idx;
 					best_idle_cpu = i;
 				}
@@ -5644,8 +5666,13 @@ static int energy_aware_wake_cpu(struct task_struct *p, int target, int sync)
 		/*
 		 * Find a cpu with sufficient capacity
 		 */
+#ifdef CONFIG_CGROUP_SCHEDTUNE
 		bool boosted = schedtune_task_boost(p) > 0;
 		bool prefer_idle = schedtune_prefer_idle(p) > 0;
+#else
+		bool boosted = 0;
+		bool prefer_idle = 0;
+#endif
 		int tmp_target = find_best_target(p, boosted, prefer_idle);
 		if (tmp_target >= 0) {
 			target_cpu = tmp_target;
