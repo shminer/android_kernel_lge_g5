@@ -195,9 +195,9 @@ static int scm_remap_error(int err)
 static u32 smc(u32 cmd_addr)
 {
 	int context_id;
-	register u32 r0 asm("r0") = 1;
-	register u32 r1 asm("r1") = (uintptr_t)&context_id;
-	register u32 r2 asm("r2") = cmd_addr;
+	register u32 r0 asm(R0_STR) = 1;
+	register u32 r1 asm(R1_STR) = (uintptr_t)&context_id;
+	register u32 r2 asm(R2_STR) = cmd_addr;
 	do {
 		asm volatile(
 			__asmeq("%0", R0_STR)
@@ -210,7 +210,7 @@ static u32 smc(u32 cmd_addr)
 			"smc	#0\n"
 			: "=r" (r0)
 			: "r" (r0), "r" (r1), "r" (r2)
-			: "r3");
+			: R3_STR);
 	} while (r0 == SCM_INTERRUPTED);
 
 	return r0;
@@ -819,9 +819,9 @@ EXPORT_SYMBOL(scm_call);
 s32 scm_call_atomic1(u32 svc, u32 cmd, u32 arg1)
 {
 	int context_id;
-	register u32 r0 asm("r0") = SCM_ATOMIC(svc, cmd, 1);
-	register u32 r1 asm("r1") = (uintptr_t)&context_id;
-	register u32 r2 asm("r2") = arg1;
+	register u32 r0 asm(R0_STR) = SCM_ATOMIC(svc, cmd, 1);
+	register u32 r1 asm(R1_STR) = (uintptr_t)&context_id;
+	register u32 r2 asm(R2_STR) = arg1;
 
 	asm volatile(
 		__asmeq("%0", R0_STR)
@@ -834,7 +834,7 @@ s32 scm_call_atomic1(u32 svc, u32 cmd, u32 arg1)
 		"smc	#0\n"
 		: "=r" (r0)
 		: "r" (r0), "r" (r1), "r" (r2)
-		: "r3");
+		: R3_STR);
 	return r0;
 }
 EXPORT_SYMBOL(scm_call_atomic1);
@@ -852,9 +852,9 @@ EXPORT_SYMBOL(scm_call_atomic1);
 s32 scm_call_atomic1_1(u32 svc, u32 cmd, u32 arg1, u32 *ret1)
 {
 	int context_id;
-	register u32 r0 asm("r0") = SCM_ATOMIC(svc, cmd, 1);
-	register u32 r1 asm("r1") = (uintptr_t)&context_id;
-	register u32 r2 asm("r2") = arg1;
+	register u32 r0 asm(R0_STR) = SCM_ATOMIC(svc, cmd, 1);
+	register u32 r1 asm(R1_STR) = (uintptr_t)&context_id;
+	register u32 r2 asm(R2_STR) = arg1;
 
 	asm volatile(
 		__asmeq("%0", R0_STR)
@@ -888,10 +888,10 @@ EXPORT_SYMBOL(scm_call_atomic1_1);
 s32 scm_call_atomic2(u32 svc, u32 cmd, u32 arg1, u32 arg2)
 {
 	int context_id;
-	register u32 r0 asm("r0") = SCM_ATOMIC(svc, cmd, 2);
-	register u32 r1 asm("r1") = (uintptr_t)&context_id;
-	register u32 r2 asm("r2") = arg1;
-	register u32 r3 asm("r3") = arg2;
+	register u32 r0 asm(R0_STR) = SCM_ATOMIC(svc, cmd, 2);
+	register u32 r1 asm(R1_STR) = (uintptr_t)&context_id;
+	register u32 r2 asm(R2_STR) = arg1;
+	register u32 r3 asm(R3_STR) = arg2;
 
 	asm volatile(
 		__asmeq("%0", R0_STR)
@@ -923,11 +923,11 @@ EXPORT_SYMBOL(scm_call_atomic2);
 s32 scm_call_atomic3(u32 svc, u32 cmd, u32 arg1, u32 arg2, u32 arg3)
 {
 	int context_id;
-	register u32 r0 asm("r0") = SCM_ATOMIC(svc, cmd, 3);
-	register u32 r1 asm("r1") = (uintptr_t)&context_id;
-	register u32 r2 asm("r2") = arg1;
-	register u32 r3 asm("r3") = arg2;
-	register u32 r4 asm("r4") = arg3;
+	register u32 r0 asm(R0_STR) = SCM_ATOMIC(svc, cmd, 3);
+	register u32 r1 asm(R1_STR) = (uintptr_t)&context_id;
+	register u32 r2 asm(R2_STR) = arg1;
+	register u32 r3 asm(R3_STR) = arg2;
+	register u32 r4 asm(R4_STR) = arg3;
 
 	asm volatile(
 		__asmeq("%0", R0_STR)
@@ -951,12 +951,12 @@ s32 scm_call_atomic4_3(u32 svc, u32 cmd, u32 arg1, u32 arg2,
 {
 	int ret;
 	int context_id;
-	register u32 r0 asm("r0") = SCM_ATOMIC(svc, cmd, 4);
-	register u32 r1 asm("r1") = (uintptr_t)&context_id;
-	register u32 r2 asm("r2") = arg1;
-	register u32 r3 asm("r3") = arg2;
-	register u32 r4 asm("r4") = arg3;
-	register u32 r5 asm("r5") = arg4;
+	register u32 r0 asm(R0_STR) = SCM_ATOMIC(svc, cmd, 4);
+	register u32 r1 asm(R1_STR) = (uintptr_t)&context_id;
+	register u32 r2 asm(R2_STR) = arg1;
+	register u32 r3 asm(R3_STR) = arg2;
+	register u32 r4 asm(R4_STR) = arg3;
+	register u32 r5 asm(R5_STR) = arg4;
 
 	asm volatile(
 		__asmeq("%0", R0_STR)
@@ -1002,13 +1002,13 @@ s32 scm_call_atomic5_3(u32 svc, u32 cmd, u32 arg1, u32 arg2,
 {
 	int ret;
 	int context_id;
-	register u32 r0 asm("r0") = SCM_ATOMIC(svc, cmd, 5);
-	register u32 r1 asm("r1") = (uintptr_t)&context_id;
-	register u32 r2 asm("r2") = arg1;
-	register u32 r3 asm("r3") = arg2;
-	register u32 r4 asm("r4") = arg3;
-	register u32 r5 asm("r5") = arg4;
-	register u32 r6 asm("r6") = arg5;
+	register u32 r0 asm(R0_STR) = SCM_ATOMIC(svc, cmd, 5);
+	register u32 r1 asm(R1_STR) = (uintptr_t)&context_id;
+	register u32 r2 asm(R2_STR) = arg1;
+	register u32 r3 asm(R3_STR) = arg2;
+	register u32 r4 asm(R4_STR) = arg3;
+	register u32 r5 asm(R5_STR) = arg4;
+	register u32 r6 asm(R6_STR) = arg5;
 
 	asm volatile(
 		__asmeq("%0", R0_STR)
@@ -1042,8 +1042,8 @@ u32 scm_get_version(void)
 {
 	int context_id;
 	static u32 version = -1;
-	register u32 r0 asm("r0");
-	register u32 r1 asm("r1");
+	register u32 r0 asm(R0_STR);
+	register u32 r1 asm(R1_STR);
 
 	if (version != -1)
 		return version;
@@ -1064,7 +1064,7 @@ u32 scm_get_version(void)
 			"smc	#0\n"
 			: "=r" (r0), "=r" (r1)
 			: "r" (r0), "r" (r1)
-			: "r2", "r3");
+			: R2_STR, R3_STR);
 	} while (r0 == SCM_INTERRUPTED);
 
 	version = r1;
