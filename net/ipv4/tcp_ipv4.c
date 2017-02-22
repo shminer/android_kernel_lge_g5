@@ -740,7 +740,6 @@ static void tcp_v4_send_reset(struct sock *sk, struct sk_buff *skb)
 		arg.bound_dev_if = sk->sk_bound_dev_if;
 
 	arg.tos = ip_hdr(skb)->tos;
-	arg.uid = sock_net_uid(net, sk && sk_fullsock(sk) ? sk : NULL);
 	ip_send_unicast_reply(*this_cpu_ptr(net->ipv4.tcp_sk),
 			      skb, &TCP_SKB_CB(skb)->header.h4.opt,
 			      ip_hdr(skb)->saddr, ip_hdr(skb)->daddr,
@@ -763,11 +762,9 @@ release_sk1:
  */
 
 #ifdef CONFIG_LGP_DATA_TCPIP_MPTCP
-static void tcp_v4_send_ack(const struct sock *sk, struct sk_buff *skb,
-			    u32 seq, u32 ack, u32 data_ack,
+static void tcp_v4_send_ack(struct sk_buff *skb, u32 seq, u32 ack, u32 data_ack,
 #else
-static void tcp_v4_send_ack(const struct sock *sk, struct sk_buff *skb,
-			    u32 seq, u32 ack,
+static void tcp_v4_send_ack(struct sk_buff *skb, u32 seq, u32 ack,
 #endif
 			    u32 win, u32 tsval, u32 tsecr, int oif,
 			    struct tcp_md5sig_key *key,
@@ -793,7 +790,7 @@ static void tcp_v4_send_ack(const struct sock *sk, struct sk_buff *skb,
 			];
 	} rep;
 	struct ip_reply_arg arg;
-	struct net *net = sock_net(sk);
+	struct net *net = dev_net(skb_dst(skb)->dev);
 
 	memset(&rep.th, 0, sizeof(struct tcphdr));
 	memset(&arg, 0, sizeof(arg));
@@ -858,7 +855,6 @@ static void tcp_v4_send_ack(const struct sock *sk, struct sk_buff *skb,
 	if (oif)
 		arg.bound_dev_if = oif;
 	arg.tos = tos;
-	arg.uid = sock_net_uid(net, sk_fullsock(sk) ? sk : NULL);
 	ip_send_unicast_reply(*this_cpu_ptr(net->ipv4.tcp_sk),
 			      skb, &TCP_SKB_CB(skb)->header.h4.opt,
 			      ip_hdr(skb)->saddr, ip_hdr(skb)->daddr,
@@ -881,7 +877,7 @@ static void tcp_v4_timewait_ack(struct sock *sk, struct sk_buff *skb)
 	}
 #endif
 
-	tcp_v4_send_ack(sk, skb, tcptw->tw_snd_nxt, tcptw->tw_rcv_nxt,
+	tcp_v4_send_ack(skb, tcptw->tw_snd_nxt, tcptw->tw_rcv_nxt,
 #ifdef CONFIG_LGP_DATA_TCPIP_MPTCP
 			data_ack,
 #endif
@@ -912,7 +908,7 @@ static void tcp_v4_reqsk_send_ack(struct sock *sk, struct sk_buff *skb,
 	/* sk->sk_state == TCP_LISTEN -> for regular TCP_SYN_RECV
 	 * sk->sk_state == TCP_SYN_RECV -> for Fast Open.
 	 */
-	tcp_v4_send_ack(sk, skb, (sk->sk_state == TCP_LISTEN) ?
+	tcp_v4_send_ack(skb, (sk->sk_state == TCP_LISTEN) ?
 			tcp_rsk(req)->snt_isn + 1 : tcp_sk(sk)->snd_nxt,
 #ifdef CONFIG_LGP_DATA_TCPIP_MPTCP
 			tcp_rsk(req)->rcv_nxt, 0, req->rcv_wnd,
