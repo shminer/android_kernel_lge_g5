@@ -110,7 +110,7 @@ static DEFINE_PER_CPU(struct acgov_cpu, acgov_cpu);
 static DEFINE_PER_CPU(struct acgov_tunables, cached_tunables);
 
 #ifdef CONFIG_MACH_MSM8996_H1
-#define LITTLE_NFREQS				16
+#define LITTLE_NFREQS				17
 #define BIG_NFREQS					25
 static unsigned long little_capacity[LITTLE_NFREQS][2] = {
 	{0, 149},
@@ -128,7 +128,8 @@ static unsigned long little_capacity[LITTLE_NFREQS][2] = {
 	{611, 648},
 	{648, 684},
 	{684, 729},
-	{729, 763}
+	{729, 763},
+	{763, 832}
 };
 
 static unsigned long big_capacity[BIG_NFREQS][2] = {
