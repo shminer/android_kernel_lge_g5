@@ -5863,7 +5863,7 @@ static int cpu_util_wake(int cpu, struct task_struct *p)
 		return cpu_util(cpu);
 
 	capacity = capacity_orig_of(cpu);
-	util = max_t(long, cpu_rq(cpu)->cfs.avg.util_avg - task_util(p), 0);
+	util = max_t(long, cpu_util(cpu) - task_util(p), 0);
 
 	return (util >= capacity) ? capacity : util;
 }
