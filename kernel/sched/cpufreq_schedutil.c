@@ -194,9 +194,9 @@ static unsigned int get_next_freq(struct sugov_policy *sg_policy,
 	return cpufreq_driver_resolve_freq(policy, freq);
 }
 
-static void sugov_get_util(unsigned long *util, unsigned long *max, int cpu)
+static void sugov_get_util(unsigned long *util, unsigned long *max, int cpu,
+                            u64 time)
 {
-	int cpu = smp_processor_id();
 	struct rq *rq = cpu_rq(cpu);
 	unsigned long max_cap, rt;
 	s64 delta;
@@ -280,7 +280,7 @@ static void sugov_update_single(struct update_util_data *hook, u64 time,
 	if (flags & SCHED_CPUFREQ_DL) {
 		next_f = policy->cpuinfo.max_freq;
 	} else {
-		sugov_get_util(&util, &max, hook->cpu);
+		sugov_get_util(&util, &max, hook->cpu, time);
 		sugov_iowait_boost(sg_cpu, &util, &max);
 		next_f = get_next_freq(sg_policy, util, max);
 	}
@@ -335,10 +335,11 @@ static void sugov_update_shared(struct update_util_data *hook, u64 time,
 	struct sugov_cpu *sg_cpu = container_of(hook, struct sugov_cpu, update_util);
 	struct sugov_policy *sg_policy = sg_cpu->sg_policy;
 	struct cpufreq_policy *policy = sg_policy->policy;
+	int this_cpu = smp_processor_id();
+	int cpu = smp_processor_id();
 	struct task_struct *curr = cpu_curr(cpu);
 	unsigned long util, max;
 	unsigned int next_f;
-	int cpu, this_cpu = smp_processor_id();
 	bool remote;
 
 	if (policy->dvfs_possible_from_any_cpu ||
@@ -354,7 +355,7 @@ static void sugov_update_shared(struct update_util_data *hook, u64 time,
 		remote = this_cpu != hook->cpu;
 	}
 
-	sugov_get_util(&util, &max, hook->cpu);
+	sugov_get_util(&util, &max, hook->cpu, time);
 
 	raw_spin_lock(&sg_policy->update_lock);
 
