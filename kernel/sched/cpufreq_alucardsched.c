@@ -46,6 +46,7 @@ unsigned long boosted_cpu_util(int cpu);
 #define PUMP_DEC_STEP_AT_MIN_FREQ	3
 #define PUMP_DEC_STEP				1
 #define BOOST_PERC					10
+#define ENERGY_AWARE_MODE					1
 #else
 #define LATENCY_MULTIPLIER			(2000)
 #define FREQ_RESPONSIVENESS			1036800
@@ -72,6 +73,9 @@ struct acgov_tunables {
 	int pump_dec_step;
 	int pump_dec_step_at_min_freq;
 	unsigned int boost_perc;
+#ifdef CONFIG_MACH_MSM8996_H1
+	unsigned int energy_aware_mode;
+#endif
 };
 
 struct acgov_policy {
@@ -313,6 +317,32 @@ static void get_target_capacity(unsigned int cpu, int index,
 		*up_cap = big_capacity[index][1];
 	}
 }
+
+static unsigned int find_capacity_range(unsigned int cpu, int index,
+										unsigned long util, bool isup)
+{
+	unsigned int i, new_index;
+	if (isup) {
+		if (util >=  ((cpu < 2) ? little_capacity[LITTLE_NFREQS][1] : 
+							big_capacity[BIG_NFREQS][1])) {
+			new_index = (cpu < 2) ? LITTLE_NFREQS : BIG_NFREQS;
+		}
+		for (i=index; i <= ((cpu < 2) ? LITTLE_NFREQS : BIG_NFREQS); i++) {
+				if (util <= ((cpu < 2) ? little_capacity[i][1] : big_capacity[i][1])) {
+					new_index = i;
+					break;
+				}
+		}
+	} else {
+			for (i=index; index >= 0; i--) {
+				if (util >= ((cpu < 2) ? little_capacity[i][0] : big_capacity[i][0])) {
+					new_index = i;
+					break;
+				}
+			}
+	}
+	return new_index;
+}
 #else
 static void get_target_load(struct cpufreq_policy *policy, int index,
 					unsigned int *down_load, unsigned int *up_load)
@@ -380,10 +410,16 @@ static unsigned int get_next_freq(struct acgov_cpu *sg_cpu, unsigned long util,
 	get_target_capacity(policy->cpu, index, &down_cap, &up_cap);
 	if (cur_util >= up_cap
 		&& policy->cur < policy->max) {
+		if (tunables->energy_aware_mode == 1)
+			index = find_capacity_range(policy->cpu, 
+																		index, cur_util, true);
 		next_freq = resolve_target_freq(policy,
 			index, pump_inc_step, true);
 	} else if (cur_util < down_cap
 		&& policy->cur > policy->min) {
+		if (tunables->energy_aware_mode == 1)
+			index = find_capacity_range(policy->cpu, 
+																		index, cur_util, false);
 		next_freq = resolve_target_freq(policy,
 			index, pump_dec_step, false);
 	}
@@ -687,6 +723,16 @@ static ssize_t boost_perc_show(struct gov_attr_set *attr_set, char *buf)
 	return sprintf(buf, "%u\n", tunables->boost_perc);
 }
 
+#ifdef CONFIG_MACH_MSM8996_H1
+/* energy_aware_mode */
+static ssize_t energy_aware_mode_show(struct gov_attr_set *attr_set, char *buf)
+{
+	struct acgov_tunables *tunables = to_acgov_tunables(attr_set);
+
+	return sprintf(buf, "%u\n", tunables->energy_aware_mode);
+}
+#endif
+
 /* up_rate_limit_us */
 static ssize_t up_rate_limit_us_store(struct gov_attr_set *attr_set,
 				      const char *buf, size_t count)
@@ -853,6 +899,29 @@ static ssize_t boost_perc_store(struct gov_attr_set *attr_set,
 	return count;
 }
 
+#ifdef CONFIG_MACH_MSM8996_H1
+/* energy_aware_mode */
+static ssize_t energy_aware_mode_store(struct gov_attr_set *attr_set,
+					const char *buf, size_t count)
+{
+	struct acgov_tunables *tunables = to_acgov_tunables(attr_set);
+	int input;
+
+	if (kstrtouint(buf, 10, &input))
+		return -EINVAL;
+
+	if (input != 1)
+		input = 0;
+
+	if (input == tunables->energy_aware_mode)
+		return count;
+
+	tunables->energy_aware_mode = input;
+
+	return count;
+}
+#endif
+
 static struct governor_attr up_rate_limit_us = __ATTR_RW(up_rate_limit_us);
 static struct governor_attr down_rate_limit_us = __ATTR_RW(down_rate_limit_us);
 static struct governor_attr freq_responsiveness = __ATTR_RW(freq_responsiveness);
@@ -861,6 +930,9 @@ static struct governor_attr pump_inc_step = __ATTR_RW(pump_inc_step);
 static struct governor_attr pump_dec_step_at_min_freq = __ATTR_RW(pump_dec_step_at_min_freq);
 static struct governor_attr pump_dec_step = __ATTR_RW(pump_dec_step);
 static struct governor_attr boost_perc = __ATTR_RW(boost_perc);
+#ifdef CONFIG_MACH_MSM8996_H1
+static struct governor_attr energy_aware_mode = __ATTR_RW(energy_aware_mode);
+#endif
 
 static struct attribute *acgov_attributes[] = {
 	&up_rate_limit_us.attr,
@@ -871,6 +943,9 @@ static struct attribute *acgov_attributes[] = {
 	&pump_dec_step_at_min_freq.attr,
 	&pump_dec_step.attr,
 	&boost_perc.attr,
+#ifdef CONFIG_MACH_MSM8996_H1
+	&energy_aware_mode.attr,
+#endif
 	NULL
 };
 
@@ -1037,6 +1112,9 @@ initialize:
 	tunables->pump_inc_step = PUMP_INC_STEP;
 	tunables->pump_dec_step = PUMP_DEC_STEP;
 	tunables->boost_perc = BOOST_PERC;
+#ifdef CONFIG_MACH_MSM8996_H1
+	tunables->energy_aware_mode = ENERGY_AWARE_MODE;
+#endif
 	pr_debug("tunables data initialized for cpu[%u]\n", cpu);
 out:
 	return;
