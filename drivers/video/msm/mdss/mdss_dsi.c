@@ -1570,7 +1570,7 @@ static int mdss_dsi_unblank(struct mdss_panel_data *pdata)
 	mipi  = &pdata->panel_info.mipi;
 
 #if defined(CONFIG_LGE_DISPLAY_COMMON)
-	pr_debug(pr_debug("%s+: ctrl=%p ndx=%d cur_power_state=%d ctrl_state=%x\n",
+	pr_debug("%s+: ctrl=%p ndx=%d cur_power_state=%d ctrl_state=%x\n",
 	        __func__, ctrl_pdata, ctrl_pdata->ndx,
 	    pdata->panel_info.panel_power_state, ctrl_pdata->ctrl_state);
 #else
