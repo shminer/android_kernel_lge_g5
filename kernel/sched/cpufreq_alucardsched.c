@@ -879,6 +879,26 @@ static ssize_t pump_dec_step_store(struct gov_attr_set *attr_set,
 	return count;
 }
 
+/* boost_perc */
+static ssize_t boost_perc_store(struct gov_attr_set *attr_set,
+					const char *buf, size_t count)
+{
+	struct acgov_tunables *tunables = to_acgov_tunables(attr_set);
+	int input;
+
+	if (kstrtouint(buf, 10, &input))
+		return -EINVAL;
+
+	input = min(max(0, input), 20);
+
+	if (input == tunables->boost_perc)
+		return count;
+
+	tunables->boost_perc = input;
+
+	return count;
+}
+
 #ifdef CONFIG_MACH_MSM8996_H1
 /* energy_aware_mode */
 static ssize_t energy_aware_mode_store(struct gov_attr_set *attr_set,
