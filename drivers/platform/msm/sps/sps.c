@@ -2317,11 +2317,13 @@ int sps_deregister_bam_device(unsigned long dev_handle)
 	mutex_lock(&bam->lock);
 	sps_bam_device_de_init(bam);
 	mutex_unlock(&bam->lock);
+#ifdef CONFIG_IPC_LOGGING
 	ipc_log_context_destroy(bam->ipc_log0);
 	ipc_log_context_destroy(bam->ipc_log1);
 	ipc_log_context_destroy(bam->ipc_log2);
 	ipc_log_context_destroy(bam->ipc_log3);
 	ipc_log_context_destroy(bam->ipc_log4);
+#endif
 	if (bam->props.virt_size)
 		(void)iounmap(bam->props.virt_addr);
 
