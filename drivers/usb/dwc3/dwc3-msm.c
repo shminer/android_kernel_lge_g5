@@ -3257,21 +3257,20 @@ static int dwc3_msm_power_set_property_usb(struct power_supply *psy,
 		/* Let OTG know about ID detection */
 		mdwc->id_state = id;
 		dbg_event(0xFF, "id_state", mdwc->id_state);
-		if (dwc->is_drd)
+		if (dwc->is_drd){
 #ifdef CONFIG_LGE_USB_G_ANDROID
-		{
 			dbg_event(0xFF, "stayID", 0);
 			pm_stay_awake(mdwc->dev);
 			cancel_delayed_work(&mdwc->resume_work);
 			queue_delayed_work(mdwc->dwc3_wq,
 					&mdwc->resume_work, 12);
-		}
 #else
 			dbg_event(0xFF, "stayID", 0);
 			pm_stay_awake(mdwc->dev);
 			queue_delayed_work(mdwc->dwc3_wq,
 					&mdwc->resume_work, 0);
 #endif
+		}
 
 		break;
 	/* PMIC notification for DP_DM state */
