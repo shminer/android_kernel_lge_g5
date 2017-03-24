@@ -641,26 +641,19 @@ static void subsystem_shutdown(struct subsys_device *dev, void *data)
 {
 	const char *name = dev->desc->name;
 
-<<<<<<< HEAD
-	pr_info("[%p]: Shutting down %s\n", current, name);
+	pr_info("[%s:%d]: Shutting down %s\n",
+			current->comm, current->pid, name);
 #ifdef CONFIG_LGE_HANDLE_PANIC
 	if (dev->desc->shutdown(dev->desc, true) < 0) {
 		lge_set_subsys_crash_reason(name, LGE_ERR_SUB_SD);
-		panic("subsys-restart: [%p]: Failed to shutdown %s!",
-			current, name);
+	panic("subsys-restart: [%s:%d]: Failed to shutdown %s!",
+			current->comm, current->pid, name);
 	}
 #else
 	if (dev->desc->shutdown(dev->desc, true) < 0)
-		panic("subsys-restart: [%p]: Failed to shutdown %s!",
-			current, name);
-#endif
-=======
-	pr_info("[%s:%d]: Shutting down %s\n",
-			current->comm, current->pid, name);
-	if (dev->desc->shutdown(dev->desc, true) < 0)
 		panic("subsys-restart: [%s:%d]: Failed to shutdown %s!",
 			current->comm, current->pid, name);
->>>>>>> 38d941a... soc: qcom: pil/ssr: fix issue with logs
+#endif
 	dev->crash_count++;
 	subsys_set_state(dev, SUBSYS_OFFLINE);
 	disable_all_irqs(dev);
