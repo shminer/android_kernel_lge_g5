@@ -33,16 +33,16 @@ unsigned long boosted_cpu_util(int cpu);
 #define DOWN_RATE_LIMIT				1000
 
 /* Frequency cap for target_load1 in KHz */
-#define LOAD1_CAP					1228800
+#define LOAD1_CAP					1036800
 /* Frequency cap for target_load2 in KHz */
-#define LOAD2_CAP					1478400
+#define LOAD2_CAP					1401600
 #define TARGET_LOAD_1				25
 #define TARGET_LOAD_2				50
 
 /* Frequency cap for target_load1 in KHz */
 #define LOAD1_CAP_BIGC				1036800
 /* Frequency cap for target_load2 in KHz */
-#define LOAD2_CAP_BIGC				1920000
+#define LOAD2_CAP_BIGC				1555200
 #define TARGET_LOAD_1_BIGC 			25
 #define TARGET_LOAD_2_BIGC 			50
 
@@ -206,7 +206,7 @@ static unsigned int get_next_freq(struct nrggov_cpu *sg_cpu, unsigned long util,
 	if(load < tunables->target_load1){
 		freq = (tunables->load1_cap + (tunables->load1_cap >> 1)) * util / max;
 	} else if (load >= tunables->target_load1 && load < tunables->target_load2){
-		freq = tunables->load2_cap * util / max;
+		freq = (tunables->load2_cap + (tunables->load2_cap >> 2)) * util / max;
 	} else {
 		freq = (policy->cpuinfo.max_freq - (policy->cpuinfo.max_freq >> 6)) * util / max;
 	}
