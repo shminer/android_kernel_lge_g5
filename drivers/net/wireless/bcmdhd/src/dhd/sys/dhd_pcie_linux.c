@@ -392,7 +392,7 @@ static int dhdpcie_suspend_dev(struct pci_dev *dev)
 #endif /* SUPPORT_LINKDOWN_RECOVERY */
 
 #endif /* OEM_ANDROID && LINUX_VERSION_CODE >= KERNEL_VERSION(3, 0, 0) */
-	DHD_TRACE_HW4(("%s: Enter\n", __FUNCTION__));
+	//DHD_TRACE_HW4(("%s: Enter\n", __FUNCTION__));
 	disable_irq(dev->irq);
 	dhd_dpc_tasklet_kill(bus->dhd);
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(3, 0, 0))
@@ -437,7 +437,7 @@ static int dhdpcie_resume_dev(struct pci_dev *dev)
 #endif /* CONFIG_ARCH_MSM */
 #endif /* SUPPORT_LINKDOWN_RECOVERY */
 #endif /* OEM_ANDROID && LINUX_VERSION_CODE >= KERNEL_VERSION(3, 0, 0) */
-	DHD_TRACE_HW4(("%s: Enter\n", __FUNCTION__));
+	//DHD_TRACE_HW4(("%s: Enter\n", __FUNCTION__));
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(3, 0, 0))
 	bus->pci_d3hot_done = 0;
 #endif /* OEM_ANDROID && LINUX_VERSION_CODE >= KERNEL_VERSION(3, 0, 0) */
