@@ -16,9 +16,6 @@
 #include <linux/compat.h>
 #include "audio_utils_aio.h"
 
-static struct miscdevice audio_g711mlaw_misc;
-static struct ws_mgr audio_g711_ws_mgr;
-
 static const struct file_operations audio_g711_debug_fops = {
 	.read = audio_aio_debug_read,
 	.open = audio_aio_debug_open,
@@ -235,9 +232,6 @@ static int audio_open(struct inode *inode, struct file *file)
 	}
 
 	audio->pcm_cfg.buffer_size = PCM_BUFSZ_MIN;
-	audio->miscdevice = &audio_g711mlaw_misc;
-	audio->wakelock_voted = false;
-	audio->audio_ws_mgr = &audio_g711_ws_mgr;
 
 	init_waitqueue_head(&audio->event_wait);
 
@@ -376,21 +370,12 @@ static struct miscdevice audio_g711mlaw_misc = {
 
 static int __init audio_g711mlaw_init(void)
 {
-	int ret = misc_register(&audio_g711mlaw_misc);
-
-	if (ret == 0)
-		device_init_wakeup(audio_g711mlaw_misc.this_device, true);
-	audio_g711_ws_mgr.ref_cnt = 0;
-	mutex_init(&audio_g711_ws_mgr.ws_lock);
-
-	return ret;
+	return misc_register(&audio_g711mlaw_misc);
 }
 
 static void __exit audio_g711mlaw_exit(void)
 {
 	int ret = misc_deregister(&audio_g711mlaw_misc);
-
-	mutex_destroy(&audio_g711_ws_mgr.ws_lock);
 
 	if (ret == 0)
 		pr_debug("device deregistered successfully:\n");
