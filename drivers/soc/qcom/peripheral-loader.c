@@ -913,12 +913,15 @@ out:
 						priv->region_start),
 					VMID_HLOS);
 			}
+			if (desc->clear_fw_region && priv->region_start)
+				pil_clear_segment(desc);
 			dma_free_attrs(desc->dev, priv->region_size,
 					priv->region, priv->region_start,
 					&desc->attrs);
 			priv->region = NULL;
 		}
-		pil_clear_segment(desc);
+		if (desc->clear_fw_region && priv->region_start)
+			pil_clear_segment(desc);
 		pil_release_mmap(desc);
 	}
 	return ret;
