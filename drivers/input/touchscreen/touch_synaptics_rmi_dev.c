@@ -680,22 +680,35 @@ clean_up:
 static ssize_t rmidev_read(struct file *filp, char __user *buf,
 		size_t count, loff_t *f_pos)
 {
-	struct rmidev_data *dev_data = filp->private_data;
 	ssize_t retval;
-	unsigned char tmpbuf[count + 1];
+	unsigned char *tmpbuf;
+	struct rmidev_data *dev_data = filp->private_data;
 
 	if (IS_ERR(dev_data)) {
 		TOUCH_RMIDEV_MSG("Pointer of char device data is invalid\n");
 		return -EBADF;
 	}
 
-	if (count == 0)
-		return 0;
+	mutex_lock(&(dev_data->file_mutex));
 
 	if (count > (REG_ADDR_LIMIT - *f_pos))
 		count = REG_ADDR_LIMIT - *f_pos;
 
-	mutex_lock(&(dev_data->file_mutex));
+	if (count == 0) {
+		retval = 0;
+		goto unlock;
+	}
+
+	if (*f_pos > REG_ADDR_LIMIT) {
+		retval = -EFAULT;
+		goto unlock;
+	}
+
+	tmpbuf = kzalloc(count + 1, GFP_KERNEL);
+	if (!tmpbuf) {
+		retval = -ENOMEM;
+		goto unlock;
+	}
 
 	retval = rmidev_i2c_read(rmidev->ts_data, *f_pos, tmpbuf, count);
 
@@ -708,6 +721,8 @@ static ssize_t rmidev_read(struct file *filp, char __user *buf,
 		*f_pos += retval;
 
 clean_up:
+	kfree(tmpbuf);
+unlock:
 	mutex_unlock(&(dev_data->file_mutex));
 
 	return retval;
@@ -725,7 +740,7 @@ static ssize_t rmidev_write(struct file *filp, const char __user *buf,
 		size_t count, loff_t *f_pos)
 {
 	struct rmidev_data *dev_data = filp->private_data;
-	unsigned char tmpbuf[count + 1];
+	unsigned char *tmpbuf;
 	ssize_t retval;
 
 	if (IS_ERR(dev_data)) {
@@ -733,24 +748,41 @@ static ssize_t rmidev_write(struct file *filp, const char __user *buf,
 		return -EBADF;
 	}
 
-	if (count == 0)
-		return 0;
+	mutex_lock(&(dev_data->file_mutex));
+
+	if (*f_pos > REG_ADDR_LIMIT) {
+		retval = -EFAULT;
+		goto unlock;
+	}
 
 	if (count > (REG_ADDR_LIMIT - *f_pos))
 		count = REG_ADDR_LIMIT - *f_pos;
 
-	if (copy_from_user(tmpbuf, buf, count))
-		return -EFAULT;
+	if (count == 0) {
+		retval = 0;
+		goto unlock;
+	}
 
-	mutex_lock(&(dev_data->file_mutex));
+	tmpbuf = kzalloc(count + 1, GFP_KERNEL);
+	if (!tmpbuf) {
+		retval = -ENOMEM;
+		goto unlock;
+	}
+
+	if (copy_from_user(tmpbuf, buf, count)) {
+		retval = -EFAULT;
+		goto clean_up;
+	}
 
 	retval = rmidev_i2c_write(rmidev->ts_data, *f_pos, tmpbuf, count);
 
 	if (retval >= 0)
 		*f_pos += retval;
 
+clean_up:
+	kfree(tmpbuf);
+unlock:
 	mutex_unlock(&(dev_data->file_mutex));
-
 	return retval;
 }
 
