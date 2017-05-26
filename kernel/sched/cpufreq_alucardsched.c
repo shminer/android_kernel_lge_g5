@@ -318,7 +318,7 @@ static void get_target_capacity(unsigned int cpu, int index,
 	}
 }
 
-static unsigned int find_capacity_range(unsigned int cpu, int index,
+static unsigned int find_next_capacity(unsigned int cpu, int index,
 										unsigned long util, bool isup)
 {
 	unsigned int i, new_index;
@@ -411,14 +411,14 @@ static unsigned int get_next_freq(struct acgov_cpu *sg_cpu, unsigned long util,
 	if (cur_util >= up_cap
 		&& policy->cur < policy->max) {
 		if (tunables->energy_aware_mode == 1)
-			index = find_capacity_range(policy->cpu, 
+			index = find_next_capacity(policy->cpu, 
 																		index, cur_util, true);
 		next_freq = resolve_target_freq(policy,
 			index, pump_inc_step, true);
 	} else if (cur_util < down_cap
 		&& policy->cur > policy->min) {
 		if (tunables->energy_aware_mode == 1)
-			index = find_capacity_range(policy->cpu, 
+			index = find_next_capacity(policy->cpu, 
 																		index, cur_util, false);
 		next_freq = resolve_target_freq(policy,
 			index, pump_dec_step, false);
