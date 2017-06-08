@@ -25,9 +25,7 @@
 #include <linux/state_notifier.h>
 #endif
 
-#ifdef CONFIG_SCHED_WALT
 unsigned long boosted_cpu_util(int cpu);
-#endif
 
 /* Stub out fast switch routines present on mainline to reduce the backport
  * overhead. */
@@ -37,23 +35,23 @@ unsigned long boosted_cpu_util(int cpu);
 #define ACGOV_KTHREAD_PRIORITY	50
 
 #ifdef CONFIG_MACH_MSM8996_H1
-#define UP_RATE_LIMIT_US			(20000)
-#define UP_RATE_LIMIT_US_BIGC		(10000)
-#define DOWN_RATE_LIMIT_US			(20000)
-#define FREQ_RESPONSIVENESS			1036800
-#define PUMP_INC_STEP_AT_MIN_FREQ	6
-#define PUMP_INC_STEP				3
+#define UP_RATE_LIMIT_US			(1000)
+#define UP_RATE_LIMIT_US_BIGC		(2000)
+#define DOWN_RATE_LIMIT_US			(6000)
+#define FREQ_RESPONSIVENESS			1113600
+#define PUMP_INC_STEP_AT_MIN_FREQ	3
+#define PUMP_INC_STEP				2
 #define PUMP_DEC_STEP_AT_MIN_FREQ	3
-#define PUMP_DEC_STEP				1
+#define PUMP_DEC_STEP				2
 #define BOOST_PERC					10
 #define ENERGY_AWARE_MODE					1
 #else
 #define LATENCY_MULTIPLIER			(2000)
-#define FREQ_RESPONSIVENESS			1036800
-#define PUMP_INC_STEP_AT_MIN_FREQ	1
-#define PUMP_INC_STEP				1
-#define PUMP_DEC_STEP_AT_MIN_FREQ	1
-#define PUMP_DEC_STEP				1
+#define FREQ_RESPONSIVENESS			1113600
+#define PUMP_INC_STEP_AT_MIN_FREQ	3
+#define PUMP_INC_STEP				2
+#define PUMP_DEC_STEP_AT_MIN_FREQ	3
+#define PUMP_DEC_STEP				2
 #define BOOST_PERC					10
 #endif
 #ifdef CONFIG_STATE_NOTIFIER
@@ -73,6 +71,9 @@ struct acgov_tunables {
 	int pump_dec_step;
 	int pump_dec_step_at_min_freq;
 	unsigned int boost_perc;
+	bool iowait_boost_enable;
+	bool eval_busy_for_freq;
+	bool freq_responsiveness_jump;
 #ifdef CONFIG_MACH_MSM8996_H1
 	unsigned int energy_aware_mode;
 #endif
@@ -118,6 +119,11 @@ struct acgov_cpu {
 	unsigned long util;
 	unsigned long max;
 	unsigned int flags;
+
+	/* The field below is for single-CPU policies only. */
+#ifdef CONFIG_NO_HZ_COMMON
+	unsigned long saved_idle_calls;
+#endif
 };
 
 static DEFINE_PER_CPU(struct acgov_cpu, acgov_cpu);
@@ -246,32 +252,27 @@ static void acgov_update_commit(struct acgov_policy *sg_policy, u64 time,
 	if (acgov_up_down_rate_limit(sg_policy, time, next_freq))
 		return;
 
+	if (!next_freq || policy->cur == next_freq)
+		return;
+
+	sg_policy->next_freq = next_freq;
 	sg_policy->last_freq_update_time = time;
 
-	if (!next_freq)
-		return;
-	
 	if (policy->fast_switch_enabled) {
-		if (policy->cur == next_freq) {
-			trace_cpu_frequency(policy->cur, smp_processor_id());
-			return;
-		}
-		sg_policy->next_freq = next_freq;
 		next_freq = cpufreq_driver_fast_switch(policy, next_freq);
 		if (next_freq == CPUFREQ_ENTRY_INVALID)
 			return;
 
 		policy->cur = next_freq;
 		trace_cpu_frequency(next_freq, smp_processor_id());
-	} else if (policy->cur != next_freq) {
-		sg_policy->next_freq = next_freq;
+	} else {
 		sg_policy->work_in_progress = true;
 		irq_work_queue(&sg_policy->irq_work);
 	}
 }
 
 static unsigned int resolve_target_freq(struct cpufreq_policy *policy,
-					int index, unsigned int step, bool isup)
+					int index, int rfindex, unsigned int step, bool isup)
 {
 	struct cpufreq_frequency_table *table;
 	unsigned int target_freq = 0;
@@ -282,6 +283,9 @@ static unsigned int resolve_target_freq(struct cpufreq_policy *policy,
 
 	table = policy->freq_table;
 	if (isup) {
+		if (rfindex > index) {
+			return table[rfindex].frequency;
+		}
 		for (i = (index + 1); (table[i].frequency != CPUFREQ_TABLE_END); i++) {
 			if (table[i].frequency != CPUFREQ_ENTRY_INVALID) {
 				target_freq = table[i].frequency;
@@ -366,7 +370,7 @@ static void get_target_load(struct cpufreq_policy *policy, int index,
 
 /**
  * get_next_freq - Compute a new frequency for a given cpufreq policy.
- * @sg_cpu: alucardsched cpu object to compute the new frequency for.
+ * @sg_policy: alucardsched policy object to compute the new frequency for.
  * @util: Current CPU utilization.
  * @max: CPU capacity.
  *
@@ -374,10 +378,9 @@ static void get_target_load(struct cpufreq_policy *policy, int index,
  * next_freq (as calculated above) is returned, subject to policy min/max and
  * cpufreq driver limitations.
  */
-static unsigned int get_next_freq(struct acgov_cpu *sg_cpu, unsigned long util,
+static unsigned int get_next_freq(struct acgov_policy *sg_policy, unsigned long util,
 				  unsigned long max)
 {
-	struct acgov_policy *sg_policy = sg_cpu->sg_policy;
 	struct cpufreq_policy *policy = sg_policy->policy;
 	struct acgov_tunables *tunables = sg_policy->tunables;
 	unsigned int freq_responsiveness = tunables->freq_responsiveness;
@@ -393,7 +396,7 @@ static unsigned int get_next_freq(struct acgov_cpu *sg_cpu, unsigned long util,
 	unsigned int cur_load =
 		(util * (100 + tunables->boost_perc)) / max;
 #endif
-	int index;
+	int index, rfindex = -1;
 
 #ifdef CONFIG_MSM_TRACK_FREQ_TARGET_INDEX
 	index = policy->cur_index;
@@ -405,6 +408,9 @@ static unsigned int get_next_freq(struct acgov_cpu *sg_cpu, unsigned long util,
 	if (policy->cur < freq_responsiveness) {
 		pump_inc_step = tunables->pump_inc_step_at_min_freq;
 		pump_dec_step = tunables->pump_dec_step_at_min_freq;
+		if (tunables->freq_responsiveness_jump)
+			rfindex = cpufreq_frequency_table_get_index(policy,
+					freq_responsiveness);			
 	}
 #ifdef CONFIG_MACH_MSM8996_H1
 	get_target_capacity(policy->cpu, index, &down_cap, &up_cap);
@@ -414,25 +420,25 @@ static unsigned int get_next_freq(struct acgov_cpu *sg_cpu, unsigned long util,
 			index = find_next_capacity(policy->cpu, 
 																		index, cur_util, true);
 		next_freq = resolve_target_freq(policy,
-			index, pump_inc_step, true);
+			index, rfindex, pump_inc_step, true);
 	} else if (cur_util < down_cap
 		&& policy->cur > policy->min) {
 		if (tunables->energy_aware_mode == 1)
 			index = find_next_capacity(policy->cpu, 
 																		index, cur_util, false);
 		next_freq = resolve_target_freq(policy,
-			index, pump_dec_step, false);
+			index, rfindex, pump_dec_step, false);
 	}
 #else
 	get_target_load(policy, index, &down_load, &up_load);
 	if (cur_load >= up_load
 		&& policy->cur < policy->max) {
 		next_freq = resolve_target_freq(policy,
-			index, pump_inc_step, true);
+			index, rfindex, pump_inc_step, true);
 	} else if (cur_load < down_load
 		&& policy->cur > policy->min) {
 		next_freq = resolve_target_freq(policy,
-			index, pump_dec_step, false);
+			index, rfindex, pump_dec_step, false);
 	}
 #endif
 #ifndef CONFIG_MSM_TRACK_FREQ_TARGET_INDEX
@@ -445,6 +451,15 @@ skip:
 		return cpufreq_driver_resolve_freq(policy, next_freq);
 	}
 	return next_freq;
+}
+
+static inline bool use_pelt(void)
+{
+#ifdef CONFIG_SCHED_WALT
+	return (!sysctl_sched_use_walt_cpu_util || walt_disabled);
+#else
+	return true;
+#endif
 }
 
 static void acgov_get_util(unsigned long *util, unsigned long *max, u64 time)
@@ -463,17 +478,21 @@ static void acgov_get_util(unsigned long *util, unsigned long *max, u64 time)
 	rt = div64_u64(rq->rt_avg, sched_avg_period() + delta);
 	rt = (rt * max_cap) >> SCHED_CAPACITY_SHIFT;
 
-	*util = min(rq->cfs.avg.util_avg + rt, max_cap);
-#ifdef CONFIG_SCHED_WALT
-	if (!walt_disabled && sysctl_sched_use_walt_cpu_util)
-		*util = boosted_cpu_util(cpu);
-#endif
+	*util = boosted_cpu_util(cpu);
+	if (likely(use_pelt()))
+		*util = min((*util + rt), max_cap);
+
 	*max = max_cap;
 }
 
 static void acgov_set_iowait_boost(struct acgov_cpu *sg_cpu, u64 time,
 				   unsigned int flags)
 {
+	struct acgov_policy *sg_policy = sg_cpu->sg_policy;
+
+	if (!sg_policy->tunables->iowait_boost_enable)
+		return;
+
 	if (flags & SCHED_CPUFREQ_IOWAIT) {
 		sg_cpu->iowait_boost = sg_cpu->iowait_boost_max;
 	} else if (sg_cpu->iowait_boost) {
@@ -501,6 +520,19 @@ static void acgov_iowait_boost(struct acgov_cpu *sg_cpu, unsigned long *util,
 	sg_cpu->iowait_boost >>= 1;
 }
 
+#ifdef CONFIG_NO_HZ_COMMON
+static bool acgov_cpu_is_busy(struct acgov_cpu *sg_cpu)
+{
+	unsigned long idle_calls = tick_nohz_get_idle_calls();
+	bool ret = idle_calls == sg_cpu->saved_idle_calls;
+
+	sg_cpu->saved_idle_calls = idle_calls;
+	return ret;
+}
+#else
+static inline bool acgov_cpu_is_busy(struct acgov_cpu *sg_cpu) { return false; }
+#endif /* CONFIG_NO_HZ_COMMON */
+
 static void acgov_update_single(struct update_util_data *hook, u64 time,
 				unsigned int flags)
 {
@@ -509,6 +541,7 @@ static void acgov_update_single(struct update_util_data *hook, u64 time,
 	struct cpufreq_policy *policy = sg_policy->policy;
 	unsigned long util, max;
 	unsigned int next_f;
+	bool busy;
 
 	acgov_set_iowait_boost(sg_cpu, time, flags);
 	sg_cpu->last_update = time;
@@ -516,40 +549,39 @@ static void acgov_update_single(struct update_util_data *hook, u64 time,
 	if (!acgov_should_update_freq(sg_policy, time))
 		return;
 
+	if (sg_policy->tunables->eval_busy_for_freq)
+		busy = acgov_cpu_is_busy(sg_cpu);
+	else
+		busy = false;
+
 	if (flags & SCHED_CPUFREQ_DL) {
 		next_f = policy->cpuinfo.max_freq;
 	} else {
 		acgov_get_util(&util, &max, time);
 		acgov_iowait_boost(sg_cpu, &util, &max);
-		next_f = get_next_freq(sg_cpu, util, max);
+		next_f = get_next_freq(sg_policy, util, max);
+		/*
+		 * Do not reduce the frequency if the CPU has not been idle
+		 * recently, as the reduction is likely to be premature then.
+		 */
+		if (busy && next_f < sg_policy->next_freq)
+			next_f = sg_policy->next_freq;
 	}
 	acgov_update_commit(sg_policy, time, next_f);
 }
 
-static unsigned int acgov_next_freq_shared(struct acgov_cpu *sg_cpu,
-					   unsigned long util, unsigned long max,
-					   unsigned int flags)
+static unsigned int acgov_next_freq_shared(struct acgov_cpu *sg_cpu, u64 time)
 {
 	struct acgov_policy *sg_policy = sg_cpu->sg_policy;
 	struct cpufreq_policy *policy = sg_policy->policy;
-	unsigned int max_f = policy->cpuinfo.max_freq;
-	u64 last_freq_update_time = sg_policy->last_freq_update_time;
+	unsigned long util = 0, max = 1;
 	unsigned int j;
 
-	if (flags & SCHED_CPUFREQ_DL)
-		return max_f;
-
-	acgov_iowait_boost(sg_cpu, &util, &max);
-
 	for_each_cpu(j, policy->cpus) {
-		struct acgov_cpu *j_sg_cpu;
+		struct acgov_cpu *j_sg_cpu = &per_cpu(acgov_cpu, j);
 		unsigned long j_util, j_max;
 		s64 delta_ns;
 
-		if (j == smp_processor_id())
-			continue;
-
-		j_sg_cpu = &per_cpu(acgov_cpu, j);
 		/*
 		 * If the CPU utilization was last updated before the previous
 		 * frequency update and the time elapsed between the last update
@@ -557,13 +589,13 @@ static unsigned int acgov_next_freq_shared(struct acgov_cpu *sg_cpu,
 		 * enough, don't take the CPU into account as it probably is
 		 * idle now (and clear iowait_boost for it).
 		 */
-		delta_ns = last_freq_update_time - j_sg_cpu->last_update;
+		delta_ns = time - j_sg_cpu->last_update;
 		if (delta_ns > TICK_NSEC) {
 			j_sg_cpu->iowait_boost = 0;
 			continue;
 		}
 		if (j_sg_cpu->flags & SCHED_CPUFREQ_DL)
-			return max_f;
+			return policy->cpuinfo.max_freq;
 
 		j_util = j_sg_cpu->util;
 		j_max = j_sg_cpu->max;
@@ -575,7 +607,7 @@ static unsigned int acgov_next_freq_shared(struct acgov_cpu *sg_cpu,
 		acgov_iowait_boost(j_sg_cpu, &util, &max);
 	}
 
-	return get_next_freq(sg_cpu, util, max);
+	return get_next_freq(sg_policy, util, max);
 }
 
 static void acgov_update_shared(struct update_util_data *hook, u64 time,
@@ -598,7 +630,11 @@ static void acgov_update_shared(struct update_util_data *hook, u64 time,
 	sg_cpu->last_update = time;
 
 	if (acgov_should_update_freq(sg_policy, time)) {
-		next_f = acgov_next_freq_shared(sg_cpu, util, max, flags);
+		if (flags & SCHED_CPUFREQ_DL)
+			next_f = sg_policy->policy->cpuinfo.max_freq;
+		else
+			next_f = acgov_next_freq_shared(sg_cpu, time);
+
 		acgov_update_commit(sg_policy, time, next_f);
 	}
 
@@ -624,15 +660,15 @@ static void acgov_irq_work(struct irq_work *irq_work)
 	sg_policy = container_of(irq_work, struct acgov_policy, irq_work);
 
 	/*
-	 * For Real Time and Deadline tasks, schedutil governor shoots the
-	 * frequency to maximum. And special care must be taken to ensure that
-	 * this kthread doesn't result in that.
+	 * For RT and deadline tasks, the alucardched governor shoots the
+	 * frequency to maximum. Special care must be taken to ensure that this
+	 * kthread doesn't result in the same behavior.
 	 *
 	 * This is (mostly) guaranteed by the work_in_progress flag. The flag is
-	 * updated only at the end of the acgov_work() and before that schedutil
-	 * rejects all other frequency scaling requests.
+	 * updated only at the end of the acgov_work() function and before that
+	 * the alucardched governor rejects all other frequency scaling requests.
 	 *
-	 * Though there is a very rare case where the RT thread yields right
+	 * There is a very rare case though, where the RT thread yields right
 	 * after the work_in_progress flag is cleared. The effects of that are
 	 * neglected for now.
 	 */
@@ -721,6 +757,33 @@ static ssize_t boost_perc_show(struct gov_attr_set *attr_set, char *buf)
 	struct acgov_tunables *tunables = to_acgov_tunables(attr_set);
 
 	return sprintf(buf, "%u\n", tunables->boost_perc);
+}
+
+/* iowait_boost_enable */
+static ssize_t iowait_boost_enable_show(struct gov_attr_set *attr_set,
+					char *buf)
+{
+	struct acgov_tunables *tunables = to_acgov_tunables(attr_set);
+
+	return sprintf(buf, "%u\n", tunables->iowait_boost_enable);
+}
+
+/* eval_busy_for_freq */
+static ssize_t eval_busy_for_freq_show(struct gov_attr_set *attr_set,
+					char *buf)
+{
+	struct acgov_tunables *tunables = to_acgov_tunables(attr_set);
+
+	return sprintf(buf, "%u\n", tunables->eval_busy_for_freq);
+}
+
+/* freq_responsiveness_jump */
+static ssize_t freq_responsiveness_jump_show(struct gov_attr_set *attr_set,
+					char *buf)
+{
+	struct acgov_tunables *tunables = to_acgov_tunables(attr_set);
+
+	return sprintf(buf, "%u\n", tunables->freq_responsiveness_jump);
 }
 
 #ifdef CONFIG_MACH_MSM8996_H1
@@ -899,6 +962,51 @@ static ssize_t boost_perc_store(struct gov_attr_set *attr_set,
 	return count;
 }
 
+/* iowait_boost_enable */
+static ssize_t iowait_boost_enable_store(struct gov_attr_set *attr_set,
+					 const char *buf, size_t count)
+{
+	struct acgov_tunables *tunables = to_acgov_tunables(attr_set);
+	bool enable;
+
+	if (strtobool(buf, &enable))
+		return -EINVAL;
+
+	tunables->iowait_boost_enable = enable;
+
+	return count;
+}
+
+/* eval_busy_for_freq */
+static ssize_t eval_busy_for_freq_store(struct gov_attr_set *attr_set,
+					 const char *buf, size_t count)
+{
+	struct acgov_tunables *tunables = to_acgov_tunables(attr_set);
+	bool enable;
+
+	if (strtobool(buf, &enable))
+		return -EINVAL;
+
+	tunables->eval_busy_for_freq = enable;
+
+	return count;
+}
+
+/* freq_responsiveness_jump */
+static ssize_t freq_responsiveness_jump_store(struct gov_attr_set *attr_set,
+					 const char *buf, size_t count)
+{
+	struct acgov_tunables *tunables = to_acgov_tunables(attr_set);
+	bool enable;
+
+	if (strtobool(buf, &enable))
+		return -EINVAL;
+
+	tunables->freq_responsiveness_jump = enable;
+
+	return count;
+}
+
 #ifdef CONFIG_MACH_MSM8996_H1
 /* energy_aware_mode */
 static ssize_t energy_aware_mode_store(struct gov_attr_set *attr_set,
@@ -930,6 +1038,9 @@ static struct governor_attr pump_inc_step = __ATTR_RW(pump_inc_step);
 static struct governor_attr pump_dec_step_at_min_freq = __ATTR_RW(pump_dec_step_at_min_freq);
 static struct governor_attr pump_dec_step = __ATTR_RW(pump_dec_step);
 static struct governor_attr boost_perc = __ATTR_RW(boost_perc);
+static struct governor_attr iowait_boost_enable = __ATTR_RW(iowait_boost_enable);
+static struct governor_attr eval_busy_for_freq = __ATTR_RW(eval_busy_for_freq);
+static struct governor_attr freq_responsiveness_jump = __ATTR_RW(freq_responsiveness_jump);
 #ifdef CONFIG_MACH_MSM8996_H1
 static struct governor_attr energy_aware_mode = __ATTR_RW(energy_aware_mode);
 #endif
@@ -943,6 +1054,9 @@ static struct attribute *acgov_attributes[] = {
 	&pump_dec_step_at_min_freq.attr,
 	&pump_dec_step.attr,
 	&boost_perc.attr,
+	&iowait_boost_enable.attr,
+	&eval_busy_for_freq.attr,
+	&freq_responsiveness_jump.attr,
 #ifdef CONFIG_MACH_MSM8996_H1
 	&energy_aware_mode.attr,
 #endif
@@ -955,8 +1069,10 @@ static struct kobj_type acgov_tunables_ktype = {
 };
 
 /********************** cpufreq governor interface *********************/
-
-static struct cpufreq_governor alucardsched_gov;
+#ifndef CONFIG_CPU_FREQ_DEFAULT_GOV_ALUCARDSCHED
+static
+#endif
+struct cpufreq_governor alucardsched_gov;
 
 static struct acgov_policy *acgov_policy_alloc(struct cpufreq_policy *policy)
 {
@@ -967,22 +1083,19 @@ static struct acgov_policy *acgov_policy_alloc(struct cpufreq_policy *policy)
 		return NULL;
 
 	sg_policy->policy = policy;
-	init_irq_work(&sg_policy->irq_work, acgov_irq_work);
-	mutex_init(&sg_policy->work_lock);
 	raw_spin_lock_init(&sg_policy->update_lock);
 	return sg_policy;
 }
 
 static void acgov_policy_free(struct acgov_policy *sg_policy)
 {
-	mutex_destroy(&sg_policy->work_lock);
 	kfree(sg_policy);
 }
 
 static int acgov_kthread_create(struct acgov_policy *sg_policy)
 {
 	struct task_struct *thread;
-	struct sched_param param = { .sched_priority = MAX_RT_PRIO-1 };
+	struct sched_param param = { .sched_priority = MAX_USER_RT_PRIO / 2 };
 	struct cpufreq_policy *policy = sg_policy->policy;
 	int ret;
 
@@ -1009,8 +1122,10 @@ static int acgov_kthread_create(struct acgov_policy *sg_policy)
 
 	sg_policy->thread = thread;
 	kthread_bind_mask(thread, policy->related_cpus);
-	/* NB: wake up so the thread does not look hung to the freezer */
-	wake_up_process_no_notif(thread);
+	init_irq_work(&sg_policy->irq_work, acgov_irq_work);
+	mutex_init(&sg_policy->work_lock);
+
+	wake_up_process(thread);
 
 	return 0;
 }
@@ -1023,6 +1138,7 @@ static void acgov_kthread_stop(struct acgov_policy *sg_policy)
 
 	flush_kthread_worker(&sg_policy->worker);
 	kthread_stop(sg_policy->thread);
+	mutex_destroy(&sg_policy->work_lock);
 }
 
 static struct acgov_tunables *acgov_tunables_alloc(struct acgov_policy *sg_policy)
@@ -1063,6 +1179,9 @@ static void store_tunables_data(struct acgov_tunables *tunables,
 	ptunables->pump_inc_step = tunables->pump_inc_step;
 	ptunables->pump_dec_step = tunables->pump_dec_step;
 	ptunables->boost_perc = tunables->boost_perc;
+	ptunables->iowait_boost_enable = tunables->iowait_boost_enable;
+	ptunables->eval_busy_for_freq = tunables->eval_busy_for_freq;
+	ptunables->freq_responsiveness_jump = tunables->freq_responsiveness_jump;
 	pr_debug("tunables data saved for cpu[%u]\n", cpu);
 }
 
@@ -1086,6 +1205,9 @@ static void get_tunables_data(struct acgov_tunables *tunables,
 		tunables->pump_inc_step = ptunables->pump_inc_step;
 		tunables->pump_dec_step = ptunables->pump_dec_step;
 		tunables->boost_perc = ptunables->boost_perc;
+		tunables->iowait_boost_enable = ptunables->iowait_boost_enable;
+		tunables->eval_busy_for_freq = ptunables->eval_busy_for_freq;
+		tunables->freq_responsiveness_jump = ptunables->freq_responsiveness_jump;
 		pr_debug("tunables data restored for cpu[%u]\n", cpu);
 		goto out;
 	}
@@ -1113,6 +1235,8 @@ initialize:
 	tunables->pump_inc_step = PUMP_INC_STEP;
 	tunables->pump_dec_step = PUMP_DEC_STEP;
 	tunables->boost_perc = BOOST_PERC;
+	tunables->eval_busy_for_freq = false;
+	tunables->freq_responsiveness_jump = true;
 #ifdef CONFIG_MACH_MSM8996_H1
 	tunables->energy_aware_mode = ENERGY_AWARE_MODE;
 #endif
@@ -1131,9 +1255,13 @@ static int acgov_init(struct cpufreq_policy *policy)
 	if (policy->governor_data)
 		return -EBUSY;
 
+	cpufreq_enable_fast_switch(policy);
+
 	sg_policy = acgov_policy_alloc(policy);
-	if (!sg_policy)
-		return -ENOMEM;
+	if (!sg_policy) {
+		ret = -ENOMEM;
+		goto disable_fast_switch;
+	}
 
 	ret = acgov_kthread_create(sg_policy);
 	if (ret)
@@ -1169,13 +1297,11 @@ static int acgov_init(struct cpufreq_policy *policy)
 	if (ret)
 		goto fail;
 
- out:
+out:
 	mutex_unlock(&global_tunables_lock);
-
-	cpufreq_enable_fast_switch(policy);
 	return 0;
 
- fail:
+fail:
 	policy->governor_data = NULL;
 	acgov_tunables_free(tunables);
 
@@ -1186,6 +1312,10 @@ free_sg_policy:
 	mutex_unlock(&global_tunables_lock);
 
 	acgov_policy_free(sg_policy);
+
+disable_fast_switch:
+	cpufreq_disable_fast_switch(policy);
+
 	pr_err("initialization failed (error %d)\n", ret);
 	return ret;
 }
@@ -1195,8 +1325,6 @@ static int acgov_exit(struct cpufreq_policy *policy)
 	struct acgov_policy *sg_policy = policy->governor_data;
 	struct acgov_tunables *tunables = sg_policy->tunables;
 	unsigned int count;
-
-	cpufreq_disable_fast_switch(policy);
 
 	mutex_lock(&global_tunables_lock);
 
@@ -1210,6 +1338,7 @@ static int acgov_exit(struct cpufreq_policy *policy)
 
 	acgov_kthread_stop(sg_policy);
 	acgov_policy_free(sg_policy);
+	cpufreq_disable_fast_switch(policy);
 
 	return 0;
 }
@@ -1238,20 +1367,14 @@ static int acgov_start(struct cpufreq_policy *policy)
 	for_each_cpu(cpu, policy->cpus) {
 		struct acgov_cpu *sg_cpu = &per_cpu(acgov_cpu, cpu);
 
+		memset(sg_cpu, 0, sizeof(*sg_cpu));
 		sg_cpu->sg_policy = sg_policy;
-		if (policy_is_shared(policy)) {
-			sg_cpu->util = 0;
-			sg_cpu->max = 0;
-			sg_cpu->flags = SCHED_CPUFREQ_DL;
-			sg_cpu->last_update = 0;
-			sg_cpu->iowait_boost = 0;
-			sg_cpu->iowait_boost_max = policy->cpuinfo.max_freq;
-			cpufreq_add_update_util_hook(cpu, &sg_cpu->update_util,
-						     acgov_update_shared);
-		} else {
-			cpufreq_add_update_util_hook(cpu, &sg_cpu->update_util,
-						     acgov_update_single);
-		}
+		sg_cpu->flags = SCHED_CPUFREQ_DL;
+		sg_cpu->iowait_boost_max = policy->cpuinfo.max_freq;
+		cpufreq_add_update_util_hook(cpu, &sg_cpu->update_util,
+					     policy_is_shared(policy) ?
+							acgov_update_shared :
+							acgov_update_single);
 	}
 	return 0;
 }
@@ -1266,8 +1389,10 @@ static int acgov_stop(struct cpufreq_policy *policy)
 
 	synchronize_sched();
 
-	irq_work_sync(&sg_policy->irq_work);
-	kthread_cancel_work_sync(&sg_policy->work);
+	if (!policy->fast_switch_enabled) {
+		irq_work_sync(&sg_policy->irq_work);
+		kthread_cancel_work_sync(&sg_policy->work);
+	}
 
 	return 0;
 }
