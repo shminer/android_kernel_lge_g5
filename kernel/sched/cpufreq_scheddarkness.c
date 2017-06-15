@@ -281,7 +281,7 @@ static unsigned int resolve_target_freq(struct cpufreq_policy *policy,
 
 /**
  * get_next_freq - Compute a new frequency for a given cpufreq policy.
- * @sg_policy: darknesssched policy object to compute the new frequency for.
+ * @sg_policy: scheddarkness policy object to compute the new frequency for.
  * @util: Current CPU utilization.
  * @max: CPU capacity.
  *
@@ -709,10 +709,10 @@ static struct kobj_type dkgov_tunables_ktype = {
 };
 
 /********************** cpufreq governor interface *********************/
-#ifndef CONFIG_CPU_FREQ_DEFAULT_GOV_DARKNESSSCHED
+#ifndef CONFIG_CPU_FREQ_DEFAULT_GOV_SCHEDDARKNESS
 static
 #endif
-struct cpufreq_governor darknesssched_gov;
+struct cpufreq_governor cpufreq_gov_scheddarkness;
 
 static struct dkgov_policy *dkgov_policy_alloc(struct cpufreq_policy *policy)
 {
@@ -903,7 +903,7 @@ static int dkgov_init(struct cpufreq_policy *policy)
 
 	ret = kobject_init_and_add(&tunables->attr_set.kobj, &dkgov_tunables_ktype,
 				   get_governor_parent_kobj(policy), "%s",
-				   darknesssched_gov.name);
+				   cpufreq_gov_scheddarkness.name);
 	if (ret)
 		goto fail;
 
@@ -1022,7 +1022,7 @@ static int dkgov_limits(struct cpufreq_policy *policy)
 	return 0;
 }
 
-static int cpufreq_darknesssched_cb(struct cpufreq_policy *policy,
+static int cpufreq_scheddarkness_cb(struct cpufreq_policy *policy,
 				unsigned int event)
 {
 	switch(event) {
@@ -1041,17 +1041,17 @@ static int cpufreq_darknesssched_cb(struct cpufreq_policy *policy,
 	}
 }
 
-#ifndef CONFIG_CPU_FREQ_DEFAULT_GOV_DARKNESSSCHED
+#ifndef CONFIG_CPU_FREQ_DEFAULT_GOV_SCHEDDARKNESS
 static
 #endif
-struct cpufreq_governor darknesssched_gov = {
-	.name = "darknesssched",
-	.governor = cpufreq_darknesssched_cb,
+struct cpufreq_governor cpufreq_gov_scheddarkness = {
+	.name = "scheddarkness",
+	.governor = cpufreq_scheddarkness_cb,
 	.owner = THIS_MODULE,
 };
 
 static int __init dkgov_register(void)
 {
-	return cpufreq_register_governor(&darknesssched_gov);
+	return cpufreq_register_governor(&cpufreq_gov_scheddarkness);
 }
 fs_initcall(dkgov_register);

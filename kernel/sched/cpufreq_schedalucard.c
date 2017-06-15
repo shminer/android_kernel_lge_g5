@@ -1245,7 +1245,6 @@ initialize:
 	tunables->pump_inc_step = PUMP_INC_STEP;
 	tunables->pump_dec_step = PUMP_DEC_STEP;
 	tunables->boost_perc = BOOST_PERC;
-	tunables->freq_responsiveness_jump = true;
 #ifdef CONFIG_MACH_MSM8996_H1
 	tunables->energy_aware_mode = ENERGY_AWARE_MODE;
 #endif
