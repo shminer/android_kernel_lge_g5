@@ -32,10 +32,15 @@ unsigned long boosted_cpu_util(int cpu);
 #define cpufreq_driver_fast_switch(x, y) 0
 #define cpufreq_enable_fast_switch(x)
 #define cpufreq_disable_fast_switch(x)
-#define LATENCY_MULTIPLIER			(2000)
+#define LATENCY_MULTIPLIER			(1000)
 #define DKGOV_KTHREAD_PRIORITY	50
 
+<<<<<<< HEAD:kernel/sched/cpufreq_darknesssched.c
 #define BOOST_PERC					5
+=======
+#define FREQ_RESPONSIVENESS			1113600
+#define BOOST_PERC					0
+>>>>>>> 41048a6... cpufreq_schedalucard, cpufreq_scheddarkness: Changed default settings.:kernel/sched/cpufreq_scheddarkness.c
 #ifdef CONFIG_STATE_NOTIFIER
 #define DEFAULT_RATE_LIMIT_SUSP_NS ((s64)(80000 * NSEC_PER_USEC))
 #endif
