@@ -34,26 +34,15 @@ unsigned long boosted_cpu_util(int cpu);
 #define cpufreq_disable_fast_switch(x)
 #define ACGOV_KTHREAD_PRIORITY	50
 
-#ifdef CONFIG_MACH_MSM8996_H1
 #define UP_RATE_LIMIT_US		(1000)
 #define UP_RATE_LIMIT_US_BIGC		(1000)
 #define DOWN_RATE_LIMIT_US		(1000)
 #define FREQ_RESPONSIVENESS		1113600
-#define PUMP_INC_STEP_AT_MIN_FREQ	2
+#define PUMP_INC_STEP_AT_MIN_FREQ	1
 #define PUMP_INC_STEP			1
-#define PUMP_DEC_STEP_AT_MIN_FREQ	2
-#define PUMP_DEC_STEP			2
+#define PUMP_DEC_STEP_AT_MIN_FREQ	1
+#define PUMP_DEC_STEP			1
 #define BOOST_PERC			0
-#define ENERGY_AWARE_MODE			1
-#else
-#define LATENCY_MULTIPLIER		(2000)
-#define FREQ_RESPONSIVENESS		1113600
-#define PUMP_INC_STEP_AT_MIN_FREQ	3
-#define PUMP_INC_STEP			2
-#define PUMP_DEC_STEP_AT_MIN_FREQ	2
-#define PUMP_DEC_STEP			2
-#define BOOST_PERC			10
-#endif
 #ifdef CONFIG_STATE_NOTIFIER
 #define DEFAULT_RATE_LIMIT_SUSP_NS ((s64)(80000 * NSEC_PER_USEC))
 #endif
@@ -75,14 +64,15 @@ struct acgov_tunables {
 	int pump_dec_step_at_min_freq;
 	unsigned int boost_perc;
 	bool iowait_boost_enable;
-#ifdef CONFIG_MACH_MSM8996_H1
-	unsigned int energy_aware_mode;
-#endif
 	int eval_busy_for_freq;
-	bool use_target_loads;
-	spinlock_t target_loads_lock;
-	unsigned int *target_loads;
-	int ntarget_loads;
+	spinlock_t target_capacity_lock;
+	unsigned long *up_target_capacity;
+	unsigned long *down_target_capacity;
+	int ntarget_capacity;
+	spinlock_t target_frequency_delay_lock;
+	unsigned int *up_target_frequency_delay;
+	unsigned int *down_target_frequency_delay;
+	int ntarget_frequency_delay;
 };
 
 struct acgov_policy {
@@ -131,148 +121,195 @@ struct acgov_cpu {
 static DEFINE_PER_CPU(struct acgov_cpu, acgov_cpu);
 static DEFINE_PER_CPU(struct acgov_tunables, cached_tunables);
 
-#define LITTLE_NFREQS			17
+#define LITTLE_NFREQS			16
 #define BIG_NFREQS			25
-#ifdef CONFIG_MACH_MSM8996_H1
-static unsigned long little_capacity[LITTLE_NFREQS][2] = {
-	{0, 149},
-	{149, 205},
-	{205, 229},
-	{229, 253},
-	{253, 296},
-	{296, 350},
-	{350, 406},
-	{406, 469},
-	{469, 491},
-	{491, 527},
-	{527, 572},
-	{572, 584},
-	{584, 630},
-	{630, 666},
-	{666, 711},
-	{711, 763},
-	{763, 795}
+
+static unsigned long little_up_target_capacity[LITTLE_NFREQS] = {
+	149,
+	205,
+	229,
+	253,
+	296,
+	350,
+	406,
+	469,
+	491,
+	527,
+	572,
+	584,
+	630,
+	666,
+	711,
+	763
 };
 
-static unsigned long big_capacity[BIG_NFREQS][2] = {
-	{0, 149},
-	{149, 197},
-	{197, 229},
-	{229, 253},
-	{253, 296},
-	{296, 350},
-	{350, 372},
-	{372, 400},
-	{400, 445},
-	{445, 495},
-	{495, 527},
-	{527, 572},
-	{572, 598},
-	{598, 630},
-	{630, 666},
-	{666, 711},
-	{711, 743},
-	{743, 780},
-	{780, 812},
-	{812, 850},
-	{850, 868},
-	{868, 914},
-	{914, 961},
-	{961, 988},
-	{988, 1024}
-};
-#endif
-
-/*
-freqs->loads: 	{307200, 71},
-				{422400, 71},
-				{480000, 71},
-				{556800, 70},
-				{652800, 70},
-				{729600, 77},
-				{844800, 77},
-				{960000, 81},
-				{1036800, 87},
-				{1113600, 87},
-				{1190400, 87},
-				{1228800, 99},
-				{1324800, 99},
-				{1401600, 99},
-				{1478400, 99},
-				{1593600, 99}
-*/
-static unsigned int little_target_loads[LITTLE_NFREQS] = {
-	71,
-	71,
-	71,
-	70,
-	70,
-	77,
-	77,
-	81,
-	87,
-	87,
-	87,
-	99,
-	99,
-	99,
-	99,
-	99
+static unsigned long little_down_target_capacity[LITTLE_NFREQS] = {
+	0,
+	149,
+	205,
+	229,
+	253,
+	296,
+	350,
+	406,
+	469,
+	491,
+	527,
+	572,
+	584,
+	630,
+	666,
+	711
 };
 
-/*
-freqs->loads: 	{307200, 65},
-				{403200, 65},
-				{480000, 65},
-				{556800, 65},
-				{652800, 65},
-				{729600, 65},
-				{806400, 75},
-				{883200, 75},
-				{940800, 75},
-				{1036800, 80},
-				{1113600, 99},
-				{1190400, 99},
-				{1248000, 99},
-				{1324800, 99},
-				{1401600, 99},
-				{1478400, 97},
-				{1555200, 97},
-				{1632000, 97},
-				{1708800, 97},
-				{1785600, 97},
-				{1824000, 97},
-				{1920000, 99},
-				{1996800, 99},
-				{2073600, 99},
-				{2150400, 99}
-*/
-static unsigned int big_target_loads[BIG_NFREQS] = {
-	65,
-	65,
-	65,
-	65,
-	65,
-	65,
-	75,
-	75,
-	75,
-	80,
-	99,
-	99,
-	99,
-	99,
-	99,
-	97,
-	97,
-	97,
-	97,
-	97,
-	97,
-	99,
-	99,
-	99,
-	99
+static unsigned long big_up_target_capacity[BIG_NFREQS] = {
+	149,
+	197,
+	229,
+	253,
+	296,
+	350,
+	372,
+	400,
+	445,
+	495,
+	527,
+	572,
+	598,
+	630,
+	666,
+	711,
+	743,
+	780,
+	812,
+	850,
+	868,
+	914,
+	961,
+	988,
+	1024
+};
+
+static unsigned long big_down_target_capacity[BIG_NFREQS] = {
+	0,
+	149,
+	197,
+	229,
+	253,
+	296,
+	350,
+	372,
+	400,
+	445,
+	495,
+	527,
+	572,
+	598,
+	630,
+	666,
+	711,
+	743,
+	780,
+	812,
+	850,
+	868,
+	914,
+	961,
+	988
+};
+
+static unsigned int little_up_target_frequency_delay[LITTLE_NFREQS] = {
+	0,
+	0,
+	0,
+	0,
+	0,
+	0,
+	0,
+	0,
+	0,
+	0,
+	0,
+	0,
+	0,
+	0,
+	0,
+	0
+};
+
+static unsigned int little_down_target_frequency_delay[LITTLE_NFREQS] = {
+	0,
+	0,
+	0,
+	0,
+	0,
+	0,
+	0,
+	0,
+	0,
+	0,
+	0,
+	0,
+	0,
+	0,
+	0,
+	0
+};
+
+static unsigned int big_up_target_frequency_delay[BIG_NFREQS] = {
+	0,
+	0,
+	0,
+	0,
+	0,
+	0,
+	0,
+	0,
+	0,
+	0,
+	0,
+	0,
+	0,
+	0,
+	0,
+	0,
+	0,
+	0,
+	0,
+	0,
+	0,
+	0,
+	0,
+	0,
+	0
+};
+
+static unsigned int big_down_target_frequency_delay[BIG_NFREQS] = {
+	0,
+	0,
+	0,
+	0,
+	0,
+	0,
+	0,
+	0,
+	0,
+	0,
+	0,
+	0,
+	0,
+	0,
+	0,
+	0,
+	0,
+	0,
+	0,
+	0,
+	0,
+	0,
+	0,
+	0,
+	0
 };
 
 /************************ Governor internals ***********************/
@@ -303,21 +340,39 @@ static bool acgov_should_update_freq(struct acgov_policy *sg_policy, u64 time)
 static bool acgov_up_down_rate_limit(struct acgov_policy *sg_policy, u64 time,
 				     unsigned int next_freq)
 {
+	struct cpufreq_policy *policy = sg_policy->policy;
+	struct acgov_tunables *tunables = sg_policy->tunables;
 	s64 delta_ns;
+	s64 up_target_frequency_delay_ns = 0, down_target_frequency_delay_ns = 0;
+	unsigned long flags;
+#ifdef CONFIG_MSM_TRACK_FREQ_TARGET_INDEX
+	int index = policy->cur_index;
+#else
+	int index = cpufreq_frequency_table_get_index(policy, policy->cur);
+#endif
 
 	delta_ns = time - sg_policy->last_freq_update_time;
 #ifdef CONFIG_STATE_NOTIFIER
 	if (state_suspended) {
 		if (delta_ns < DEFAULT_RATE_LIMIT_SUSP_NS)
 			return true;
+	} else if (index >= 0
+				&& tunables->up_target_frequency_delay
+				&& tunables->down_target_frequency_delay) {
+		spin_lock_irqsave(&tunables->target_frequency_delay_lock, flags);
+		up_target_frequency_delay_ns =
+			tunables->up_target_frequency_delay[index] * NSEC_PER_USEC;
+		down_target_frequency_delay_ns =
+			tunables->down_target_frequency_delay[index] * NSEC_PER_USEC;
+		spin_unlock_irqrestore(&tunables->target_frequency_delay_lock, flags);
 	}
 #endif
 	if (next_freq > sg_policy->next_freq &&
-	    delta_ns < sg_policy->up_rate_delay_ns)
+	    delta_ns < (sg_policy->up_rate_delay_ns + up_target_frequency_delay_ns))
 			return true;
 
 	if (next_freq < sg_policy->next_freq &&
-	    delta_ns < sg_policy->down_rate_delay_ns)
+	    delta_ns < (sg_policy->down_rate_delay_ns + down_target_frequency_delay_ns))
 			return true;
 
 	return false;
@@ -388,66 +443,6 @@ static unsigned int resolve_target_freq(struct cpufreq_policy *policy,
 	return target_freq;
 }
 
-#ifdef CONFIG_MACH_MSM8996_H1
-static void get_target_capacity(unsigned int cpu, int index,
-					unsigned long *down_cap, unsigned long *up_cap)
-{
-	if (cpu < 2) {
-		*down_cap = little_capacity[index][0];
-		*up_cap = little_capacity[index][1];
-	} else {
-		*down_cap = big_capacity[index][0];
-		*up_cap = big_capacity[index][1];
-	}
-}
-
-static unsigned int find_next_capacity(unsigned int cpu, int index,
-										unsigned long util, bool isup)
-{
-	unsigned int i, new_index;
-	if (isup) {
-		if (util >=  ((cpu < 2) ? little_capacity[LITTLE_NFREQS][1] : 
-							big_capacity[BIG_NFREQS][1])) {
-			new_index = (cpu < 2) ? LITTLE_NFREQS : BIG_NFREQS;
-		}
-		for (i=index; i <= ((cpu < 2) ? LITTLE_NFREQS : BIG_NFREQS); i++) {
-				if (util <= ((cpu < 2) ? little_capacity[i][1] : big_capacity[i][1])) {
-					new_index = i;
-					break;
-				}
-		}
-	} else {
-			for (i=index; index >= 0; i--) {
-				if (util >= ((cpu < 2) ? little_capacity[i][0] : big_capacity[i][0])) {
-					new_index = i;
-					break;
-				}
-			}
-	}
-	return new_index;
-}
-
-#else
-static void get_target_load(struct cpufreq_policy *policy, int index,
-					unsigned int *down_load, unsigned int *up_load)
-{
-	struct cpufreq_frequency_table *table;
-	int i = 0;
-
-	if (!policy)
-		return;
-
-	table = policy->freq_table;
-	for (i = (index - 1); i >= 0; i--) {
-		if (table[i].frequency != CPUFREQ_ENTRY_INVALID) {
-			*down_load = clamp_val((table[i].frequency * 100) / policy->max, 0, 100);
-			break;
-		}
-	}
-	*up_load = clamp_val((policy->cur * 100) / policy->max, 0, 100);
-}
-#endif
-
 /**
  * get_next_freq - Compute a new frequency for a given cpufreq policy.
  * @sg_policy: schedalucard policy object to compute the new frequency for.
@@ -466,16 +461,9 @@ static unsigned int get_next_freq(struct acgov_policy *sg_policy, unsigned long 
 	int pump_inc_step = tunables->pump_inc_step;
 	int pump_dec_step = tunables->pump_dec_step;
 	unsigned int next_freq = CPUFREQ_ENTRY_INVALID;
-#ifdef CONFIG_MACH_MSM8996_H1
 	unsigned long down_cap = 0, up_cap = 0;
 	unsigned long cur_util =
-			util + ((util * tunables->boost_perc) / 100);
-	unsigned int cur_load =	(cur_util * 100) / max;
-#else
-	unsigned int cur_load =
-		(util * (100 + tunables->boost_perc)) / max;
-#endif
-	unsigned int up_load = 0, down_load = 200;
+		util + ((util * tunables->boost_perc) / 100);
 	unsigned long flags;
 	int fr_index = -1;
 #ifdef CONFIG_MSM_TRACK_FREQ_TARGET_INDEX
@@ -493,52 +481,24 @@ static unsigned int get_next_freq(struct acgov_policy *sg_policy, unsigned long 
 		if (tunables->freq_responsiveness_jump)
 			fr_index = tunables->freq_responsiveness_index;			
 	}
-#ifdef CONFIG_MACH_MSM8996_H1
-	get_target_capacity(policy->cpu, index, &down_cap, &up_cap);
-	if (tunables->use_target_loads
-		&& tunables->target_loads) {
-		spin_lock_irqsave(&tunables->target_loads_lock, flags);
-		up_load = tunables->target_loads[index];
-		spin_unlock_irqrestore(&tunables->target_loads_lock, flags);
-		down_load = up_load;
-	}
+	if (!tunables->up_target_capacity
+		|| !tunables->down_target_capacity)
+		return next_freq;
+
+	spin_lock_irqsave(&tunables->target_capacity_lock, flags);
+	up_cap = tunables->up_target_capacity[index];
+	down_cap = tunables->down_target_capacity[index];
+	spin_unlock_irqrestore(&tunables->target_capacity_lock, flags);
+
 	if (cur_util >= up_cap
-		&& policy->cur < policy->max 
-		&& cur_load >= up_load) {
-		if (tunables->energy_aware_mode == 1)
-			index = find_next_capacity(policy->cpu, 
-																		index, cur_util, true);
-		next_freq = resolve_target_freq(policy,
-			index, fr_index, pump_inc_step, true);
-	} else if (cur_util < down_cap
-		&& policy->cur > policy->min
-		&& cur_load < down_load ) {
-		if (tunables->energy_aware_mode == 1)
-			index = find_next_capacity(policy->cpu, 
-																		index, cur_util, false);
-		next_freq = resolve_target_freq(policy,
-			index, fr_index, pump_dec_step, false);
-	}
-#else
-	if (tunables->use_target_loads
-		&& tunables->target_loads) {
-		spin_lock_irqsave(&tunables->target_loads_lock, flags);
-		up_load = tunables->target_loads[index];
-		spin_unlock_irqrestore(&tunables->target_loads_lock, flags);
-		down_load = up_load;
-	} else {
-		get_target_load(policy, index, &down_load, &up_load);
-	}
-	if (cur_load >= up_load
 		&& policy->cur < policy->max) {
 		next_freq = resolve_target_freq(policy,
 			index, fr_index, pump_inc_step, true);
-	} else if (cur_load < down_load
+	} else if (cur_util < down_cap
 		&& policy->cur > policy->min) {
 		next_freq = resolve_target_freq(policy,
 			index, fr_index, pump_dec_step, false);
 	}
-#endif
 #ifndef CONFIG_MSM_TRACK_FREQ_TARGET_INDEX
 skip:
 #endif
@@ -890,27 +850,8 @@ static ssize_t eval_busy_for_freq_show(struct gov_attr_set *attr_set,
 	return sprintf(buf, "%u\n", tunables->eval_busy_for_freq);
 }
 
-#ifdef CONFIG_MACH_MSM8996_H1
-/* energy_aware_mode */
-static ssize_t energy_aware_mode_show(struct gov_attr_set *attr_set, char *buf)
-{
-	struct acgov_tunables *tunables = to_acgov_tunables(attr_set);
-
-	return sprintf(buf, "%u\n", tunables->energy_aware_mode);
-}
-#endif
-
-/* use_target_loads */
-static ssize_t use_target_loads_show(struct gov_attr_set *attr_set,
-					char *buf)
-{
-	struct acgov_tunables *tunables = to_acgov_tunables(attr_set);
-
-	return sprintf(buf, "%u\n", tunables->use_target_loads);
-}
-
-/* target_loads */
-static ssize_t target_loads_show(struct gov_attr_set *attr_set,
+/* up_target_capacity */
+static ssize_t up_target_capacity_show(struct gov_attr_set *attr_set,
 					char *buf)
 {
 	struct acgov_tunables *tunables = to_acgov_tunables(attr_set);
@@ -918,14 +859,83 @@ static ssize_t target_loads_show(struct gov_attr_set *attr_set,
 	ssize_t ret = 0;
 	unsigned long flags;
 
-	if (!tunables->target_loads)
+	if (!tunables->up_target_capacity)
 		return -EINVAL;
 
-	spin_lock_irqsave(&tunables->target_loads_lock, flags);
-	for (i = 0; i < tunables->ntarget_loads; i++)
-		ret += sprintf(buf + ret, "%u%s", tunables->target_loads[i],
+	spin_lock_irqsave(&tunables->target_capacity_lock, flags);
+	for (i = 0; i < tunables->ntarget_capacity; i++)
+		ret += sprintf(buf + ret, "%lu%s", tunables->up_target_capacity[i],
 			       ":");
-	spin_unlock_irqrestore(&tunables->target_loads_lock, flags);
+	spin_unlock_irqrestore(&tunables->target_capacity_lock, flags);
+
+	sprintf(buf + ret - 1, "\n");
+
+	return ret;
+}
+
+/* down_target_capacity */
+static ssize_t down_target_capacity_show(struct gov_attr_set *attr_set,
+					char *buf)
+{
+	struct acgov_tunables *tunables = to_acgov_tunables(attr_set);
+	int i;
+	ssize_t ret = 0;
+	unsigned long flags;
+
+	if (!tunables->down_target_capacity)
+		return -EINVAL;
+
+	spin_lock_irqsave(&tunables->target_capacity_lock, flags);
+	for (i = 0; i < tunables->ntarget_capacity; i++)
+		ret += sprintf(buf + ret, "%lu%s", tunables->down_target_capacity[i],
+			       ":");
+	spin_unlock_irqrestore(&tunables->target_capacity_lock, flags);
+
+	sprintf(buf + ret - 1, "\n");
+
+	return ret;
+}
+
+/* up_target_frequency_delay */
+static ssize_t up_target_frequency_delay_show(struct gov_attr_set *attr_set,
+					char *buf)
+{
+	struct acgov_tunables *tunables = to_acgov_tunables(attr_set);
+	int i;
+	ssize_t ret = 0;
+	unsigned long flags;
+
+	if (!tunables->up_target_frequency_delay)
+		return -EINVAL;
+
+	spin_lock_irqsave(&tunables->target_frequency_delay_lock, flags);
+	for (i = 0; i < tunables->ntarget_frequency_delay; i++)
+		ret += sprintf(buf + ret, "%u%s", tunables->up_target_frequency_delay[i],
+			       ":");
+	spin_unlock_irqrestore(&tunables->target_frequency_delay_lock, flags);
+
+	sprintf(buf + ret - 1, "\n");
+
+	return ret;
+}
+
+/* down_target_frequency_delay */
+static ssize_t down_target_frequency_delay_show(struct gov_attr_set *attr_set,
+					char *buf)
+{
+	struct acgov_tunables *tunables = to_acgov_tunables(attr_set);
+	int i;
+	ssize_t ret = 0;
+	unsigned long flags;
+
+	if (!tunables->down_target_frequency_delay)
+		return -EINVAL;
+
+	spin_lock_irqsave(&tunables->target_frequency_delay_lock, flags);
+	for (i = 0; i < tunables->ntarget_frequency_delay; i++)
+		ret += sprintf(buf + ret, "%u%s", tunables->down_target_frequency_delay[i],
+			       ":");
+	spin_unlock_irqrestore(&tunables->target_frequency_delay_lock, flags);
 
 	sprintf(buf + ret - 1, "\n");
 
@@ -1153,45 +1163,8 @@ static ssize_t eval_busy_for_freq_store(struct gov_attr_set *attr_set,
 	return count;
 }
 
-#ifdef CONFIG_MACH_MSM8996_H1
-/* energy_aware_mode */
-static ssize_t energy_aware_mode_store(struct gov_attr_set *attr_set,
-					const char *buf, size_t count)
-{
-	struct acgov_tunables *tunables = to_acgov_tunables(attr_set);
-	int input;
-
-	if (kstrtouint(buf, 10, &input))
-		return -EINVAL;
-
-	if (input != 1)
-		input = 0;
-
-	if (input == tunables->energy_aware_mode)
-		return count;
-
-	tunables->energy_aware_mode = input;
-
-	return count;
-}
-#endif
-
-/* use_target_loads */
-static ssize_t use_target_loads_store(struct gov_attr_set *attr_set,
-					 const char *buf, size_t count)
-{
-	struct acgov_tunables *tunables = to_acgov_tunables(attr_set);
-	bool enable;
-
-	if (strtobool(buf, &enable))
-		return -EINVAL;
-
-	tunables->use_target_loads = enable;
-
-	return count;
-}
-
-static ssize_t target_loads_store(struct gov_attr_set *attr_set,
+/* up_target_capacity */
+static ssize_t up_target_capacity_store(struct gov_attr_set *attr_set,
 					 const char *buf, size_t count)
 {
 	struct acgov_tunables *tunables = to_acgov_tunables(attr_set);
@@ -1200,24 +1173,24 @@ static ssize_t target_loads_store(struct gov_attr_set *attr_set,
 	int ntokens = 1;
 	unsigned long flags;
 
-	if (!tunables->target_loads)
+	if (!tunables->up_target_capacity)
 		return -EINVAL;
 
 	cp = buf;
 	while ((cp = strpbrk(cp + 1, ":")))
 		ntokens++;
 
-	if (ntokens != tunables->ntarget_loads)
+	if (ntokens != tunables->ntarget_capacity)
 		return -EINVAL;
 
 	cp = buf;
-	spin_lock_irqsave(&tunables->target_loads_lock, flags);
+	spin_lock_irqsave(&tunables->target_capacity_lock, flags);
 	for (i = 0; i < ntokens; i++) {
-		if (sscanf(cp, "%u", &tunables->target_loads[i]) != 1) {
-			spin_unlock_irqrestore(&tunables->target_loads_lock, flags);
+		if (sscanf(cp, "%lu", &tunables->up_target_capacity[i]) != 1) {
+			spin_unlock_irqrestore(&tunables->target_capacity_lock, flags);
 			return -EINVAL;
 		} else {
-			pr_debug("CPU[%u], index[%d], val[%u]\n", tunables->cpu, i, tunables->target_loads[i]);
+			pr_debug("CPU[%u], index[%d], val[%lu]\n", tunables->cpu, i, tunables->up_target_capacity[i]);
 		}
 
 		cp = strpbrk(cp, ":");
@@ -1225,7 +1198,127 @@ static ssize_t target_loads_store(struct gov_attr_set *attr_set,
 			break;
 		cp++;
 	}
-	spin_unlock_irqrestore(&tunables->target_loads_lock, flags);
+	spin_unlock_irqrestore(&tunables->target_capacity_lock, flags);
+
+	return count;
+}
+
+/* down_target_capacity */
+static ssize_t down_target_capacity_store(struct gov_attr_set *attr_set,
+					 const char *buf, size_t count)
+{
+	struct acgov_tunables *tunables = to_acgov_tunables(attr_set);
+	const char *cp;
+	int i;
+	int ntokens = 1;
+	unsigned long flags;
+
+	if (!tunables->down_target_capacity)
+		return -EINVAL;
+
+	cp = buf;
+	while ((cp = strpbrk(cp + 1, ":")))
+		ntokens++;
+
+	if (ntokens != tunables->ntarget_capacity)
+		return -EINVAL;
+
+	cp = buf;
+	spin_lock_irqsave(&tunables->target_capacity_lock, flags);
+	for (i = 0; i < ntokens; i++) {
+		if (sscanf(cp, "%lu", &tunables->down_target_capacity[i]) != 1) {
+			spin_unlock_irqrestore(&tunables->target_capacity_lock, flags);
+			return -EINVAL;
+		} else {
+			pr_debug("CPU[%u], index[%d], val[%lu]\n", tunables->cpu, i, tunables->down_target_capacity[i]);
+		}
+
+		cp = strpbrk(cp, ":");
+		if (!cp)
+			break;
+		cp++;
+	}
+	spin_unlock_irqrestore(&tunables->target_capacity_lock, flags);
+
+	return count;
+}
+
+/* up_target_frequency_delay */
+static ssize_t up_target_frequency_delay_store(struct gov_attr_set *attr_set,
+					 const char *buf, size_t count)
+{
+	struct acgov_tunables *tunables = to_acgov_tunables(attr_set);
+	const char *cp;
+	int i;
+	int ntokens = 1;
+	unsigned long flags;
+
+	if (!tunables->up_target_frequency_delay)
+		return -EINVAL;
+
+	cp = buf;
+	while ((cp = strpbrk(cp + 1, ":")))
+		ntokens++;
+
+	if (ntokens != tunables->ntarget_frequency_delay)
+		return -EINVAL;
+
+	cp = buf;
+	spin_lock_irqsave(&tunables->target_frequency_delay_lock, flags);
+	for (i = 0; i < ntokens; i++) {
+		if (sscanf(cp, "%u", &tunables->up_target_frequency_delay[i]) != 1) {
+			spin_unlock_irqrestore(&tunables->target_frequency_delay_lock, flags);
+			return -EINVAL;
+		} else {
+			pr_debug("CPU[%u], index[%d], val[%u]\n", tunables->cpu, i, tunables->up_target_frequency_delay[i]);
+		}
+
+		cp = strpbrk(cp, ":");
+		if (!cp)
+			break;
+		cp++;
+	}
+	spin_unlock_irqrestore(&tunables->target_frequency_delay_lock, flags);
+
+	return count;
+}
+
+/* down_target_frequency_delay */
+static ssize_t down_target_frequency_delay_store(struct gov_attr_set *attr_set,
+					 const char *buf, size_t count)
+{
+	struct acgov_tunables *tunables = to_acgov_tunables(attr_set);
+	const char *cp;
+	int i;
+	int ntokens = 1;
+	unsigned long flags;
+
+	if (!tunables->down_target_frequency_delay)
+		return -EINVAL;
+
+	cp = buf;
+	while ((cp = strpbrk(cp + 1, ":")))
+		ntokens++;
+
+	if (ntokens != tunables->ntarget_frequency_delay)
+		return -EINVAL;
+
+	cp = buf;
+	spin_lock_irqsave(&tunables->target_frequency_delay_lock, flags);
+	for (i = 0; i < ntokens; i++) {
+		if (sscanf(cp, "%u", &tunables->down_target_frequency_delay[i]) != 1) {
+			spin_unlock_irqrestore(&tunables->target_frequency_delay_lock, flags);
+			return -EINVAL;
+		} else {
+			pr_debug("CPU[%u], index[%d], val[%u]\n", tunables->cpu, i, tunables->down_target_frequency_delay[i]);
+		}
+
+		cp = strpbrk(cp, ":");
+		if (!cp)
+			break;
+		cp++;
+	}
+	spin_unlock_irqrestore(&tunables->target_frequency_delay_lock, flags);
 
 	return count;
 }
@@ -1242,11 +1335,10 @@ static struct governor_attr pump_dec_step = __ATTR_RW(pump_dec_step);
 static struct governor_attr boost_perc = __ATTR_RW(boost_perc);
 static struct governor_attr iowait_boost_enable = __ATTR_RW(iowait_boost_enable);
 static struct governor_attr eval_busy_for_freq = __ATTR_RW(eval_busy_for_freq);
-#ifdef CONFIG_MACH_MSM8996_H1
-static struct governor_attr energy_aware_mode = __ATTR_RW(energy_aware_mode);
-#endif
-static struct governor_attr use_target_loads = __ATTR_RW(use_target_loads);
-static struct governor_attr target_loads = __ATTR_RW(target_loads);
+static struct governor_attr up_target_capacity = __ATTR_RW(up_target_capacity);
+static struct governor_attr down_target_capacity = __ATTR_RW(down_target_capacity);
+static struct governor_attr up_target_frequency_delay = __ATTR_RW(up_target_frequency_delay);
+static struct governor_attr down_target_frequency_delay = __ATTR_RW(down_target_frequency_delay);
 
 static struct attribute *acgov_attributes[] = {
 	&up_rate_limit_us.attr,
@@ -1261,11 +1353,10 @@ static struct attribute *acgov_attributes[] = {
 	&boost_perc.attr,
 	&iowait_boost_enable.attr,
 	&eval_busy_for_freq.attr,
-#ifdef CONFIG_MACH_MSM8996_H1
-	&energy_aware_mode.attr,
-#endif
-	&use_target_loads.attr,
-	&target_loads.attr,
+	&up_target_capacity.attr,
+	&down_target_capacity.attr,
+	&up_target_frequency_delay.attr,
+	&down_target_frequency_delay.attr,
 	NULL
 };
 
@@ -1389,8 +1480,10 @@ static void store_tunables_data(struct acgov_tunables *tunables,
 	ptunables->boost_perc = tunables->boost_perc;
 	ptunables->iowait_boost_enable = tunables->iowait_boost_enable;
 	ptunables->eval_busy_for_freq = tunables->eval_busy_for_freq;
-	ptunables->use_target_loads = tunables->use_target_loads;
-	tunables->target_loads = NULL;
+	tunables->up_target_capacity = NULL;
+	tunables->down_target_capacity = NULL;
+	tunables->up_target_frequency_delay = NULL;
+	tunables->down_target_frequency_delay = NULL;
 	pr_debug("tunables data saved for cpu[%u]\n", cpu);
 }
 
@@ -1407,13 +1500,22 @@ static void get_tunables_data(struct acgov_tunables *tunables,
 
 	tunables->cpu = cpu;
 	if (cpu < 2) {
-		tunables->target_loads = little_target_loads;
-		tunables->ntarget_loads = LITTLE_NFREQS;
+		tunables->up_target_capacity = little_up_target_capacity;
+		tunables->down_target_capacity = little_down_target_capacity;
+		tunables->ntarget_capacity = LITTLE_NFREQS;
+		tunables->up_target_frequency_delay = little_up_target_frequency_delay;
+		tunables->down_target_frequency_delay = little_down_target_frequency_delay;
+		tunables->ntarget_frequency_delay = LITTLE_NFREQS;
 	} else {
-		tunables->target_loads = big_target_loads;
-		tunables->ntarget_loads = BIG_NFREQS;
+		tunables->up_target_capacity = big_up_target_capacity;
+		tunables->down_target_capacity = big_down_target_capacity;
+		tunables->ntarget_capacity = BIG_NFREQS;
+		tunables->up_target_frequency_delay = big_up_target_frequency_delay;
+		tunables->down_target_frequency_delay = big_down_target_frequency_delay;
+		tunables->ntarget_frequency_delay = BIG_NFREQS;
 	}
-	spin_lock_init(&tunables->target_loads_lock);
+	spin_lock_init(&tunables->target_capacity_lock);
+	spin_lock_init(&tunables->target_frequency_delay_lock);
 	if (ptunables->freq_responsiveness > 0) {
 		tunables->up_rate_limit_us = ptunables->up_rate_limit_us;
 		tunables->down_rate_limit_us = ptunables->down_rate_limit_us;
@@ -1431,7 +1533,6 @@ static void get_tunables_data(struct acgov_tunables *tunables,
 		tunables->boost_perc = ptunables->boost_perc;
 		tunables->iowait_boost_enable = ptunables->iowait_boost_enable;
 		tunables->eval_busy_for_freq = ptunables->eval_busy_for_freq;
-		tunables->use_target_loads = ptunables->use_target_loads;
 		pr_debug("tunables data restored for cpu[%u]\n", cpu);
 		goto out;
 	}
@@ -1462,9 +1563,6 @@ initialize:
 	tunables->pump_inc_step = PUMP_INC_STEP;
 	tunables->pump_dec_step = PUMP_DEC_STEP;
 	tunables->boost_perc = BOOST_PERC;
-#ifdef CONFIG_MACH_MSM8996_H1
-	tunables->energy_aware_mode = ENERGY_AWARE_MODE;
-#endif
 	tunables->eval_busy_for_freq = 0;
 	pr_debug("tunables data initialized for cpu[%u]\n", cpu);
 out:
