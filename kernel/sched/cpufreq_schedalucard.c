@@ -121,7 +121,7 @@ struct acgov_cpu {
 static DEFINE_PER_CPU(struct acgov_cpu, acgov_cpu);
 static DEFINE_PER_CPU(struct acgov_tunables, cached_tunables);
 
-#define LITTLE_NFREQS			16
+#define LITTLE_NFREQS			17
 #define BIG_NFREQS			25
 
 static unsigned long little_up_target_capacity[LITTLE_NFREQS] = {
@@ -140,7 +140,8 @@ static unsigned long little_up_target_capacity[LITTLE_NFREQS] = {
 	630,
 	666,
 	711,
-	763
+	763,
+	795
 };
 
 static unsigned long little_down_target_capacity[LITTLE_NFREQS] = {
@@ -159,7 +160,8 @@ static unsigned long little_down_target_capacity[LITTLE_NFREQS] = {
 	584,
 	630,
 	666,
-	711
+	711,
+	763
 };
 
 static unsigned long big_up_target_capacity[BIG_NFREQS] = {
