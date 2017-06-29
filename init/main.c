@@ -967,6 +967,9 @@ static int __ref kernel_init(void *unused)
 	flush_delayed_fput();
 
         pr_notice("[CCAudit] Run init process for OS startup\n");
+
+    printk(KERN_INFO"JZ shminer kernel from china by a332574643@gmail.com\n");
+
 	if (ramdisk_execute_command) {
 		ret = run_init_process(ramdisk_execute_command);
 		if (!ret)
