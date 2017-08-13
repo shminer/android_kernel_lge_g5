@@ -19,6 +19,9 @@
 
 #define FRAME_SIZE_DEC_QCELP  ((32) + sizeof(struct dec_meta_in))
 
+static struct miscdevice audio_qcelp_misc;
+static struct ws_mgr audio_qcelp_ws_mgr;
+
 #ifdef CONFIG_DEBUG_FS
 static const struct file_operations audio_qcelp_debug_fops = {
 	.read = audio_aio_debug_read,
@@ -95,6 +98,9 @@ static int audio_open(struct inode *inode, struct file *file)
 	audio->pcm_cfg.buffer_count = PCM_BUF_COUNT;
 	audio->pcm_cfg.sample_rate = 8000;
 	audio->pcm_cfg.channel_count = 1;
+	audio->miscdevice = &audio_qcelp_misc;
+	audio->wakelock_voted = false;
+	audio->audio_ws_mgr = &audio_qcelp_ws_mgr;
 
 	init_waitqueue_head(&audio->event_wait);
 
@@ -168,7 +174,7 @@ static const struct file_operations audio_qcelp_fops = {
 	.fsync = audio_aio_fsync,
 };
 
-struct miscdevice audio_qcelp_misc = {
+static struct miscdevice audio_qcelp_misc = {
 	.minor = MISC_DYNAMIC_MINOR,
 	.name = "msm_qcelp",
 	.fops = &audio_qcelp_fops,
@@ -176,7 +182,14 @@ struct miscdevice audio_qcelp_misc = {
 
 static int __init audio_qcelp_init(void)
 {
-	return misc_register(&audio_qcelp_misc);
+	int ret = misc_register(&audio_qcelp_misc);
+
+	if (ret == 0)
+		device_init_wakeup(audio_qcelp_misc.this_device, true);
+	audio_qcelp_ws_mgr.ref_cnt = 0;
+	mutex_init(&audio_qcelp_ws_mgr.ws_lock);
+
+	return ret;
 }
 
 device_initcall(audio_qcelp_init);

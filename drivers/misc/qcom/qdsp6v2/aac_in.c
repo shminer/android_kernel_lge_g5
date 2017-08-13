@@ -420,7 +420,6 @@ static long aac_in_compat_ioctl(struct file *file, unsigned int cmd,
 	struct q6audio_in  *audio = file->private_data;
 	int rc = 0;
 
-	pr_info("%s: file input ioctl cmd = %d\n", __func__, cmd);
 	switch (cmd) {
 	case AUDIO_START:
 	case AUDIO_STOP: {
