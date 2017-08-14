@@ -282,17 +282,17 @@
 			reg = <0 0x85800000 0 0x3000000>;
 		};
 
-		peripheral_mem: peripheral_region@8ea00000 {
+		peripheral_mem: peripheral_region@8e900000 {
 			compatible = "removed-dma-pool";
 			no-map;
-			reg = <0 0x8ea00000 0 0x2d00000>;
+			reg = <0 0x8e900000 0 0x2d00000>;
 		};
 
 		adsp_mem: adsp_region {
 			compatible = "shared-dma-pool";
 			alloc-ranges = <0 0x00000000 0 0xffffffff>;
 			reusable;
-			alignment = <0 0x100000>;
+			alignment = <0 0x400000>;
 			size = <0 0x400000>;
 		};
 
@@ -315,7 +315,7 @@
 		modem_mem: modem_region@88800000 {
 			compatible = "removed-dma-pool";
 			no-map;
-			reg = <0 0x88800000 0 0x6200000>;
+			reg = <0 0x88800000 0 0x6100000>;
 		};
 
 		dfps_data_mem: dfps_data_mem@83400000 {
@@ -1872,6 +1872,7 @@
 		interrupts = <0 28 0>, <0 29 0>;
 		qcom,bark-time = <11000>;
 		qcom,pet-time = <10000>;
+		qcom,ipi-ping;
 		qcom,wakeup-enable;
 	};
 
@@ -2197,9 +2198,11 @@
 	qusb_phy1: qusb@7412000 {
 		compatible = "qcom,qusb2phy";
 		reg = <0x07412000 0x180>,
+			<0x076f8800 0x400>,
 			<0x0007024c 0x4>,
 			<0x00388014 0x4>;
 		reg-names = "qusb_phy_base",
+			"qscratch_base",
 			"tune2_efuse_addr",
 			"ref_clk_addr";
 		vdd-supply = <&pm8994_s2_corner>;
@@ -2570,8 +2573,6 @@
 		qcom,use-sw-aes-xts-algo;
 		qcom,use-sw-aes-ccm-algo;
 		qcom,use-sw-ahash-algo;
-		qcom,use-sw-hmac-algo;
-		qcom,use-sw-aead-algo;
 	};
 
 	qcom_cedev: qcedev@660000 {
@@ -3585,11 +3586,6 @@
 
 	qcom,msm-adsprpc-mem {
 		compatible = "qcom,msm-adsprpc-mem-region";
-		memory-region = <&adsp_mem>;
-	};
-
-	qcom,msm-mdsprpc-mem {
-		compatible = "qcom,msm-mdsprpc-mem-region";
 		memory-region = <&adsp_mem>;
 	};
 

@@ -241,7 +241,8 @@ err_invalid_input:
 	return ret;
 }
 
-static struct msm_smem *get_same_fd_buffer(struct msm_vidc_inst *inst, int fd)
+static struct msm_smem *get_same_fd_buffer(struct msm_vidc_list *buf_list,
+							int fd)
 {
 	struct buffer_info *temp;
 	struct msm_smem *same_fd_handle = NULL;
@@ -251,18 +252,16 @@ static struct msm_smem *get_same_fd_buffer(struct msm_vidc_inst *inst, int fd)
 	if (!fd)
 		return NULL;
 
-	if (!inst || fd < 0) {
-		dprintk(VIDC_ERR, "%s: Invalid input\n", __func__);
+	if (!buf_list || fd < 0) {
+		dprintk(VIDC_ERR, "Invalid input\n");
 		goto err_invalid_input;
 	}
 
-	mutex_lock(&inst->registeredbufs.lock);
-	list_for_each_entry(temp, &inst->registeredbufs.list, list) {
+	mutex_lock(&buf_list->lock);
+	list_for_each_entry(temp, &buf_list->list, list) {
 		for (i = 0; i < min(temp->num_planes, VIDEO_MAX_PLANES); i++) {
-			bool ion_hndl_matches = temp->handle[i] ?
-				msm_smem_compare_buffers(inst->mem_client, fd,
-				temp->handle[i]->smem_priv) : false;
-			if (ion_hndl_matches && temp->mapped[i])  {
+			if (temp->fd[i] == fd &&
+				temp->handle[i] && temp->mapped[i])  {
 				temp->same_fd_ref[i]++;
 				dprintk(VIDC_INFO,
 				"Found same fd buffer\n");
@@ -273,7 +272,7 @@ static struct msm_smem *get_same_fd_buffer(struct msm_vidc_inst *inst, int fd)
 		if (same_fd_handle)
 			break;
 	}
-	mutex_unlock(&inst->registeredbufs.lock);
+	mutex_unlock(&buf_list->lock);
 
 err_invalid_input:
 	return same_fd_handle;
@@ -486,8 +485,9 @@ int map_and_register_buf(struct msm_vidc_inst *inst, struct v4l2_buffer *b)
 			goto exit;
 		}
 
-		same_fd_handle = get_same_fd_buffer(
-				inst, b->m.planes[i].reserved[0]);
+		same_fd_handle = i ? get_same_fd_buffer(
+				&inst->registeredbufs,
+				b->m.planes[i].reserved[0]) : NULL;
 
 		populate_buf_info(binfo, b, i);
 		if (same_fd_handle) {
@@ -909,7 +909,8 @@ int msm_vidc_dqbuf(void *instance, struct v4l2_buffer *b)
 
 	for (i = b->length - 1; i >= 0 ; i--) {
 		if (EXTRADATA_IDX(b->length) &&
-			i == EXTRADATA_IDX(b->length)) {
+			(i == EXTRADATA_IDX(b->length)) &&
+			!b->m.planes[i].m.userptr) {
 			continue;
 		}
 		buffer_info = device_to_uvaddr(&inst->registeredbufs,

@@ -3897,6 +3897,7 @@ int msm_comm_try_get_bufreqs(struct msm_vidc_inst *inst)
 	dprintk(VIDC_PROF, "Input buffers: %d, Output buffers: %d\n",
 			inst->buff_req.buffer[0].buffer_count_actual,
 			inst->buff_req.buffer[1].buffer_count_actual);
+
 	return rc;
 }
 
