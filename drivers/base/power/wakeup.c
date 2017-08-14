@@ -17,8 +17,15 @@
 #include <linux/types.h>
 #include <linux/wakeup_reason.h>
 #include <linux/moduleparam.h>
-#include <linux/display_state.h>
 #include <trace/events/power.h>
+#include <linux/moduleparam.h>
+
+static bool enable_wlan_rx_wake_ws = true;
+module_param(enable_wlan_rx_wake_ws, bool, 0644);
+static bool enable_wlan_ctrl_wake_ws = true;
+module_param(enable_wlan_ctrl_wake_ws, bool, 0644);
+static bool enable_wlan_wake_ws = true;
+module_param(enable_wlan_wake_ws, bool, 0644);
 
 #include "power.h"
 
@@ -32,9 +39,9 @@ static bool enable_wlan_wow_wl_ws = false;
 module_param(enable_wlan_wow_wl_ws, bool, 0644);
 static bool enable_wlan_ws = false;
 module_param(enable_wlan_ws, bool, 0644);
-static bool enable_timerfd_ws = false;
+static bool enable_timerfd_ws = true;
 module_param(enable_timerfd_ws, bool, 0644);
-static bool enable_netlink_ws = false;
+static bool enable_netlink_ws = true;
 module_param(enable_netlink_ws, bool, 0644);
 static bool enable_netmgr_wl_ws = false;
 module_param(enable_netmgr_wl_ws, bool, 0644);
@@ -468,39 +475,6 @@ static void wakeup_source_deactivate(struct wakeup_source *ws)
 		wake_up(&wakeup_count_wait_queue);
 }
 
-static bool wakeup_source_blocker(struct wakeup_source *ws)
-{
-	unsigned int wslen = 0;
-
-	if (ws) {
-		wslen = strlen(ws->name);
-
-		if ((!enable_ipa_ws && !strncmp(ws->name, "IPA_WS", wslen)) ||
-			(!enable_wlan_extscan_wl_ws &&
-				!strncmp(ws->name, "wlan_extscan_wl", wslen)) ||
-			(!enable_qcom_rx_wakelock_ws &&
-				!strncmp(ws->name, "qcom_rx_wakelock", wslen)) ||
-			(!enable_wlan_ws &&
-				!strncmp(ws->name, "wlan", wslen)) ||
-			(!enable_netmgr_wl_ws &&
-				!strncmp(ws->name, "netmgr_wl", wslen)) ||
-			(!enable_timerfd_ws &&
-				!strncmp(ws->name, "[timerfd]", wslen)) ||
-			(!enable_netlink_ws &&
-				!strncmp(ws->name, "NETLINK", wslen))) {
-			if (ws->active) {
-				wakeup_source_deactivate(ws);
-				pr_info("forcefully deactivate wakeup source: %s\n",
-					ws->name);
-			}
-
-			return true;
-		}
-	}
-
-	return false;
-}
-
 /*
  * The functions below use the observation that each wakeup event starts a
  * period in which the system should not be suspended.  The moment this period
@@ -541,6 +515,36 @@ static void wakeup_source_activate(struct wakeup_source *ws)
 {
 	unsigned int cec;
 
+	if (!enable_wlan_rx_wake_ws && !strcmp(ws->name, "wlan_rx_wake"))
+                return;
+
+	if (!enable_wlan_ctrl_wake_ws && !strcmp(ws->name, "wlan_ctrl_wake"))
+                return;
+
+	if (!enable_wlan_wake_ws && !strcmp(ws->name, "wlan_wake"))
+                return;
+
+	if ((!enable_ipa_ws && !strncmp(ws->name, "IPA_WS", 6)) ||
+		(!enable_wlan_extscan_wl_ws &&
+			!strncmp(ws->name, "wlan_extscan_wl", 15)) ||
+		(!enable_qcom_rx_wakelock_ws &&
+			!strncmp(ws->name, "qcom_rx_wakelock", 16)) ||
+		(!enable_wlan_wow_wl_ws &&
+                        !strncmp(ws->name, "wlan_wow_wl", 11)) ||
+		(!enable_wlan_ws &&
+                        !strncmp(ws->name, "wlan", 4)) ||
+		(!enable_timerfd_ws &&
+                        !strncmp(ws->name, "[timerfd]", 9)) ||
+		(!enable_netlink_ws &&
+                        !strncmp(ws->name, "NETLINK", 7)) ||
+		(!enable_netmgr_wl_ws &&
+                        !strncmp(ws->name, "netmgr_wl", 9))) {
+		if (ws->active)
+			wakeup_source_deactivate(ws);
+
+		return;
+	}
+
 	/*
 	 * active wakeup source should bring the system
 	 * out of PM_SUSPEND_FREEZE state
@@ -565,15 +569,13 @@ static void wakeup_source_activate(struct wakeup_source *ws)
  */
 static void wakeup_source_report_event(struct wakeup_source *ws)
 {
-	if (!wakeup_source_blocker(ws)) {
-		ws->event_count++;
-		/* This is racy, but the counter is approximate anyway. */
-		if (events_check_enabled)
-			ws->wakeup_count++;
+	ws->event_count++;
+	/* This is racy, but the counter is approximate anyway. */
+	if (events_check_enabled)
+		ws->wakeup_count++;
 
-		if (!ws->active)
-			wakeup_source_activate(ws);
-	}
+	if (!ws->active)
+		wakeup_source_activate(ws);
 }
 
 /**
@@ -790,10 +792,6 @@ void pm_print_active_wakeup_sources(void)
 	int active = 0;
 	struct wakeup_source *last_activity_ws = NULL;
 
-	// kinda pointless to force this routine during screen on
-	if (is_display_on())
-		return;
-
 	rcu_read_lock();
 
 #ifdef CONFIG_LGE_PM_DEBUG
@@ -821,9 +819,7 @@ void pm_print_active_wakeup_sources(void)
 	list_for_each_entry_rcu(ws, &wakeup_sources, entry) {
 		if (ws->active) {
 			pr_info("active wakeup source: %s\n", ws->name);
-
-			if (!wakeup_source_blocker(ws))
-				active = 1;
+			active = 1;
 		} else if (!active &&
 			   (!last_activity_ws ||
 			    ktime_to_ns(ws->last_time) >
