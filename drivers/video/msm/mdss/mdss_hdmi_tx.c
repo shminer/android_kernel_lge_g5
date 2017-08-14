@@ -22,7 +22,6 @@
 #include <linux/types.h>
 #include <linux/hdcp_qseecom.h>
 #include <linux/clk.h>
-#include <linux/slimport.h>
 
 #define REG_DUMP 0
 
@@ -352,10 +351,6 @@ static void hdmi_tx_audio_setup(struct hdmi_tx_ctrl *hdmi_ctrl)
 
 static inline u32 hdmi_tx_is_dvi_mode(struct hdmi_tx_ctrl *hdmi_ctrl)
 {
-#ifdef CONFIG_SLIMPORT_CTYPE
-	if (!is_slimport_vga())
-		return 0;
-#endif
 #ifdef NO_USE // CONFIG_LGE_DP_ANX7688
 	if (rx_get_cable_type() != VGA_TYPE)
 		return 0;
@@ -426,11 +421,8 @@ static inline void hdmi_tx_send_cable_notification(
 static inline void hdmi_tx_set_audio_switch_node(
 	struct hdmi_tx_ctrl *hdmi_ctrl, int val)
 {
-#ifdef AUDIO_BLOCK_FOR_DVI
-	if (hdmi_ctrl && hdmi_ctrl->audio_ops.notify && !hdmi_tx_is_dvi_mode(hdmi_ctrl))
-#else // original
-	if (hdmi_ctrl && hdmi_ctrl->audio_ops.notify)
-#endif
+	if (hdmi_ctrl && hdmi_ctrl->audio_ops.notify &&
+		!hdmi_tx_is_dvi_mode(hdmi_ctrl))
 		hdmi_ctrl->audio_ops.notify(hdmi_ctrl->audio_data, val);
 }
 
@@ -710,9 +702,6 @@ static int hdmi_tx_update_pixel_clk(struct hdmi_tx_ctrl *hdmi_ctrl)
 	}
 
 	power_data->clk_config->rate = pinfo->clk_rate;
-
-	if (pinfo->out_format == MDP_Y_CBCR_H2V2)
-		power_data->clk_config->rate /= 2;
 
 	DEV_DBG("%s: rate %ld\n", __func__, power_data->clk_config->rate);
 
@@ -1528,6 +1517,8 @@ static void hdmi_tx_hdcp_cb_work(struct work_struct *work)
 		return;
 	}
 
+	mutex_lock(&hdmi_ctrl->tx_lock);
+
 	switch (hdmi_ctrl->hdcp_status) {
 	case HDCP_STATE_AUTHENTICATED:
 		hdmi_ctrl->auth_state = true;
@@ -1564,7 +1555,6 @@ static void hdmi_tx_hdcp_cb_work(struct work_struct *work)
 				DEV_ERR("%s: HDCP reauth failed. rc=%d\n",
 					__func__, rc);
 		} else {
-			hdmi_tx_set_audio_switch_node(hdmi_ctrl, 0);
 			DEV_DBG("%s: Not reauthenticating. Cable not conn\n",
 				__func__);
 		}
@@ -1595,6 +1585,8 @@ static void hdmi_tx_hdcp_cb_work(struct work_struct *work)
 		break;
 		/* do nothing */
 	}
+
+	mutex_unlock(&hdmi_ctrl->tx_lock);
 }
 
 #ifndef CONFIG_SLIMPORT_COMMON
@@ -1734,7 +1726,7 @@ static int hdmi_tx_read_edid(struct hdmi_tx_ctrl *hdmi_ctrl)
 			check_sum += ebuf[ndx];
 
 		if (check_sum & 0xFF) {
-			DEV_ERR("%s: checksome mismatch\n", __func__);
+			DEV_ERR("%s: checksum mismatch\n", __func__);
 			ret = -EINVAL;
 			goto end;
 		}
@@ -2190,6 +2182,8 @@ static void hdmi_tx_hpd_int_work(struct work_struct *work)
 {
 	struct hdmi_tx_ctrl *hdmi_ctrl = NULL;
 	struct dss_io_data *io;
+	int rc = -EINVAL;
+	int retry = MAX_EDID_READ_RETRY;
 
 	hdmi_ctrl = container_of(work, struct hdmi_tx_ctrl, hpd_int_work);
 	if (!hdmi_ctrl) {
@@ -2228,7 +2222,10 @@ static void hdmi_tx_hpd_int_work(struct work_struct *work)
 					hdmi_ctrl->hdcp_data);
 		}
 
-		hdmi_tx_read_sink_info(hdmi_ctrl);
+		while (rc && retry--)
+			rc = hdmi_tx_read_sink_info(hdmi_ctrl);
+		if (!retry && rc)
+			pr_warn_ratelimited("%s: EDID read failed\n", __func__);
 
 		if (hdmi_tx_enable_power(hdmi_ctrl, HDMI_TX_DDC_PM, false))
 			DEV_ERR("%s: Failed to disable ddc power\n", __func__);
@@ -3069,8 +3066,8 @@ static int hdmi_tx_power_off(struct hdmi_tx_ctrl *hdmi_ctrl)
 	if (hdmi_ctrl->panel_ops.off)
 		hdmi_ctrl->panel_ops.off(pdata);
 
-	hdmi_ctrl->panel_power_on = false;
 	hdmi_tx_core_off(hdmi_ctrl);
+	hdmi_ctrl->panel_power_on = false;
 
 	if (hdmi_ctrl->hpd_off_pending || hdmi_ctrl->panel_suspend)
 		hdmi_tx_hpd_off(hdmi_ctrl);
@@ -3621,7 +3618,7 @@ static int hdmi_tx_init_switch_dev(struct hdmi_tx_ctrl *hdmi_ctrl)
 end:
 	return rc;
 }
-
+#define LGE_NULL_CRASH_PATCH
 static int hdmi_tx_hdcp_off(struct hdmi_tx_ctrl *hdmi_ctrl)
 {
 	int rc = 0;
@@ -3634,11 +3631,10 @@ static int hdmi_tx_hdcp_off(struct hdmi_tx_ctrl *hdmi_ctrl)
 	DEV_DBG("%s: Turning off HDCP\n", __func__);
 	hdmi_ctrl->hdcp_ops->hdmi_hdcp_off(
 		hdmi_ctrl->hdcp_data);
-
-	flush_delayed_work(&hdmi_ctrl->hdcp_cb_work);
-
+#ifdef LGE_NULL_CRASH_PATCH
+	cancel_delayed_work(&hdmi_ctrl->hdcp_cb_work);
+#endif
 	hdmi_ctrl->hdcp_ops = NULL;
-
 	rc = hdmi_tx_enable_power(hdmi_ctrl, HDMI_TX_DDC_PM,
 		false);
 	if (rc)
@@ -3718,9 +3714,6 @@ static void hdmi_tx_update_fps(struct hdmi_tx_ctrl *hdmi_ctrl)
 		DEV_DBG("%s: Dynamic fps not enabled\n", __func__);
 		return;
 	}
-
-	DEV_DBG("%s: current fps %d, new fps %d\n", __func__,
-		pinfo->current_fps, hdmi_ctrl->dynamic_fps);
 
 	if (hdmi_ctrl->dynamic_fps == pinfo->current_fps) {
 		DEV_DBG("%s: Panel is already at this FPS: %d\n",
@@ -3987,7 +3980,6 @@ static int hdmi_tx_event_handler(struct mdss_panel_data *panel_data,
 	/* UPDATE FPS is called from atomic context */
 	if (event == MDSS_EVENT_PANEL_UPDATE_FPS) {
 		hdmi_ctrl->dynamic_fps = (u32) (unsigned long)arg;
-		DEV_DBG("%s: fps %d\n", __func__, hdmi_ctrl->dynamic_fps);
 		queue_work(hdmi_ctrl->workq, &hdmi_ctrl->fps_work);
 		return rc;
 	}
