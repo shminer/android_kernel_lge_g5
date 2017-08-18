@@ -1096,9 +1096,8 @@ static int mdss_mdp_get_img(struct msmfb_data *img,
 		data->addr += data->offset;
 		data->len -= data->offset;
 
-		pr_debug("mem=%d ihdl=%pK buf=0x%pa len=0x%lx\n",
-			 img->memory_id, data->srcp_dma_buf, &data->addr,
-			 data->len);
+		pr_debug("mem=%d ihdl=%pK buf=0x%pa len=0x%lx\n", img->memory_id,
+			 data->srcp_dma_buf, &data->addr, data->len);
 	} else {
 		mdss_mdp_put_img(data, rotator, dir);
 		return ret ? : -EOVERFLOW;

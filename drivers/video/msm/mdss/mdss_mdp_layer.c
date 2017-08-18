@@ -1,4 +1,4 @@
-/* Copyright (c) 2012-2017, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2012-2016, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -467,7 +467,6 @@ static int __configure_pipe_params(struct msm_fb_data_type *mfd,
 	int ret = 0;
 	u32 left_lm_w = left_lm_w_from_mfd(mfd);
 	u32 flags;
-	bool is_right_blend = false;
 
 	struct mdss_mdp_mixer *mixer = NULL;
 	struct mdss_overlay_private *mdp5_data = mfd_to_mdp5_data(mfd);
@@ -477,7 +476,7 @@ static int __configure_pipe_params(struct msm_fb_data_type *mfd,
 	mixer = mdss_mdp_mixer_get(mdp5_data->ctl, mixer_mux);
 	pipe->src_fmt = mdss_mdp_get_format_params(layer->buffer.format);
 	if (!pipe->src_fmt || !mixer) {
-		pr_err("invalid layer format:%d or mixer:%pK\n",
+		pr_err("invalid layer format:%d or mixer:%p\n",
 				layer->buffer.format, pipe->mixer_left);
 		ret = -EINVAL;
 		goto end;
@@ -575,7 +574,6 @@ static int __configure_pipe_params(struct msm_fb_data_type *mfd,
 	 * staging, same pipe will be stagged on both layer mixers.
 	 */
 	if (mdata->has_src_split) {
-		is_right_blend = pipe->is_right_blend;
 		if (left_blend_pipe) {
 			if (pipe->priority <= left_blend_pipe->priority) {
 				pr_err("priority limitation. left:%d right%d\n",
@@ -585,7 +583,7 @@ static int __configure_pipe_params(struct msm_fb_data_type *mfd,
 				goto end;
 			} else {
 				pr_debug("pipe%d is a right_pipe\n", pipe->num);
-				is_right_blend = true;
+				pipe->is_right_blend = true;
 			}
 		} else if (pipe->is_right_blend) {
 			/*
@@ -594,7 +592,7 @@ static int __configure_pipe_params(struct msm_fb_data_type *mfd,
 			 */
 			mdss_mdp_mixer_pipe_unstage(pipe, pipe->mixer_left);
 			mdss_mdp_mixer_pipe_unstage(pipe, pipe->mixer_right);
-			is_right_blend = false;
+			pipe->is_right_blend = false;
 		}
 
 		if (is_split_lm(mfd) && __layer_needs_src_split(layer)) {
@@ -620,7 +618,6 @@ static int __configure_pipe_params(struct msm_fb_data_type *mfd,
 			}
 			pipe->src_split_req = false;
 		}
-		pipe->is_right_blend = is_right_blend;
 	}
 
 	pipe->multirect.mode = vinfo->multirect.mode;
@@ -1111,40 +1108,6 @@ end:
 }
 
 /*
- * __is_sd_state_valid() - validate secure display state
- *
- * This function checks if the current state of secrure display is valid,
- * based on the new settings.
- * For command mode panels, the sd state would be invalid if a non secure pipe
- * comes and one of the below condition is met:
- *	1) Secure Display is enabled for current client, and there is other
-	secure client.
- *	2) Secure Display is disabled for current client, and there is other
-	secure client.
- *	3) Secure pipes are already staged for the current client.
- * For other panels, the sd state would be invalid if a non secure pipe comes
- * and one of the below condition is met:
- *	1) Secure Display is enabled for current or other client.
- *	2) Secure pipes are already staged for the current client.
- *
- */
-static inline bool __is_sd_state_valid(uint32_t sd_pipes, uint32_t nonsd_pipes,
-	int panel_type, u32 sd_enabled)
-{
-	if (panel_type == MIPI_CMD_PANEL) {
-		if ((((mdss_get_sd_client_cnt() > 1) && sd_enabled) ||
-			(mdss_get_sd_client_cnt() && !sd_enabled) ||
-			sd_pipes)
-			&& nonsd_pipes)
-			return false;
-	} else {
-		if ((sd_pipes || mdss_get_sd_client_cnt()) && nonsd_pipes)
-			return false;
-	}
-	return true;
-}
-
-/*
  * __validate_secure_display() - validate secure display
  *
  * This function travers through used pipe list and checks if any pipe
@@ -1156,8 +1119,6 @@ static int __validate_secure_display(struct mdss_overlay_private *mdp5_data)
 {
 	struct mdss_mdp_pipe *pipe, *tmp;
 	uint32_t sd_pipes = 0, nonsd_pipes = 0;
-	int panel_type = mdp5_data->ctl->panel_data->panel_info.type;
-	int ret = 0;
 
 	mutex_lock(&mdp5_data->list_lock);
 	list_for_each_entry_safe(pipe, tmp, &mdp5_data->pipes_used, list) {
@@ -1171,21 +1132,14 @@ static int __validate_secure_display(struct mdss_overlay_private *mdp5_data)
 	pr_debug("pipe count:: secure display:%d non-secure:%d\n",
 		sd_pipes, nonsd_pipes);
 
-	mdp5_data->sd_transition_state = SD_TRANSITION_NONE;
-	if (!__is_sd_state_valid(sd_pipes, nonsd_pipes, panel_type,
-		mdp5_data->sd_enabled)) {
+	if ((sd_pipes || mdss_get_sd_client_cnt()) && nonsd_pipes) {
 		pr_err("non-secure layer validation request during secure display session\n");
 		pr_err(" secure client cnt:%d secure pipe cnt:%d non-secure pipe cnt:%d\n",
 			mdss_get_sd_client_cnt(), sd_pipes, nonsd_pipes);
-		ret = -EINVAL;
-	} else if (!mdp5_data->sd_enabled && sd_pipes) {
-			mdp5_data->sd_transition_state =
-				SD_TRANSITION_NON_SECURE_TO_SECURE;
-	} else if (mdp5_data->sd_enabled && !sd_pipes) {
-			mdp5_data->sd_transition_state =
-				SD_TRANSITION_SECURE_TO_NON_SECURE;
+		return -EINVAL;
+	} else {
+		return 0;
 	}
-	return ret;
 }
 
 /*
@@ -1939,20 +1893,16 @@ validate_exit:
 	mutex_lock(&mdp5_data->list_lock);
 	list_for_each_entry_safe(pipe, tmp, &mdp5_data->pipes_used, list) {
 		if (IS_ERR_VALUE(ret)) {
-			if (((pipe->ndx & rec_release_ndx[0]) &&
-						(pipe->multirect.num == 0)) ||
-					((pipe->ndx & rec_release_ndx[1]) &&
-					 (pipe->multirect.num == 1))) {
+			if ((pipe->ndx & rec_release_ndx[0]) ||
+			    (pipe->ndx & rec_release_ndx[1])) {
 				mdss_mdp_smp_unreserve(pipe);
 				pipe->params_changed = 0;
 				pipe->dirty = true;
 				if (!list_empty(&pipe->list))
 					list_del_init(&pipe->list);
 				mdss_mdp_pipe_destroy(pipe);
-			} else if (((pipe->ndx & rec_destroy_ndx[0]) &&
-						(pipe->multirect.num == 0)) ||
-					((pipe->ndx & rec_destroy_ndx[1]) &&
-					 (pipe->multirect.num == 1))) {
+			} else if ((pipe->ndx & rec_destroy_ndx[0]) ||
+				   (pipe->ndx & rec_destroy_ndx[1])) {
 				/*
 				 * cleanup/destroy list pipes should move back
 				 * to destroy list. Next/current kickoff cycle
@@ -1964,7 +1914,7 @@ validate_exit:
 			}
 		} else {
 			pipe->file = file;
-			pr_debug("file pointer attached with pipe is %pK\n",
+			pr_debug("file pointer attached with pipe is %p\n",
 				file);
 		}
 	}
@@ -1976,43 +1926,6 @@ end:
 	pr_debug("fb%d validated layers =%d\n", mfd->index, i);
 
 	return ret;
-}
-
-/*
- * __parse_frc_info() - parse frc info from userspace
- * @mdp5_data: mdss data per FB device
- * @input_frc: frc info from user space
- *
- * This function fills the FRC info of current device which will be used
- * during following kickoff.
- */
-static void __parse_frc_info(struct mdss_overlay_private *mdp5_data,
-	struct mdp_frc_info *input_frc)
-{
-	struct mdss_mdp_ctl *ctl = mdp5_data->ctl;
-	struct mdss_mdp_frc_fsm *frc_fsm = mdp5_data->frc_fsm;
-
-	if (input_frc->flags & MDP_VIDEO_FRC_ENABLE) {
-		struct mdss_mdp_frc_info *frc_info = &frc_fsm->frc_info;
-
-		if (!frc_fsm->enable) {
-			/* init frc_fsm when first entry */
-			mdss_mdp_frc_fsm_init_state(frc_fsm);
-			/* keep vsync on when FRC is enabled */
-			ctl->ops.add_vsync_handler(ctl,
-					&ctl->frc_vsync_handler);
-		}
-
-		frc_info->cur_frc.frame_cnt = input_frc->frame_cnt;
-		frc_info->cur_frc.timestamp = input_frc->timestamp;
-	} else if (frc_fsm->enable) {
-		/* remove vsync handler when FRC is disabled */
-		ctl->ops.remove_vsync_handler(ctl, &ctl->frc_vsync_handler);
-	}
-
-	frc_fsm->enable = input_frc->flags & MDP_VIDEO_FRC_ENABLE;
-
-	pr_debug("frc_enable=%d\n", frc_fsm->enable);
 }
 
 /*
@@ -2050,8 +1963,7 @@ int mdss_mdp_layer_pre_commit(struct msm_fb_data_type *mfd,
 	/* handle null commit */
 	if (!layer_count) {
 		__handle_free_list(mdp5_data, NULL, layer_count);
-		/* Check for secure state transition. */
-		return __validate_secure_display(mdp5_data);
+		return 0;
 	}
 
 	validate_info_list = kcalloc(layer_count, sizeof(*validate_info_list),
@@ -2118,9 +2030,6 @@ int mdss_mdp_layer_pre_commit(struct msm_fb_data_type *mfd,
 		pr_err("unable to start overlay %d (%d)\n", mfd->index, ret);
 		goto map_err;
 	}
-
-	if (commit->frc_info)
-		__parse_frc_info(mdp5_data, commit->frc_info);
 
 	ret = __handle_buffer_fences(mfd, commit, layer_list);
 

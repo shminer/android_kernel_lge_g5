@@ -1320,7 +1320,7 @@ int config_ppp_op_mode(struct ppp_blit_op *blit_op)
 		pr_debug("ROI(x %d,y %d, w  %d, h %d) ",
 			blit_op->bg.roi.x, blit_op->bg.roi.y,
 			blit_op->bg.roi.width, blit_op->bg.roi.height);
-		pr_debug("Addr %pK, Stride S0 %d Addr_P1 %pK, Stride S1 %d\n",
+		pr_debug("Addr %pK, Stride S0 %d	Addr_P1 %pK, Stride S1 %d\n",
 			blit_op->bg.p0,	blit_op->bg.stride0,
 			blit_op->bg.p1,	blit_op->bg.stride1);
 	}

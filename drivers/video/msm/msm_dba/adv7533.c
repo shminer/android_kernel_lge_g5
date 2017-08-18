@@ -508,25 +508,13 @@ static void adv7533_parse_vreg_dt(struct device *dev,
 		}
 		mp->vreg_config[i].disable_load = val_array[i];
 
-		/* post-on-sleep */
-		memset(val_array, 0, sizeof(u32) * dt_vreg_total);
-		rc = of_property_read_u32_array(of_node,
-				"qcom,post-on-sleep", val_array,
-						dt_vreg_total);
-		if (rc)
-			pr_warn("%s: error read post on sleep. rc=%d\n",
-					__func__, rc);
-		else
-			mp->vreg_config[i].post_on_sleep = val_array[i];
-
-		pr_info("%s: %s min=%d, max=%d, enable=%d disable=%d post-on-sleep=%d\n",
+		pr_debug("%s: %s min=%d, max=%d, enable=%d disable=%d\n",
 			__func__,
 			mp->vreg_config[i].vreg_name,
 			mp->vreg_config[i].min_voltage,
 			mp->vreg_config[i].max_voltage,
 			mp->vreg_config[i].enable_load,
-			mp->vreg_config[i].disable_load,
-			mp->vreg_config[i].post_on_sleep);
+			mp->vreg_config[i].disable_load);
 	}
 
 	devm_kfree(dev, val_array);
@@ -740,7 +728,7 @@ static void adv7533_notify_clients(struct msm_dba_device_info *dev,
 u32 adv7533_read_edid(struct adv7533 *pdata, u32 size, char *edid_buf)
 {
 	u32 ret = 0, read_size = size / 2;
-	u8 edid_addr = 0;
+	u8 edid_addr;
 	int ndx;
 
 	if (!pdata || !edid_buf)
@@ -1469,14 +1457,14 @@ exit:
 static int adv7533_video_on(void *client, bool on,
 	struct msm_dba_video_cfg *cfg, u32 flags)
 {
-	int ret = 0;
+	int ret = -EINVAL;
 	u8 lanes;
 	u8 reg_val = 0;
 	struct adv7533 *pdata = adv7533_get_platform_data(client);
 
 	if (!pdata || !cfg) {
 		pr_err("%s: invalid platform data\n", __func__);
-		return -EINVAL;
+		return ret;
 	}
 
 	mutex_lock(&pdata->ops_mutex);
