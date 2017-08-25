@@ -403,21 +403,11 @@ KBUILD_CPPFLAGS := -D__KERNEL__
 KBUILD_CFLAGS   := -Wall -Wundef -Wstrict-prototypes -Wno-trigraphs \
 		   -fno-strict-aliasing -fno-common \
 		   -Werror-implicit-function-declaration \
-		   -Wno-format-security -Wno-unused -Wno-maybe-uninitialized \
-                   -Wno-array-bounds -Wno-memset-transposed-args \
-                   -mcpu=cortex-a57.cortex-a53 -mtune=cortex-a57.cortex-a53 \
-                   -march=armv8-a \
-		   -mcpu=cortex-a57+crc+crypto -mtune=cortex-a57 \
-                   -fmodulo-sched -fmodulo-sched-allow-regmoves \
-                   -funswitch-loops -fpredictive-commoning -fgcse-after-reload \
-		   -fno-aggressive-loop-optimizations \
-		   -fno-delete-null-pointer-checks \
-		   $(GRAPHITE) \
-                   -std=gnu89
+		   -Wno-format-security \
+		   -std=gnu89
 
-# GCC 6.1 is too strict
-KBUILD_CFLAGS	+= -Wno-misleading-indentation -Wno-tautological-compare -pipe -fno-pic	   
-KBUILD_CFLAGS	+= $(GEN_OPT_FLAGS)
+# Optimization for Kryo
+KBUILD_CFLAGS	+= -mcpu=cortex-a57+crc+crypto
 
 # Snapdragon 820 doesn't need 835769/843419 erratum fixes
 # some toolchain enables those fixes automatically, so opt-out
