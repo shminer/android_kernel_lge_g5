@@ -3870,6 +3870,61 @@ init_freq_thread:
 	}
 }
 
+/* Ioctl override */
+static unsigned int c0_ioctl_user_max_freq_limit = 0;
+static unsigned int c0_ioctl_user_min_freq_limit = 0;
+static unsigned int c1_ioctl_user_max_freq_limit = 0;
+static unsigned int c1_ioctl_user_min_freq_limit = 0;
+
+module_param_named(c0_ioctl_user_max_freq_limit, 
+					c0_ioctl_user_max_freq_limit, uint, 0644);
+
+module_param_named(c0_ioctl_user_min_freq_limit, 
+					c0_ioctl_user_min_freq_limit, uint, 0644);
+
+module_param_named(c1_ioctl_user_max_freq_limit, 
+					c1_ioctl_user_max_freq_limit, uint, 0644);
+
+module_param_named(c1_ioctl_user_min_freq_limit, 
+					c1_ioctl_user_min_freq_limit, uint, 0644);
+
+static unsigned int msm_thermal_engine_ioctl_user_limit(uint32_t cpu, 
+									uint32_t freq, bool is_max)
+{
+	unsigned int out = 0;
+
+	if (is_max) {
+		if(cpu < 2)	{
+			if(!c0_ioctl_user_max_freq_limit)
+				return freq;
+			if(freq >= c0_ioctl_user_max_freq_limit)
+			out = c0_ioctl_user_max_freq_limit;
+		else
+			if(!c1_ioctl_user_max_freq_limit)
+				return freq;
+			if(freq <= c1_ioctl_user_max_freq_limit)
+			out = c1_ioctl_user_max_freq_limit;
+		}
+	else
+		if(cpu < 2)	{
+			if(!c0_ioctl_user_min_freq_limit)
+				return freq;
+			if(freq >= c0_ioctl_user_min_freq_limit)
+			out = c0_ioctl_user_min_freq_limit;
+		else
+			if(!c1_ioctl_user_min_freq_limit)
+				return freq;
+			if(freq <= c1_ioctl_user_min_freq_limit)
+			out = c1_ioctl_user_min_freq_limit;
+		}
+	}
+
+	dprintk("Thermal-engine ioctl is overrided, set cpu%u %sfreq to %u\n",
+			cpu, (is_max) ? "Max" : "Min", out);
+
+	return out;
+}
+
 int msm_thermal_get_freq_plan_size(uint32_t cluster, unsigned int *table_len)
 {
 	uint32_t i = 0;
@@ -4024,6 +4079,9 @@ int msm_thermal_set_cluster_freq(uint32_t cluster, uint32_t freq, bool is_max)
 		return -ENODEV;
 	}
 
+	dprintk("Userspace requested %s frequency %u for CPU%u\n",
+			(is_max) ? "Max" : "Min", freq, cluster);
+	
 	for (; i < core_ptr->entity_count; i++) {
 		cluster_ptr = &core_ptr->child_entity_ptr[i];
 		if (cluster_ptr->cluster_id != cluster)
@@ -4045,6 +4103,7 @@ int msm_thermal_set_cluster_freq(uint32_t cluster, uint32_t freq, bool is_max)
 	for_each_cpu_mask(i, cluster_ptr->cluster_cores) {
 		uint32_t *freq_ptr = (is_max) ? &cpus[i].user_max_freq
 					: &cpus[i].user_min_freq;
+		freq = msm_thermal_engine_ioctl_user_limit(i, freq, is_max);
 		if (*freq_ptr == freq)
 			continue;
 		notify = true;
@@ -4062,60 +4121,6 @@ int msm_thermal_set_cluster_freq(uint32_t cluster, uint32_t freq, bool is_max)
 	return ret;
 }
 
-/* Ioctl override */
-static unsigned int c0_ioctl_user_max_freq_limit = 0;
-static unsigned int c0_ioctl_user_min_freq_limit = 0;
-static unsigned int c1_ioctl_user_max_freq_limit = 0;
-static unsigned int c1_ioctl_user_min_freq_limit = 0;
-
-module_param_named(c0_ioctl_user_max_freq_limit, 
-					c0_ioctl_user_max_freq_limit, uint, 0644);
-
-module_param_named(c0_ioctl_user_min_freq_limit, 
-					c0_ioctl_user_min_freq_limit, uint, 0644);
-
-module_param_named(c1_ioctl_user_max_freq_limit, 
-					c1_ioctl_user_max_freq_limit, uint, 0644);
-
-module_param_named(c1_ioctl_user_min_freq_limit, 
-					c1_ioctl_user_min_freq_limit, uint, 0644);
-
-static unsigned int msm_thermal_engine_ioctl_user_limit(uint32_t cpu, 
-									uint32_t freq, bool is_max)
-{
-	unsigned int out = 0;
-
-	if (is_max) {
-		if(cpu < 2)	{
-			if(!c0_ioctl_user_max_freq_limit)
-				return freq;
-			if(freq >= c0_ioctl_user_max_freq_limit)
-			out = c0_ioctl_user_max_freq_limit;
-		else
-			if(!c1_ioctl_user_max_freq_limit)
-				return freq;
-			if(freq <= c1_ioctl_user_max_freq_limit)
-			out = c1_ioctl_user_max_freq_limit;
-		}
-	else
-		if(cpu < 2)	{
-			if(!c0_ioctl_user_min_freq_limit)
-				return freq;
-			if(freq >= c0_ioctl_user_min_freq_limit)
-			out = c0_ioctl_user_min_freq_limit;
-		else
-			if(!c1_ioctl_user_min_freq_limit)
-				return freq;
-			if(freq <= c1_ioctl_user_min_freq_limit)
-			out = c1_ioctl_user_min_freq_limit;
-		}
-	}
-
-	dprintk("Thermal-engine ioctl is overrided, set cpu%u %sfreq to %u\n",
-			cpu, (is_max) ? "Max" : "Min", out);
-
-	return out;
-}
 int msm_thermal_set_frequency(uint32_t cpu, uint32_t freq, bool is_max)
 {
 	int ret = 0;
