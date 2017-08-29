@@ -79,7 +79,7 @@
 #define HOTPLUG_RETRY_INTERVAL_MS 100
 #define UIO_VERSION "1.0"
 
-static unsigned debug = 1;
+static unsigned debug = 0;
 
 #define dprintk(msg...)		\
 do {				\
@@ -3897,25 +3897,37 @@ static unsigned int msm_thermal_engine_ioctl_user_limit(uint32_t cpu,
 		if(cpu < 2)	{
 			if(!c0_ioctl_user_max_freq_limit)
 				return freq;
-			if(freq >= c0_ioctl_user_max_freq_limit)
-			out = c0_ioctl_user_max_freq_limit;
-		else
+
+			if(freq < c0_ioctl_user_max_freq_limit)
+				out = c0_ioctl_user_max_freq_limit;
+			else
+				return freq;
+		}else{
 			if(!c1_ioctl_user_max_freq_limit)
 				return freq;
-			if(freq <= c1_ioctl_user_max_freq_limit)
-			out = c1_ioctl_user_max_freq_limit;
+
+			if(freq < c1_ioctl_user_max_freq_limit)
+				out = c1_ioctl_user_max_freq_limit;
+			else
+				return freq;
 		}
-	else
+	}else{
 		if(cpu < 2)	{
 			if(!c0_ioctl_user_min_freq_limit)
 				return freq;
-			if(freq >= c0_ioctl_user_min_freq_limit)
-			out = c0_ioctl_user_min_freq_limit;
-		else
+
+			if(freq > c0_ioctl_user_min_freq_limit)
+				out = c0_ioctl_user_min_freq_limit;
+			else
+			 	return freq;			
+		}else{
 			if(!c1_ioctl_user_min_freq_limit)
 				return freq;
-			if(freq <= c1_ioctl_user_min_freq_limit)
-			out = c1_ioctl_user_min_freq_limit;
+
+			if(freq > c1_ioctl_user_min_freq_limit)
+				out = c1_ioctl_user_min_freq_limit;
+			else
+			 	return freq;
 		}
 	}
 
@@ -4079,9 +4091,9 @@ int msm_thermal_set_cluster_freq(uint32_t cluster, uint32_t freq, bool is_max)
 		return -ENODEV;
 	}
 
-	dprintk("Userspace requested %s frequency %u for CPU%u\n",
-			(is_max) ? "Max" : "Min", freq, cluster);
-	
+	/*dprintk("Userspace requested %s frequency %u for CPU%u\n",
+			(is_max) ? "Max" : "Min", freq, cluster);*/
+
 	for (; i < core_ptr->entity_count; i++) {
 		cluster_ptr = &core_ptr->child_entity_ptr[i];
 		if (cluster_ptr->cluster_id != cluster)
