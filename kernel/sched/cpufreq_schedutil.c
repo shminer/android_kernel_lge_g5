@@ -687,7 +687,7 @@ initialize:
 		tunables->down_rate_limit_us *= lat;
 	}
 	tunables->eval_busy_for_freq = true;
-	tunables->iowait_boost_enable = true;
+	tunables->iowait_boost_enable = false;
 
 	pr_debug("tunables data initialized for cpu[%u]\n", cpu);
 out:
