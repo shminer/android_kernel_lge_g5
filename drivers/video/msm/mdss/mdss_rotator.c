@@ -1133,6 +1133,7 @@ static void mdss_rotator_release_from_work_distribution(
 		bool free_perf = false;
 		u32 wb_idx = entry->queue->hw->wb_id;
 
+		mutex_lock(&mgr->lock);
 		mutex_lock(&entry->perf->work_dis_lock);
 		if (entry->perf->work_distribution[wb_idx])
 			entry->perf->work_distribution[wb_idx]--;
@@ -1158,6 +1159,7 @@ static void mdss_rotator_release_from_work_distribution(
 			entry->perf = NULL;
 			MDSS_XLOG(mgr->rot_enable_clk_cnt, 0x2);
 		}
+		mutex_unlock(&mgr->lock);
 	}
 }
 
@@ -2057,7 +2059,6 @@ static int mdss_rotator_close_session(struct mdss_rot_mgr *mgr,
 	list_del_init(&perf->list);
 	mutex_unlock(&perf->work_dis_lock);
 	mutex_unlock(&private->perf_lock);
-	mutex_unlock(&mgr->lock);
 
 	if (offload_release_work)
 		goto done;
@@ -2072,6 +2073,7 @@ static int mdss_rotator_close_session(struct mdss_rot_mgr *mgr,
 done:
 	pr_debug("Closed session id:%u", id);
 	ATRACE_END(__func__);
+	mutex_unlock(&mgr->lock);
 	return 0;
 }
 
