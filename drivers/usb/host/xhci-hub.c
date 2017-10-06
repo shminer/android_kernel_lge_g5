@@ -20,7 +20,7 @@
  * Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
  */
 
-#include <linux/gfp.h>
+
 #include <linux/slab.h>
 #include <asm/unaligned.h>
 
@@ -276,6 +276,9 @@ static int xhci_stop_device(struct xhci_hcd *xhci, int slot_id, int suspend)
 
 	ret = 0;
 	virt_dev = xhci->devs[slot_id];
+	if (!virt_dev)
+		return -ENODEV;
+
 	cmd = xhci_alloc_command(xhci, false, true, GFP_NOIO);
 	if (!cmd) {
 		xhci_dbg(xhci, "Couldn't allocate command structure.\n");
@@ -290,24 +293,25 @@ static int xhci_stop_device(struct xhci_hcd *xhci, int slot_id, int suspend)
 						     GFP_NOWAIT);
 			if (!command) {
 				spin_unlock_irqrestore(&xhci->lock, flags);
-				xhci_free_command(xhci, cmd);
-				return -ENOMEM;
-
+				ret = -ENOMEM;
+				goto cmd_cleanup;
 			}
 
 			ret = xhci_queue_stop_endpoint(xhci, command, slot_id,
-					i, suspend);
+						       i, suspend);
 			if (ret) {
 				spin_unlock_irqrestore(&xhci->lock, flags);
-				goto err_cmd_queue;
+				xhci_free_command(xhci, command);
+				goto cmd_cleanup;
 			}
 		}
 	}
 	ret = xhci_queue_stop_endpoint(xhci, cmd, slot_id, 0, suspend);
 	if (ret) {
 		spin_unlock_irqrestore(&xhci->lock, flags);
-		goto err_cmd_queue;
+		goto cmd_cleanup;
 	}
+
 	xhci_ring_cmd_db(xhci);
 	spin_unlock_irqrestore(&xhci->lock, flags);
 
@@ -319,7 +323,7 @@ static int xhci_stop_device(struct xhci_hcd *xhci, int slot_id, int suspend)
 		ret = -ETIME;
 	}
 
-err_cmd_queue:
+cmd_cleanup:
 	xhci_free_command(xhci, cmd);
 	return ret;
 }
@@ -355,13 +359,6 @@ static void xhci_disable_port(struct usb_hcd *hcd, struct xhci_hcd *xhci,
 				"SuperSpeed port.\n");
 		return;
 	}
-
-	/*
-	 * Port fails to transition phy in to L2 state if port is in disabled
-	 * state and PORT_PE bit is set to 1
-	 */
-	if (!(readl(addr) & PORT_PE))
-		return;
 
 	/* Write 1 to disable the port */
 	writel(port_status | PORT_PE, addr);
@@ -502,10 +499,13 @@ static void xhci_hub_report_usb3_link_state(struct xhci_hcd *xhci,
 	u32 pls = status_reg & PORT_PLS_MASK;
 
 	/* resume state is a xHCI internal state.
-	 * Do not report it to usb core.
+	 * Do not report it to usb core, instead, pretend to be U3,
+	 * thus usb core knows it's not ready for transfer
 	 */
-	if (pls == XDEV_RESUME)
+	if (pls == XDEV_RESUME) {
+		*status |= USB_SS_PORT_LS_U3;
 		return;
+	}
 
 	/* When the CAS bit is set then warm reset
 	 * should be performed on port
@@ -606,7 +606,14 @@ static u32 xhci_get_port_status(struct usb_hcd *hcd,
 		status |= USB_PORT_STAT_C_RESET << 16;
 	/* USB3.0 only */
 	if (hcd->speed == HCD_USB3) {
-		if ((raw_port_status & PORT_PLC))
+		/* Port link change with port in resume state should not be
+		 * reported to usbcore, as this is an internal state to be
+		 * handled by xhci driver. Reporting PLC to usbcore may
+		 * cause usbcore clearing PLC first and port change event
+		 * irq won't be generated.
+		 */
+		if ((raw_port_status & PORT_PLC) &&
+			(raw_port_status & PORT_PLS_MASK) != XDEV_RESUME)
 			status |= USB_PORT_STAT_C_LINK_STATE << 16;
 		if ((raw_port_status & PORT_WRC))
 			status |= USB_PORT_STAT_C_BH_RESET << 16;
@@ -624,8 +631,30 @@ static u32 xhci_get_port_status(struct usb_hcd *hcd,
 		if ((raw_port_status & PORT_RESET) ||
 				!(raw_port_status & PORT_PE))
 			return 0xffffffff;
-		if (time_after_eq(jiffies,
-					bus_state->resume_done[wIndex])) {
+		/* did port event handler already start resume timing? */
+		if (!bus_state->resume_done[wIndex]) {
+			/* If not, maybe we are in a host initated resume? */
+			if (test_bit(wIndex, &bus_state->resuming_ports)) {
+				/* Host initated resume doesn't time the resume
+				 * signalling using resume_done[].
+				 * It manually sets RESUME state, sleeps 20ms
+				 * and sets U0 state. This should probably be
+				 * changed, but not right now.
+				 */
+			} else {
+				/* port resume was discovered now and here,
+				 * start resume timing
+				 */
+				unsigned long timeout = jiffies +
+					msecs_to_jiffies(USB_RESUME_TIMEOUT);
+
+				set_bit(wIndex, &bus_state->resuming_ports);
+				bus_state->resume_done[wIndex] = timeout;
+				mod_timer(&hcd->rh_timer, timeout);
+			}
+		/* Has resume been signalled for USB_RESUME_TIME yet? */
+		} else if (time_after_eq(jiffies,
+					 bus_state->resume_done[wIndex])) {
 			int time_left;
 
 			xhci_dbg(xhci, "Resume USB2 port %d\n",
@@ -634,6 +663,9 @@ static u32 xhci_get_port_status(struct usb_hcd *hcd,
 			clear_bit(wIndex, &bus_state->resuming_ports);
 
 			set_bit(wIndex, &bus_state->rexit_ports);
+
+			xhci_test_and_clear_bit(xhci, port_array, wIndex,
+						PORT_PLC);
 			xhci_set_link_state(xhci, port_array, wIndex,
 					XDEV_U0);
 
@@ -666,12 +698,23 @@ static u32 xhci_get_port_status(struct usb_hcd *hcd,
 		} else {
 			/*
 			 * The resume has been signaling for less than
-			 * 20ms. Report the port status as SUSPEND,
-			 * let the usbcore check port status again
-			 * and clear resume signaling later.
+			 * USB_RESUME_TIME. Report the port status as SUSPEND,
+			 * let the usbcore check port status again and clear
+			 * resume signaling later.
 			 */
 			status |= USB_PORT_STAT_SUSPEND;
 		}
+	}
+	/*
+	 * Clear stale usb2 resume signalling variables in case port changed
+	 * state during resume signalling. For example on error
+	 */
+	if ((bus_state->resume_done[wIndex] ||
+	     test_bit(wIndex, &bus_state->resuming_ports)) &&
+	    (raw_port_status & PORT_PLS_MASK) != XDEV_U3 &&
+	    (raw_port_status & PORT_PLS_MASK) != XDEV_RESUME) {
+		bus_state->resume_done[wIndex] = 0;
+		clear_bit(wIndex, &bus_state->resuming_ports);
 	}
 	if ((raw_port_status & PORT_PLS_MASK) == XDEV_U0
 			&& (raw_port_status & PORT_POWER)
@@ -713,149 +756,6 @@ static u32 xhci_get_port_status(struct usb_hcd *hcd,
 	return status;
 }
 
-static void xhci_single_step_completion(struct urb *urb)
-{
-	struct completion *done = urb->context;
-
-	complete(done);
-}
-
-/*
- * Allocate a URB and initialize the various fields of it.
- * This API is used by the single_step_set_feature test of
- * EHSET where IN packet of the GetDescriptor request is
- * sent 15secs after the SETUP packet.
- * Return NULL if failed.
- */
-static struct urb *xhci_request_single_step_set_feature_urb(
-		struct usb_device *udev,
-		void *dr,
-		void *buf,
-		struct completion *done)
-{
-	struct urb *urb;
-	struct usb_hcd *hcd = bus_to_hcd(udev->bus);
-	struct usb_host_endpoint *ep;
-
-	urb = usb_alloc_urb(0, GFP_KERNEL);
-	if (!urb)
-		return NULL;
-
-	urb->pipe = usb_rcvctrlpipe(udev, 0);
-	ep = udev->ep_in[usb_pipeendpoint(urb->pipe)];
-	if (!ep) {
-		usb_free_urb(urb);
-		return NULL;
-	}
-
-	/*
-	 * Initialize the various URB fields as these are used by the HCD
-	 * driver to queue it and as well as when completion happens.
-	 */
-	urb->ep = ep;
-	urb->dev = udev;
-	urb->setup_packet = dr;
-	urb->transfer_buffer = buf;
-	urb->transfer_buffer_length = USB_DT_DEVICE_SIZE;
-	urb->complete = xhci_single_step_completion;
-	urb->status = -EINPROGRESS;
-	urb->actual_length = 0;
-	urb->transfer_flags = URB_DIR_IN;
-	usb_get_urb(urb);
-	atomic_inc(&urb->use_count);
-	atomic_inc(&urb->dev->urbnum);
-	usb_hcd_map_urb_for_dma(hcd, urb, GFP_KERNEL);
-	urb->context = done;
-	return urb;
-}
-
-/*
- * This function implements the USB_PORT_FEAT_TEST handling of the
- * SINGLE_STEP_SET_FEATURE test mode as defined in the Embedded
- * High-Speed Electrical Test (EHSET) specification. This simply
- * issues a GetDescriptor control transfer, with an inserted 15-second
- * delay after the end of the SETUP stage and before the IN token of
- * the DATA stage is set. The idea is that this gives the test operator
- * enough time to configure the oscilloscope to perform a measurement
- * of the response time between the DATA and ACK packets that follow.
- */
-static int xhci_ehset_single_step_set_feature(struct usb_hcd *hcd, int port)
-{
-	int retval;
-	struct usb_ctrlrequest *dr;
-	struct urb *urb;
-	struct usb_device *udev;
-	struct xhci_hcd	*xhci = hcd_to_xhci(hcd);
-	struct usb_device_descriptor *buf;
-	unsigned long flags;
-	DECLARE_COMPLETION_ONSTACK(done);
-
-	/* Obtain udev of the rhub's child port */
-	udev = usb_hub_find_child(hcd->self.root_hub, port);
-	if (!udev) {
-		xhci_err(xhci, "No device attached to the RootHub\n");
-		return -ENODEV;
-	}
-	buf = kmalloc(USB_DT_DEVICE_SIZE, GFP_KERNEL);
-	if (!buf)
-		return -ENOMEM;
-
-	dr = kmalloc(sizeof(struct usb_ctrlrequest), GFP_KERNEL);
-	if (!dr) {
-		kfree(buf);
-		return -ENOMEM;
-	}
-
-	/* Fill Setup packet for GetDescriptor */
-	dr->bRequestType = USB_DIR_IN;
-	dr->bRequest = USB_REQ_GET_DESCRIPTOR;
-	dr->wValue = cpu_to_le16(USB_DT_DEVICE << 8);
-	dr->wIndex = 0;
-	dr->wLength = cpu_to_le16(USB_DT_DEVICE_SIZE);
-	urb = xhci_request_single_step_set_feature_urb(udev, dr, buf, &done);
-	if (!urb)
-		goto cleanup;
-
-	/* Now complete just the SETUP stage */
-	spin_lock_irqsave(&xhci->lock, flags);
-	retval = xhci_submit_single_step_set_feature(hcd, urb, 1);
-	spin_unlock_irqrestore(&xhci->lock, flags);
-	if (retval)
-		goto out1;
-
-	if (!wait_for_completion_timeout(&done, msecs_to_jiffies(2000))) {
-		usb_kill_urb(urb);
-		retval = -ETIMEDOUT;
-		xhci_err(xhci, "%s SETUP stage timed out on ep0\n", __func__);
-		goto out1;
-	}
-
-	/* Sleep for 15 seconds; HC will send SOFs during this period */
-	msleep(15 * 1000);
-
-	/* Complete remaining DATA and status stages. Re-use same URB */
-	urb->status = -EINPROGRESS;
-	usb_get_urb(urb);
-	atomic_inc(&urb->use_count);
-	atomic_inc(&urb->dev->urbnum);
-
-	spin_lock_irqsave(&xhci->lock, flags);
-	retval = xhci_submit_single_step_set_feature(hcd, urb, 0);
-	spin_unlock_irqrestore(&xhci->lock, flags);
-	if (!retval && !wait_for_completion_timeout(&done,
-						msecs_to_jiffies(2000))) {
-		usb_kill_urb(urb);
-		retval = -ETIMEDOUT;
-		xhci_err(xhci, "%s IN stage timed out on ep0\n", __func__);
-	}
-out1:
-	usb_free_urb(urb);
-cleanup:
-	kfree(dr);
-	kfree(buf);
-	return retval;
-}
-
 int xhci_hub_control(struct usb_hcd *hcd, u16 typeReq, u16 wValue,
 		u16 wIndex, char *buf, u16 wLength)
 {
@@ -870,7 +770,6 @@ int xhci_hub_control(struct usb_hcd *hcd, u16 typeReq, u16 wValue,
 	u16 link_state = 0;
 	u16 wake_mask = 0;
 	u16 timeout = 0;
-	u16 test_mode = 0;
 
 	max_ports = xhci_get_ports(hcd, &port_array);
 	bus_state = &xhci->bus_state[hcd_index(hcd)];
@@ -944,8 +843,8 @@ int xhci_hub_control(struct usb_hcd *hcd, u16 typeReq, u16 wValue,
 			link_state = (wIndex & 0xff00) >> 3;
 		if (wValue == USB_PORT_FEAT_REMOTE_WAKE_MASK)
 			wake_mask = wIndex & 0xff00;
-		/* The MSB of wIndex is the U1/U2 timeout OR TEST mode*/
-		test_mode = timeout = (wIndex & 0xff00) >> 8;
+		/* The MSB of wIndex is the U1/U2 timeout */
+		timeout = (wIndex & 0xff00) >> 8;
 		wIndex &= 0xff;
 		if (!wIndex || wIndex > max_ports)
 			goto error;
@@ -1119,32 +1018,6 @@ int xhci_hub_control(struct usb_hcd *hcd, u16 typeReq, u16 wValue,
 			temp |= PORT_U2_TIMEOUT(timeout);
 			writel(temp, port_array[wIndex] + PORTPMSC);
 			break;
-		case USB_PORT_FEAT_TEST:
-			slot_id = xhci_find_slot_id_by_port(hcd, xhci,
-							wIndex + 1);
-			if (test_mode && test_mode <= 5) {
-				/* unlock to execute stop endpoint commands */
-				spin_unlock_irqrestore(&xhci->lock, flags);
-				xhci_stop_device(xhci, slot_id, 1);
-				spin_lock_irqsave(&xhci->lock, flags);
-				xhci_halt(xhci);
-
-				temp = readl_relaxed(port_array[wIndex] +
-								PORTPMSC);
-				temp |= test_mode << 28;
-				writel_relaxed(temp, port_array[wIndex] +
-								PORTPMSC);
-				/* to make sure above write goes through */
-				mb();
-			} else if (test_mode == 6) {
-				spin_unlock_irqrestore(&xhci->lock, flags);
-				retval = xhci_ehset_single_step_set_feature(hcd,
-									wIndex);
-				spin_lock_irqsave(&xhci->lock, flags);
-			} else {
-				goto error;
-			}
-			break;
 		default:
 			goto error;
 		}
@@ -1173,13 +1046,15 @@ int xhci_hub_control(struct usb_hcd *hcd, u16 typeReq, u16 wValue,
 				if ((temp & PORT_PE) == 0)
 					goto error;
 
+				set_bit(wIndex, &bus_state->resuming_ports);
 				xhci_set_link_state(xhci, port_array, wIndex,
 							XDEV_RESUME);
 				spin_unlock_irqrestore(&xhci->lock, flags);
-				usleep_range(21000, 21500);
+				msleep(20);
 				spin_lock_irqsave(&xhci->lock, flags);
 				xhci_set_link_state(xhci, port_array, wIndex,
 							XDEV_U0);
+				clear_bit(wIndex, &bus_state->resuming_ports);
 			}
 			bus_state->port_c_suspend |= 1 << wIndex;
 
@@ -1412,7 +1287,7 @@ int xhci_bus_resume(struct usb_hcd *hcd)
 						port_index, XDEV_RESUME);
 
 				spin_unlock_irqrestore(&xhci->lock, flags);
-				usleep_range(21000, 21500);
+				msleep(20);
 				spin_lock_irqsave(&xhci->lock, flags);
 
 				xhci_set_link_state(xhci, port_array,
