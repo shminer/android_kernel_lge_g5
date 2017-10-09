@@ -115,6 +115,11 @@ static int validate_user_key(struct fscrypt_info *crypt_info,
 	}
 	down_read(&keyring_key->sem);
 	ukp = ((struct user_key_payload *)keyring_key->payload.data);
+	if (!ukp) {
+		/* key was revoked before we acquired its semaphore */
+		res = -EKEYREVOKED;
+		goto out;
+	}
 	if (ukp->datalen != sizeof(struct fscrypt_key)) {
 		res = -EINVAL;
 		up_read(&keyring_key->sem);
