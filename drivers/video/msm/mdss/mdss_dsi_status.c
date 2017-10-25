@@ -136,7 +136,6 @@ irqreturn_t hw_vsync_handler(int irq, void *data)
 		pr_err("%s: DSI ctrl not available\n", __func__);
 		return IRQ_HANDLED;
 	}
-	complete(&(ctrl_pdata->te_comp));
 
 	spin_lock_irqsave(&pstatus_init_lock, flags);
 	ps_data = pstatus_data;
