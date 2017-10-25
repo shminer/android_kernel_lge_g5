@@ -1,16 +1,15 @@
-# exFAT filesystem driver rules
 
-exfat := exfat
+obj-y += exfat_core.o exfat_fs.o
 
-ifeq ($(CONFIG_EXFAT_COMPAT_TUXERA),y)
-exfat := texfat
-endif
+exfat_fs-y	:= exfat_super.o
 
-obj-$(CONFIG_EXFAT_FS) := $(exfat).o
+exfat_core-y	:= exfat.o exfat_api.o exfat_blkdev.o exfat_cache.o \
+			   exfat_data.o exfat_global.o exfat_nls.o \
+			   exfat_oal.o exfat_upcase.o exfat_xattr.o
 
-$(exfat)-y := exfat_super.o exfat_misc.o exfat_api.o \
-	   exfat_blkdev.o exfat_cache.o \
-	   exfat_data.o exfat_global.o exfat_nls.o \
-	   exfat_oal.o exfat_upcase.o exfat_xattr.o
+all:
+	make -C /lib/modules/$(shell uname -r)/build M=$(PWD) modules
 
-ccflags-y += -DEXFAT_VERSION=\"1.2.24\"
+clean:
+	make -C /lib/modules/$(shell uname -r)/build M=$(PWD) clean
+

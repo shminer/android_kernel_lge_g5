@@ -28,6 +28,7 @@
 #include <linux/mutex.h>
 #include <linux/swap.h>
 
+#include "exfat_config.h"
 #include "exfat_global.h"
 #include "exfat_data.h"
 #include "exfat_oal.h"
@@ -60,8 +61,10 @@ struct exfat_mount_options {
 	char *iocharset;
 	unsigned char casesensitive;
 	unsigned char tz_utc;
-	unsigned char discard;
 	unsigned char errors;
+#if EXFAT_CONFIG_DISCARD
+	unsigned char discard;
+#endif
 };
 
 #define EXFAT_HASH_BITS    8
@@ -74,7 +77,7 @@ struct exfat_sb_info {
 	struct exfat_mount_options options;
 	int use_vmalloc;
 
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(3,7,0)
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(3,7,00)
 	int s_dirt;
 	struct mutex s_lock;
 #endif
@@ -85,7 +88,7 @@ struct exfat_sb_info {
 
 	spinlock_t inode_hash_lock;
 	struct hlist_head inode_hashtable[EXFAT_HASH_SIZE];
-#ifdef CONFIG_EXFAT_DEBUG
+#if EXFAT_CONFIG_KERNEL_DEBUG
 	long debug_flags;
 #endif
 };
@@ -96,7 +99,7 @@ struct exfat_inode_info {
 	loff_t mmu_private;
 	loff_t i_pos;
 	struct hlist_node i_hash_fat;
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(3,4,0)
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(3,4,00)
 	struct rw_semaphore truncate_lock;
 #endif
 	struct inode vfs_inode;
