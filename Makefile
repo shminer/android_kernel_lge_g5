@@ -298,7 +298,7 @@ CONFIG_SHELL := $(shell if [ -x "$$BASH" ]; then echo $$BASH; \
 	  else echo sh; fi ; fi)
 
 # Set optimization flags for gcc
-FLAGS := -march=armv8-a+crypto -mcpu=cortex-a72.cortex-a53 -mtune=cortex-a72.cortex-a53 -fmodulo-sched -fmodulo-sched-allow-regmoves -fno-gcse-after-reload -fno-tree-vectorize -mlow-precision-recip-sqrt -mpc-relative-literal-loads -ffast-math -O3 -fgraphite -fgraphite-identity -floop-strip-mine -fmodulo-sched-allow-regmoves -ftree-loop-vectorize -ftree-slp-vectorize -fvect-cost-model -fsingle-precision-constant -fpredictive-commoning -Wno-maybe-uninitialized -Wno-misleading-indentation -Wno-array-bounds -Wno-shift-overflow
+FLAGS := -march=armv8-a+crypto -mcpu=cortex-a72.cortex-a53 -mtune=cortex-a72.cortex-a53 -fmodulo-sched-allow-regmoves -fno-gcse-after-reload -fno-tree-vectorize -mlow-precision-recip-sqrt -mpc-relative-literal-loads -ffast-math -O3 -fgraphite -fgraphite-identity -floop-strip-mine -fmodulo-sched-allow-regmoves -ftree-loop-vectorize -ftree-slp-vectorize -fvect-cost-model -fsingle-precision-constant -fpredictive-commoning -Wno-maybe-uninitialized -Wno-misleading-indentation -Wno-array-bounds -Wno-shift-overflow
 GRAPHITE	= -fgraphite-identity -floop-parallelize-all -ftree-loop-linear -floop-interchange -floop-strip-mine -floop-block -floop-flatten
 
 HOSTCC       = $(CCACHE) gcc
