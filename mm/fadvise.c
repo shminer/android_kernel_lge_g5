@@ -73,7 +73,7 @@ SYSCALL_DEFINE4(fadvise64_64, int, fd, loff_t, offset, loff_t, len, int, advice)
 	else
 		endbyte--;		/* inclusive */
 
-	bdi = inode_to_bdi(mapping->host);
+	bdi = mapping->backing_dev_info;
 
 	switch (advice) {
 	case POSIX_FADV_NORMAL:
@@ -113,7 +113,7 @@ SYSCALL_DEFINE4(fadvise64_64, int, fd, loff_t, offset, loff_t, len, int, advice)
 	case POSIX_FADV_NOREUSE:
 		break;
 	case POSIX_FADV_DONTNEED:
-		if (!bdi_write_congested(bdi))
+		if (!bdi_write_congested(mapping->backing_dev_info))
 			__filemap_fdatawrite_range(mapping, offset, endbyte,
 						   WB_SYNC_NONE);
 

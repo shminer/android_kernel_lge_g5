@@ -116,8 +116,6 @@ struct backing_dev_info {
 #endif
 };
 
-struct backing_dev_info *inode_to_bdi(struct inode *inode);
-
 int __must_check bdi_init(struct backing_dev_info *bdi);
 void bdi_destroy(struct backing_dev_info *bdi);
 
@@ -358,12 +356,12 @@ static inline bool bdi_cap_swap_backed(struct backing_dev_info *bdi)
 
 static inline bool mapping_cap_writeback_dirty(struct address_space *mapping)
 {
-	return bdi_cap_writeback_dirty(inode_to_bdi(mapping->host));
+	return bdi_cap_writeback_dirty(mapping->backing_dev_info);
 }
 
 static inline bool mapping_cap_account_dirty(struct address_space *mapping)
 {
-	return bdi_cap_account_dirty(inode_to_bdi(mapping->host));
+	return bdi_cap_account_dirty(mapping->backing_dev_info);
 }
 
 static inline bool mapping_cap_swap_backed(struct address_space *mapping)
