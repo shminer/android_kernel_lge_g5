@@ -1,6 +1,6 @@
 #
 # Automatically generated file; DO NOT EDIT.
-# Linux/arm64 3.18.82 Kernel Configuration
+# Linux/arm64 3.18.84 Kernel Configuration
 #
 CONFIG_ARM64=y
 CONFIG_64BIT=y
@@ -1714,12 +1714,6 @@ CONFIG_WIFI_CONTROL_FUNC=y
 # CONFIG_LIBERTAS is not set
 # CONFIG_WL_TI is not set
 # CONFIG_MWIFIEX is not set
-# CONFIG_CNSS is not set
-# CONFIG_CLD_DEBUG is not set
-# CONFIG_CLD_HL_SDIO_CORE is not set
-# CONFIG_CLD_LL_CORE is not set
-# CONFIG_CNSS_LOGGER is not set
-# CONFIG_WLAN_FEATURE_RX_WAKELOCK is not set
 CONFIG_BCMDHD=y
 CONFIG_BCMDHD_PCIE=y
 # CONFIG_BCM4343 is not set
@@ -1743,6 +1737,12 @@ CONFIG_BCMDHD_PREALLOC_PKTIDMAP=y
 CONFIG_BCMDHD_HOSTAPD_BGN_MODE=y
 CONFIG_DHD_DEBUG_ENABLED=y
 CONFIG_RUNTIME_TCPACK_SUPPRESS=y
+# CONFIG_CNSS is not set
+# CONFIG_CLD_DEBUG is not set
+# CONFIG_CLD_HL_SDIO_CORE is not set
+# CONFIG_CLD_LL_CORE is not set
+# CONFIG_CNSS_LOGGER is not set
+# CONFIG_WLAN_FEATURE_RX_WAKELOCK is not set
 
 #
 # Enable WiMAX (Networking options) to see the WiMAX drivers
