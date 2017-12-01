@@ -22,7 +22,7 @@
 		compatible = "qcom,smb1351-charger";
 		reg = <0x1d>;
 		qcom,parallel-charger;
-		qcom,float-voltage-mv = <4380>;
+		qcom,float-voltage-mv = <4400>;
 		qcom,recharge-mv = <100>;
 		qcom,iterm-disabled;
 	};
@@ -32,7 +32,7 @@
 	status = "ok";
 	qcom,iterm-ma = <100>;
 	qcom,fastchg-current-ma = <2500>;
-	qcom,float-voltage-mv = <4380>;
+	qcom,float-voltage-mv = <4400>;
 	qcom,resume-delta-mv = <149>;
 	qcom,bmd-pin-src="bpd_thm";
 	qcom,bms-psy-name = "bms";

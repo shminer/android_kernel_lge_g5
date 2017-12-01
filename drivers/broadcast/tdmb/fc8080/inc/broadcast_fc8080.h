@@ -50,12 +50,14 @@ int tdmb_fc8080_power_on_retry(void);
 #endif
 /*[BCAST002][E]*/
 
-#if defined(CONFIG_ARCH_MSM8994)
+
+
+#if defined(CONFIG_ARCH_MSM8994) || defined(CONFIG_ARCH_MSM8996) || defined(CONFIG_ARCH_MSM8917)
 #define __broadcast_dev_exit_p(x)        x
 #define __broadcast_dev_init            __init
-#elif defined(CONFIG_ARCH_MSM8996)
+#elif defined(CONFIG_ARCH_MSM8916)
 #define __broadcast_dev_exit_p(x)        x
-#define __broadcast_dev_init            __init
+#define __broadcast_dev_init            __devinit
 #elif defined(CONFIG_ARCH_MSM8226)
 #define __broadcast_dev_exit_p(x)        __devexit_p(x)
 #define __broadcast_dev_init            __devinit

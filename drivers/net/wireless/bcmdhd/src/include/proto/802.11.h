@@ -4788,7 +4788,8 @@ enum {
 	FTM_VS_TLV_SEC_PARAMS = 3,		/* security parameters (in either) */
 	FTM_VS_TLV_SEQ_PARAMS = 4,		/* toast parameters (FTM_REQ, BRCM proprietary) */
 	FTM_VS_TLV_MF_BUF = 5,			/* multi frame buffer - may span ftm vs ie's */
-	FTM_VS_TLV_TIMING_PARAMS = 6		/* timing adjustments */
+	FTM_VS_TLV_TIMING_PARAMS = 6,		/* timing adjustments */
+	FTM_VS_TLV_MF_STATS_BUF = 7,		/* multi frame statistics buffer */
 };
 
 /* the following definitions are *DEPRECATED* and moved to implemenetion files. They

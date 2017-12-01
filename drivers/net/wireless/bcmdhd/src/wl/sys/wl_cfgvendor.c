@@ -749,10 +749,32 @@ wl_cfgvendor_hotlist_cfg(struct wiphy *wiphy,
 	nla_for_each_attr(iter, data, len, tmp2) {
 		type = nla_type(iter);
 		switch (type) {
-
+		case GSCAN_ATTRIBUTE_HOTLIST_BSSID_COUNT:
+			if (nla_len(iter) != sizeof(uint32)) {
+				WL_DBG(("type:%d length:%d not matching.\n",
+					type, nla_len(inner)));
+				err = -EINVAL;
+				goto exit;
+			}
+			hotlist_params->nbssid = (uint16)nla_get_u32(iter);
+			if ((hotlist_params->nbssid == 0) ||
+			    (hotlist_params->nbssid > PFN_SWC_MAX_NUM_APS)) {
+				WL_ERR(("nbssid:%d exceed limit.\n",
+					hotlist_params->nbssid));
+				err = -EINVAL;
+				goto exit;
+			}
+			break;
 		case GSCAN_ATTRIBUTE_HOTLIST_BSSIDS:
+			if (hotlist_params->nbssid == 0) {
+				WL_ERR(("nbssid not retrieved.\n"));
+				err = -EINVAL;
+				goto exit;
+			}
 			pbssid = hotlist_params->bssid;
 			nla_for_each_nested(outer, iter, tmp) {
+				if (j >= hotlist_params->nbssid)
+					break;
 				nla_for_each_nested(inner, outer, tmp1) {
 					type = nla_type(inner);
 					switch (type) {
@@ -791,15 +813,16 @@ wl_cfgvendor_hotlist_cfg(struct wiphy *wiphy,
 						WL_ERR(("ATTR unknown %d\n", type));
 						err = -EINVAL;
 						goto exit;
-
 					}
 				}
-				if (++j >= PFN_SWC_MAX_NUM_APS) {
-					WL_ERR(("cap hotlist max:%d\n", j));
-					break;
-				}
+				j++;
 			}
-			hotlist_params->nbssid = j;
+			if (j != hotlist_params->nbssid) {
+				WL_ERR(("bssid_cnt:%d != nbssid:%d.\n", j,
+					hotlist_params->nbssid));
+				err = -EINVAL;
+				goto exit;
+			}
 			break;
 		case GSCAN_ATTRIBUTE_HOTLIST_FLUSH:
 			if (nla_len(iter) != sizeof(uint8)) {
@@ -1033,13 +1056,15 @@ wl_cfgvendor_significant_change_cfg(struct wiphy *wiphy,
 	const struct nlattr *outer, *inner, *iter;
 	bool flush = FALSE;
 	wl_pfn_significant_bssid_t *pbssid;
+	uint16 num_bssid = 0;
+	uint16 max_buf_size = sizeof(gscan_swc_params_t) +
+		sizeof(wl_pfn_significant_bssid_t) * (PFN_SWC_MAX_NUM_APS - 1);
 
-	significant_params = (gscan_swc_params_t *) kzalloc(len, GFP_KERNEL);
+	significant_params = kzalloc(max_buf_size, GFP_KERNEL);
 	if (!significant_params) {
-		WL_ERR(("Cannot Malloc mem to parse config commands size - %d bytes \n", len));
-		return -ENOMEM;
+		WL_ERR(("Cannot Malloc mem size:%d\n", len));
+		return BCME_NOMEM;
 	}
-
 
 	nla_for_each_attr(iter, data, len, tmp2) {
 		type = nla_type(iter);
@@ -1057,9 +1082,27 @@ wl_cfgvendor_significant_change_cfg(struct wiphy *wiphy,
 			case GSCAN_ATTRIBUTE_MIN_BREACHING:
 				significant_params->swc_threshold = nla_get_u16(iter);
 				break;
+			case GSCAN_ATTRIBUTE_NUM_BSSID:
+				num_bssid = nla_get_u16(iter);
+				if (num_bssid > PFN_SWC_MAX_NUM_APS) {
+					WL_ERR(("ovar max SWC bssids:%d\n",
+						num_bssid));
+					err = BCME_BADARG;
+					goto exit;
+				}
+				break;
 			case GSCAN_ATTRIBUTE_SIGNIFICANT_CHANGE_BSSIDS:
+				if (num_bssid == 0) {
+					WL_ERR(("num_bssid : 0\n"));
+					err = BCME_BADARG;
+					goto exit;
+				}
 				pbssid = significant_params->bssid_elem_list;
 				nla_for_each_nested(outer, iter, tmp) {
+					if (j >= num_bssid) {
+						j++;
+						break;
+					}
 					nla_for_each_nested(inner, outer, tmp1) {
 							switch (nla_type(inner)) {
 								case GSCAN_ATTRIBUTE_BSSID:
@@ -1089,13 +1132,19 @@ wl_cfgvendor_significant_change_cfg(struct wiphy *wiphy,
 				break;
 		}
 	}
+	if (j != num_bssid) {
+		WL_ERR(("swc bssids count:%d not matched to num_bssid:%d\n",
+			j, num_bssid));
+		err = BCME_BADARG;
+		goto exit;
+	}
 	significant_params->nbssid = j;
 
 	if (dhd_dev_pno_set_cfg_gscan(bcmcfg_to_prmry_ndev(cfg),
 	              DHD_PNO_SIGNIFICANT_SCAN_CFG_ID,
 	              significant_params, flush) < 0) {
 		WL_ERR(("Could not set GSCAN significant cfg\n"));
-		err = -EINVAL;
+		err = BCME_ERROR;
 		goto exit;
 	}
 exit:
@@ -1965,7 +2014,6 @@ static int wl_cfgvendor_lstats_get_info(struct wiphy *wiphy,
 
 	bzero(&scbval, sizeof(scb_val_t));
 	bzero(cfg->ioctl_buf, WLC_IOCTL_MAXLEN);
-	bzero(iovar_buf, WLC_IOCTL_MAXLEN);
 
 	output = cfg->ioctl_buf;
 	radio = (wifi_radio_stat *)output;
@@ -2010,7 +2058,6 @@ static int wl_cfgvendor_lstats_get_info(struct wiphy *wiphy,
 	iface->ac[WIFI_AC_BK].tx_mpdu = wl_wme_cnt->tx[AC_BK].packets;
 	iface->ac[WIFI_AC_BK].rx_mpdu = wl_wme_cnt->rx[AC_BK].packets;
 	iface->ac[WIFI_AC_BK].mpdu_lost = wl_wme_cnt->tx_failed[WIFI_AC_BK].packets;
-	bzero(iovar_buf, WLC_IOCTL_MAXLEN);
 
 	err = wldev_iovar_getbuf(bcmcfg_to_prmry_ndev(cfg), "counters", NULL, 0,
 		iovar_buf, WLC_IOCTL_MAXLEN, NULL);
@@ -2032,7 +2079,6 @@ static int wl_cfgvendor_lstats_get_info(struct wiphy *wiphy,
 	iface->num_peers = NUM_PEER;
 	iface->peer_info->num_rate = NUM_RATE;
 
-	bzero(iovar_buf, WLC_IOCTL_MAXLEN);
 	output = (char *)iface + sizeof(wifi_iface_stat) + NUM_PEER*sizeof(wifi_peer_info);
 
 	err = wldev_iovar_getbuf(bcmcfg_to_prmry_ndev(cfg), "ratestat", NULL, 0,
@@ -2151,7 +2197,7 @@ static int wl_cfgvendor_dbg_get_mem_dump(struct wiphy *wiphy,
 	int buf_len = 0;
 	void __user *user_buf = NULL;
 	const struct nlattr *iter;
-	char *mem_buf;
+	char *mem_buf = NULL;
 	struct sk_buff *skb;
 	struct bcm_cfg80211 *cfg = wiphy_priv(wiphy);
 
@@ -2159,10 +2205,24 @@ static int wl_cfgvendor_dbg_get_mem_dump(struct wiphy *wiphy,
 		type = nla_type(iter);
 		switch (type) {
 			case DEBUG_ATTRIBUTE_FW_DUMP_LEN:
-				buf_len = nla_get_u32(iter);
+				/* Check if the iter is valid and
+				 * buffer length is not already initialized.
+				 */
+				if ((nla_len(iter) == sizeof(uint32)) &&
+					!buf_len) {
+					buf_len = nla_get_u32(iter);
+				} else {
+					ret = BCME_ERROR;
+					goto exit;
+				}
 				break;
 			case DEBUG_ATTRIBUTE_FW_DUMP_DATA:
-				user_buf = (void __user *) (unsigned long) nla_get_u64(iter);
+				if (nla_len(iter) != sizeof(uint64)) {
+					WL_ERR(("Invalid len\n"));
+					ret = BCME_ERROR;
+					goto exit;
+				}
+				user_buf = (void __user *)nla_get_u64(iter);
 				break;
 			default:
 				WL_ERR(("Unknown type: %d\n", type));

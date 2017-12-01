@@ -210,7 +210,7 @@
 #define WL_BSSTYPE_MESH  3
 /* Bitmask for scan_type */
 #define WL_SCANFLAGS_PASSIVE	0x01	/* force passive scan */
-#define WL_SCANFLAGS_RESERVED	0x02	/* Reserved */
+#define WL_SCANFLAGS_LOW_PRIO	0x02	/* Low priority scan */
 #define WL_SCANFLAGS_PROHIBITED	0x04	/* allow scanning prohibited channels */
 #define WL_SCANFLAGS_OFFCHAN	0x08	/* allow scanning/reporting off-channel APs */
 #define WL_SCANFLAGS_HOTSPOT	0x10	/* automatic ANQP to hotspot APs */

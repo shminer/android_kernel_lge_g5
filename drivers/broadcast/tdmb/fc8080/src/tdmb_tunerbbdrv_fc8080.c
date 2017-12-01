@@ -68,7 +68,6 @@
 #define DMB_SVC_ID 0
 #define DAB_SVC_ID 2
 #define DAT_SVC_ID 1
-//#define FEATURE_GET_FIC_POLLING
 
 /* change memcpy mscBuffer -> msc_data -> buffer  to mscBuffer->buffer */
 #define NOT_MSCDATA_MULTIPLE_MEMCPY
@@ -800,7 +799,7 @@ int8    tunerbb_drv_fc8080_get_ber(struct broadcast_tdmb_sig_info *dmb_bb_info)
 
     nation_info = tunerbb_drv_fc8080_get_nation();
 
-    printk("service_type=%d, protection_level=%d, nation_info=%d\n", fc8080_serviceType[0], protection_level, nation_info);
+    //printk("service_type=%d, protection_level=%d, nation_info=%d\n", fc8080_serviceType[0], protection_level, nation_info);
 
     if(nation_info == KR)
     {
@@ -1028,7 +1027,7 @@ int8    tunerbb_drv_fc8080_get_ber(struct broadcast_tdmb_sig_info *dmb_bb_info)
         bbm_com_word_write(0, BBM_BUF_OVERRUN, 0);
     }
     if(overrun != 0) {
-        print_log(0, "======= FC8080 BBM_BUF_OVERRUN=====  0x%x\n", overrun);
+        print_log(0, "======= FC8080 BBM_BUF_OVERRUN =====  0x%x\n", overrun);
     }
 }
 

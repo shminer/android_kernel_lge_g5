@@ -1,7 +1,7 @@
 
 qcom,lge_bl42d1_tocad_2800mah_averaged_masterslave_nov23rd2015 {
 	/* #2221136_LGE_BL42D1_Tocad_2800mAh_averaged_MasterSlave_Nov23rd2015*/
-	qcom,max-voltage-uv = <4380000>;
+	qcom,max-voltage-uv = <4400000>;
 	qcom,nom-batt-capacity-mah = <2800>;
 	qcom,batt-id-kohm = <0>;
 	qcom,battery-beta = <4150>;

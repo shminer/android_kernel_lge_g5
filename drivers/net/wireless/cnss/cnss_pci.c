@@ -118,7 +118,6 @@
 #define WLAN_VREG_IO_DELAY_MIN	100
 #define WLAN_VREG_IO_DELAY_MAX	1000
 #define WLAN_ENABLE_DELAY	10
-#define PCIE_SWITCH_DELAY       20
 #define WLAN_RECOVERY_DELAY	1
 #define PCIE_ENABLE_DELAY	100
 #define WLAN_BOOTSTRAP_DELAY	10
@@ -1849,7 +1848,7 @@ static int cnss_wlan_runtime_resume(struct device *dev)
 	if (wdrv && wdrv->runtime_ops && wdrv->runtime_ops->runtime_resume)
 		ret = wdrv->runtime_ops->runtime_resume(to_pci_dev(dev));
 
-	pr_debug("cnss: runtime resume status: %d\n", ret);
+	pr_info("cnss: runtime resume status: %d\n", ret);
 
 	return ret;
 }
@@ -2638,13 +2637,6 @@ static int cnss_powerup(const struct subsys_desc *subsys)
 
 	msleep(POWER_ON_DELAY);
 	cnss_configure_wlan_en_gpio(WLAN_EN_HIGH);
-	/**
-	 *  Some platforms have wifi and other PCIE card attached with PCIE
-	 *  switch on the same RC like P5459 board(ROME 3.2 PCIE card + Ethernet
-	 *  PCI), it will need extra time to stable the signals when do SSR,
-	 *  otherwise fail to create the PCIE link, so add PCIE_SWITCH_DELAY.
-	 */
-	msleep(PCIE_SWITCH_DELAY);
 
 	if (!pdev) {
 		pr_err("%d: invalid pdev\n", __LINE__);

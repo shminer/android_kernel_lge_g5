@@ -35,8 +35,12 @@
  *  netdev_ops->ndo_do_ioctl in new kernels)
  *  @dev: the net_device handle
  */
-s32 wldev_ioctl(
-	struct net_device *dev, u32 cmd, void *arg, u32 len, u32 set);
+
+s32 wldev_ioctl_get(
+	struct net_device *dev, u32 cmd, void *arg, u32 len);
+
+s32 wldev_ioctl_set(
+	struct net_device *dev, u32 cmd, const void *arg, u32 len);
 
 /** Retrieve named IOVARs, this function calls wl_dev_ioctl with
  *  WLC_GET_VAR IOCTL code
