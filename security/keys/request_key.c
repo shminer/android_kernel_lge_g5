@@ -284,7 +284,6 @@ static int construct_get_dest_keyring(struct key **_dest_keyring)
 					do_perm_check = false;
 					break;
 				}
-
 			}
 
 		case KEY_REQKEY_DEFL_THREAD_KEYRING:
