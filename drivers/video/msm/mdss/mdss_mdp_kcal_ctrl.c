@@ -217,9 +217,16 @@ static ssize_t kcal_store(struct device *dev, struct device_attribute *attr,
 	struct kcal_lut_data *lut_data = dev_get_drvdata(dev);
 
 	r = sscanf(buf, "%d %d %d", &kcal_r, &kcal_g, &kcal_b);
-	if ((r != 3) || (kcal_r < 1 || kcal_r > 256) ||
-		(kcal_g < 1 || kcal_g > 256) || (kcal_b < 1 || kcal_b > 256))
+	if ((r != 3) || (kcal_r < 1 || kcal_r > 248) ||
+		(kcal_g < 1 || kcal_g > 250) || (kcal_b < 1 || kcal_b > 246))
 		return -EINVAL;
+
+	if (kcal_r >= 248)
+		kcal_r = 248;
+	if (kcal_g >= 250)
+		kcal_g = 250;
+	if (kcal_b >= 246)
+		kcal_b = 246;
 
 	lut_data->red = kcal_r;
 	lut_data->green = kcal_g;
