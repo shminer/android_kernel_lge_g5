@@ -17,6 +17,7 @@
 #include <linux/init.h>
 #include <linux/cpufreq.h>
 #include <linux/cpu.h>
+#include <linux/kthread.h>
 #include <linux/sched.h>
 #include <linux/moduleparam.h>
 #include <linux/slab.h>
@@ -30,24 +31,37 @@ struct cpu_sync {
 };
 
 static DEFINE_PER_CPU(struct cpu_sync, sync_info);
-static struct workqueue_struct *cpu_boost_wq;
 
-static struct work_struct input_boost_work;
-static bool input_boost_enabled;
+static unsigned int input_boost_enabled = 1;
+module_param(input_boost_enabled, uint, 0644);
 
 static unsigned int input_boost_ms = 40;
 module_param(input_boost_ms, uint, 0644);
 
+static unsigned int input_boost_off_ms = 40;
+module_param(input_boost_off_ms, uint, 0644);
+
+#ifdef CONFIG_DYNAMIC_STUNE_BOOST
+/* OOS 5.0.2 Top-app boost group */
+static int dynamic_stune_group_idx = 3;
+module_param(dynamic_stune_group_idx, uint, 0644);
+
+static int dynamic_stune_boost = 0;
+module_param(dynamic_stune_boost, uint, 0644);
+#endif /* CONFIG_DYNAMIC_STUNE_BOOST */
+
 static struct delayed_work input_boost_rem;
 static u64 last_input_time;
-#define MIN_INPUT_INTERVAL (150 * USEC_PER_MSEC)
+
+static struct kthread_work input_boost_work;
+static struct kthread_worker cpu_boost_worker;
+static struct task_struct *cpu_boost_worker_thread;
 
 static int set_input_boost_freq(const char *buf, const struct kernel_param *kp)
 {
 	int i, ntokens = 0;
 	unsigned int val, cpu;
 	const char *cp = buf;
-	bool enabled = false;
 
 	while ((cp = strpbrk(cp + 1, " :")))
 		ntokens++;
@@ -58,7 +72,7 @@ static int set_input_boost_freq(const char *buf, const struct kernel_param *kp)
 			return -EINVAL;
 		for_each_possible_cpu(i)
 			per_cpu(sync_info, i).input_boost_freq = val;
-		goto check_enable;
+		goto out;
 	}
 
 	/* CPU:value pair */
@@ -77,15 +91,7 @@ static int set_input_boost_freq(const char *buf, const struct kernel_param *kp)
 		cp++;
 	}
 
-check_enable:
-	for_each_possible_cpu(i) {
-		if (per_cpu(sync_info, i).input_boost_freq) {
-			enabled = true;
-			break;
-		}
-	}
-	input_boost_enabled = enabled;
-
+out:
 	return 0;
 }
 
@@ -109,84 +115,6 @@ static const struct kernel_param_ops param_ops_input_boost_freq = {
 };
 module_param_cb(input_boost_freq, &param_ops_input_boost_freq, NULL, 0644);
 
-static DEFINE_PER_CPU(unsigned int, multi_boost_freq_sync_info);
-
-#define INPUT_SAMPLING_TIME (40 * USEC_PER_MSEC)
-#define MAX_MULTI_BOOST 200
-
-static bool multi_boost_enabled;
-static unsigned int multi_boost_ms = 0;
-static bool multi_boost_started;
-
-static struct work_struct input_boost_multi;
-
-static int set_multi_boost_freq(const char *buf, const struct kernel_param *kp)
-{
-	int i, ntokens = 0;
-	unsigned int val, cpu;
-	const char *cp = buf;
-	bool enabled = false;
-
-	while ((cp = strpbrk(cp + 1, " :")))
-		ntokens++;
-
-	/* single number: apply to all CPUs */
-	if (!ntokens) {
-		if (sscanf(buf, "%u\n", &val) != 1)
-			return -EINVAL;
-		for_each_possible_cpu(i)
-			per_cpu(multi_boost_freq_sync_info, i) = val;
-		goto check_enable;
-	}
-
-	/* CPU:value pair */
-	if (!(ntokens % 2))
-		return -EINVAL;
-
-	cp = buf;
-	for (i = 0; i < ntokens; i += 2) {
-		if (sscanf(cp, "%u:%u", &cpu, &val) != 2)
-			return -EINVAL;
-		if (cpu > num_possible_cpus())
-			return -EINVAL;
-
-		per_cpu(multi_boost_freq_sync_info, cpu) = val;
-		cp = strchr(cp, ' ');
-		cp++;
-	}
-
-check_enable:
-	for_each_possible_cpu(i) {
-		if (per_cpu(multi_boost_freq_sync_info, i)) {
-			enabled = true;
-			break;
-		}
-	}
-	multi_boost_enabled = enabled;
-
-	return 0;
-}
-
-static int get_multi_boost_freq(char *buf, const struct kernel_param *kp)
-{
-	int cnt = 0, cpu;
-	unsigned int val;
-
-	for_each_possible_cpu(cpu) {
-		val = per_cpu(multi_boost_freq_sync_info, cpu);
-		cnt += snprintf(buf + cnt, PAGE_SIZE - cnt,
-				"%d:%u ", cpu, val);
-	}
-	cnt += snprintf(buf + cnt, PAGE_SIZE - cnt, "\n");
-	return cnt;
-}
-
-static const struct kernel_param_ops param_ops_multi_boost_freq = {
-	.set = set_multi_boost_freq,
-	.get = get_multi_boost_freq,
-};
-module_param_cb(multi_boost_freq, &param_ops_multi_boost_freq, NULL, 0644);
-
 /*
  * The CPUFREQ_ADJUST notifier is used to override the current policy min to
  * make sure policy min >= boost_min. The cpufreq framework then does the job
@@ -205,20 +133,19 @@ static int boost_adjust_notify(struct notifier_block *nb, unsigned long val,
 	unsigned int cpu = policy->cpu;
 	struct cpu_sync *s = &per_cpu(sync_info, cpu);
 	unsigned int ib_min = s->input_boost_min;
-	unsigned int min;
 
 	switch (val) {
 	case CPUFREQ_ADJUST:
 		if (!ib_min)
 			break;
 
-		min = min(ib_min, policy->max);
+		ib_min = min(ib_min, policy->max);
 
 		pr_debug("CPU%u policy min before boost: %u kHz\n",
 			 cpu, policy->min);
-		pr_debug("CPU%u boost min: %u kHz\n", cpu, min);
+		pr_debug("CPU%u boost min: %u kHz\n", cpu, ib_min);
 
-		cpufreq_verify_within_limits(policy, min, UINT_MAX);
+		cpufreq_verify_within_limits(policy, ib_min, UINT_MAX);
 
 		pr_debug("CPU%u policy min after boost: %u kHz\n",
 			 cpu, policy->min);
@@ -239,8 +166,16 @@ static void update_policy_online(void)
 	/* Re-evaluate policy to trigger adjust notifier for online CPUs */
 	get_online_cpus();
 	for_each_online_cpu(i) {
-		pr_debug("Updating policy for CPU%d\n", i);
-		cpufreq_update_policy(i);
+		/*
+		 * both clusters have synchronous cpus
+		 * no need to upldate the policy for each core
+		 * individually, saving at least one [down|up] write
+		 * and a [lock|unlock] irqrestore per pass
+		 */
+		if ((i & 1) == 0) {
+			pr_debug("Updating policy for CPU%d\n", i);
+			cpufreq_update_policy(i);
+		}
 	}
 	put_online_cpus();
 }
@@ -257,16 +192,23 @@ static void do_input_boost_rem(struct work_struct *work)
 		i_sync_info->input_boost_min = 0;
 	}
 
+#ifdef CONFIG_DYNAMIC_STUNE_BOOST
+	/* Reset dynamic stune boost value to the default value */
+	dynamic_boost_write(dynamic_stune_group_idx, 0, true);
+#endif /* CONFIG_DYNAMIC_STUNE_BOOST */
+
 	/* Update policies for all online CPUs */
 	update_policy_online();
 
-	multi_boost_ms = 0;
 }
 
-static void do_input_boost(struct work_struct *work)
+static void do_input_boost(struct kthread_work *work)
 {
 	unsigned int i;
 	struct cpu_sync *i_sync_info;
+
+	if (!input_boost_ms)
+		return;
 
 	cancel_delayed_work_sync(&input_boost_rem);
 
@@ -277,57 +219,16 @@ static void do_input_boost(struct work_struct *work)
 		i_sync_info->input_boost_min = i_sync_info->input_boost_freq;
 	}
 
+#ifdef CONFIG_DYNAMIC_STUNE_BOOST
+	/* Set dynamic stune boost value */
+	dynamic_boost_write(dynamic_stune_group_idx, dynamic_stune_boost, false);
+#endif /* CONFIG_DYNAMIC_STUNE_BOOST */
+
 	/* Update policies for all online CPUs */
 	update_policy_online();
 
-	queue_delayed_work(cpu_boost_wq, &input_boost_rem,
-					msecs_to_jiffies(input_boost_ms));
-}
-
-static void do_input_boost_multi(struct work_struct *work)
-{
-	unsigned int i;
-	struct cpu_sync *i_sync_info;
-
-	if (multi_boost_ms == 0) {
-
-		cancel_delayed_work_sync(&input_boost_rem);
-
-		/* Set the input_boost_min for all CPUs in the system */
-		for_each_possible_cpu(i) {
-			i_sync_info = &per_cpu(sync_info, i);
-			i_sync_info->input_boost_min = i_sync_info->input_boost_freq;
-		}
-
-		/* Update policies for all online CPUs */
-		update_policy_online();
-
-		queue_delayed_work(cpu_boost_wq, &input_boost_rem,
-						msecs_to_jiffies(input_boost_ms  * 2));
-
-		multi_boost_started = true;
-	}
-	else {
-		if (multi_boost_started == true && multi_boost_ms >= MAX_MULTI_BOOST) {
-			/* lower the input_boost_min for all CPUs in the system */
-			for_each_possible_cpu(i) {
-				i_sync_info = &per_cpu(sync_info, i);
-				i_sync_info->input_boost_min = per_cpu(multi_boost_freq_sync_info, i);
-			}
-
-			/* Update policies for all online CPUs */
-			update_policy_online();
-
-			multi_boost_started = false;
-		}
-
-		mod_delayed_work(cpu_boost_wq, &input_boost_rem,
-						msecs_to_jiffies(input_boost_ms * 2));
-	}
-
-	pr_debug("Setting multi boost #%d for all CPUs\n", multi_boost_ms);
-
-	multi_boost_ms += input_boost_ms;
+	queue_delayed_work(system_power_efficient_wq,
+		&input_boost_rem, msecs_to_jiffies(input_boost_ms));
 }
 
 static void cpuboost_input_event(struct input_handle *handle,
@@ -338,27 +239,14 @@ static void cpuboost_input_event(struct input_handle *handle,
 	if (!input_boost_enabled)
 		return;
 
-	if (multi_boost_enabled) {
-		now = ktime_to_us(ktime_get());
-		if (now - last_input_time < INPUT_SAMPLING_TIME)
-			return;
-
-		if (work_pending(&input_boost_multi))
-			return;
-
-		queue_work(cpu_boost_wq, &input_boost_multi);
-		last_input_time = ktime_to_us(ktime_get());
-		return;
-	}
-
 	now = ktime_to_us(ktime_get());
-	if (now - last_input_time < MIN_INPUT_INTERVAL)
+	if ((now - last_input_time) < (input_boost_off_ms * USEC_PER_MSEC))
 		return;
 
-	if (work_pending(&input_boost_work))
+	if (queuing_blocked(&cpu_boost_worker, &input_boost_work))
 		return;
 
-	queue_work(cpu_boost_wq, &input_boost_work);
+	queue_kthread_work(&cpu_boost_worker, &input_boost_work);
 	last_input_time = ktime_to_us(ktime_get());
 }
 
@@ -394,6 +282,11 @@ err2:
 
 static void cpuboost_input_disconnect(struct input_handle *handle)
 {
+#ifdef CONFIG_DYNAMIC_STUNE_BOOST
+	/* Reset dynamic stune boost value to the default value */
+	dynamic_boost_write(dynamic_stune_group_idx, 0, true);
+#endif /* CONFIG_DYNAMIC_STUNE_BOOST */
+
 	input_close_device(handle);
 	input_unregister_handle(handle);
 	kfree(handle);
@@ -437,14 +330,18 @@ static int cpu_boost_init(void)
 {
 	int cpu, ret;
 	struct cpu_sync *s;
+	struct sched_param param = { .sched_priority = MAX_RT_PRIO - 2 };
 
-	cpu_boost_wq = alloc_workqueue("cpuboost_wq", WQ_HIGHPRI, 0);
-	if (!cpu_boost_wq)
+	init_kthread_worker(&cpu_boost_worker);
+	cpu_boost_worker_thread = kthread_run(kthread_worker_fn,
+		&cpu_boost_worker, "cpu_boost_worker_thread");
+	if (IS_ERR(cpu_boost_worker_thread))
 		return -EFAULT;
 
-	INIT_WORK(&input_boost_work, do_input_boost);
+	sched_setscheduler(cpu_boost_worker_thread, SCHED_FIFO, &param);
+
+	init_kthread_work(&input_boost_work, do_input_boost);
 	INIT_DELAYED_WORK(&input_boost_rem, do_input_boost_rem);
-	INIT_WORK(&input_boost_multi, do_input_boost_multi);
 
 	for_each_possible_cpu(cpu) {
 		s = &per_cpu(sync_info, cpu);

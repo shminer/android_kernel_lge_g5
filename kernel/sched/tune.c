@@ -239,6 +239,15 @@ struct boost_groups {
 /* Boost groups affecting each CPU in the system */
 static DEFINE_PER_CPU(struct boost_groups, cpu_boost_groups);
 
+#ifdef CONFIG_DYNAMIC_STUNE_BOOST
+struct dynamic_stune {
+	struct cgroup_subsys_state *app_css;
+	int default_app_boost;
+};
+static struct dynamic_stune dynamic_stune_group[BOOSTGROUPS_COUNT];
+static int cur_app_idx = 0;
+#endif /* CONFIG_DYNAMIC_STUNE_BOOST */
+
 static void
 schedtune_cpu_update(int cpu)
 {
@@ -582,6 +591,82 @@ boost_read(struct cgroup_subsys_state *css, struct cftype *cft)
 	return st->boost;
 }
 
+#ifdef CONFIG_DYNAMIC_STUNE_BOOST
+static int
+_dynamic_boost_write(struct cgroup_subsys_state *css, int boost)
+{
+	struct schedtune *st = css_st(css);
+	unsigned threshold_idx;
+	int boost_pct;
+
+	if (boost < -100 || boost > 100)
+		return -EINVAL;
+	boost_pct = boost;
+
+	/*
+	 * Update threshold params for Performance Boost (B)
+	 * and Performance Constraint (C) regions.
+	 * The current implementatio uses the same cuts for both
+	 * B and C regions.
+	 */
+	threshold_idx = clamp(boost_pct, 0, 99) / 10;
+	st->perf_boost_idx = threshold_idx;
+	st->perf_constrain_idx = threshold_idx;
+
+	st->boost = boost;
+	if (css == &root_schedtune.css) {
+		sysctl_sched_cfs_boost = boost;
+		perf_boost_idx  = threshold_idx;
+		perf_constrain_idx  = threshold_idx;
+	}
+
+	/* Update CPU boost */
+	schedtune_boostgroup_update(st->idx, st->boost);
+
+	trace_sched_tune_config(st->boost);
+
+	return 0;
+}
+
+int
+dynamic_boost_write(int idx, int boost, bool defaultboost)
+{
+	struct cgroup_subsys_state *css;
+
+	if (idx >= BOOSTGROUPS_COUNT
+		|| idx < 0) {
+		pr_err("dynamic stune boost index more than %d SchedTune boosting groups\n",
+		       BOOSTGROUPS_COUNT);
+		return -1;
+	}
+	if (idx != cur_app_idx) {
+		/* Restore default boost for current boost group */
+		css = dynamic_stune_group[cur_app_idx].app_css;
+		if (!css) {
+			pr_err("dynamic stune boost group[%d] not allocated!\n",
+				cur_app_idx);
+		} else {
+			_dynamic_boost_write(css, 
+				dynamic_stune_group[cur_app_idx].default_app_boost);
+		}
+		cur_app_idx = idx;
+	}
+	css = dynamic_stune_group[idx].app_css;
+	if (!css) {
+		pr_err("dynamic stune boost group[%d] not allocated!\n",
+				idx);
+		return -1;
+	}
+	if (defaultboost)
+		boost = dynamic_stune_group[idx].default_app_boost;
+
+	if (boost < dynamic_stune_group[idx].default_app_boost)
+		return 0;
+
+	return _dynamic_boost_write(css, boost);
+}
+#endif /* CONFIG_DYNAMIC_STUNE_BOOST */
+
 static int
 boost_write(struct cgroup_subsys_state *css, struct cftype *cft,
 	    s64 boost)
@@ -610,6 +695,11 @@ boost_write(struct cgroup_subsys_state *css, struct cftype *cft,
 		perf_boost_idx  = threshold_idx;
 		perf_constrain_idx  = threshold_idx;
 	}
+
+#ifdef CONFIG_DYNAMIC_STUNE_BOOST
+	/* Remember default app boost value */
+	dynamic_stune_group[st->idx].default_app_boost = boost;
+#endif /* CONFIG_DYNAMIC_STUNE_BOOST */
 
 	/* Update CPU boost */
 	schedtune_boostgroup_update(st->idx, st->boost);
@@ -653,6 +743,18 @@ schedtune_boostgroup_init(struct schedtune *st)
 		bg->group[st->idx].tasks = 0;
 		raw_spin_lock_init(&bg->lock);
 	}
+
+#ifdef CONFIG_DYNAMIC_STUNE_BOOST
+    /* 
+     * Assume confidently that the index of top-app should be the last assigned index.
+     * This observation is likely due to SchedTune cgroups should be initialized in alphabetical order.
+     * E.g. audio, background, foreground, system-background, top-app (last)
+     */
+	cur_app_idx = st->idx;
+	dynamic_stune_group[st->idx].app_css = &st->css;
+	dynamic_stune_group[st->idx].default_app_boost = st->boost;
+	pr_info("STUNE INIT: cur app idx: %d\n", cur_app_idx);
+#endif /* CONFIG_DYNAMIC_STUNE_BOOST */
 
 	return 0;
 }
@@ -707,6 +809,12 @@ schedtune_boostgroup_release(struct schedtune *st)
 
 	/* Keep track of allocated boost groups */
 	allocated_group[st->idx] = NULL;
+
+#ifdef CONFIG_DYNAMIC_STUNE_BOOST
+	/* Keep track of dynamic stune allocated boost groups */
+	dynamic_stune_group[st->idx].app_css = NULL;
+	dynamic_stune_group[st->idx].default_app_boost = 0;
+#endif
 }
 
 static void
