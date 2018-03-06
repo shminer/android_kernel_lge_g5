@@ -46,7 +46,7 @@ module_param(input_boost_off_ms, uint, 0644);
 static int dynamic_stune_group_idx = 3;
 module_param(dynamic_stune_group_idx, uint, 0644);
 
-static int dynamic_stune_boost = 0;
+static int dynamic_stune_boost = 1;
 module_param(dynamic_stune_boost, uint, 0644);
 #endif /* CONFIG_DYNAMIC_STUNE_BOOST */
 
