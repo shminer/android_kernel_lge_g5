@@ -35,10 +35,10 @@ static DEFINE_PER_CPU(struct cpu_sync, sync_info);
 static unsigned int input_boost_enabled = 1;
 module_param(input_boost_enabled, uint, 0644);
 
-static unsigned int input_boost_ms = 40;
+static unsigned int input_boost_ms = 500;
 module_param(input_boost_ms, uint, 0644);
 
-static unsigned int input_boost_off_ms = 40;
+static unsigned int input_boost_off_ms = 750;
 module_param(input_boost_off_ms, uint, 0644);
 
 #ifdef CONFIG_DYNAMIC_STUNE_BOOST
