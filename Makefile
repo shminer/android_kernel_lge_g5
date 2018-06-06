@@ -297,14 +297,10 @@ CONFIG_SHELL := $(shell if [ -x "$$BASH" ]; then echo $$BASH; \
 	  else if [ -x /bin/bash ]; then echo /bin/bash; \
 	  else echo sh; fi ; fi)
 
-# Set optimization flags for gcc
-FLAGS := -march=armv8-a+crypto -mcpu=cortex-a72.cortex-a53 -mtune=cortex-a72.cortex-a53 -fmodulo-sched-allow-regmoves -fno-gcse-after-reload -fno-tree-vectorize -mlow-precision-recip-sqrt -mpc-relative-literal-loads -ffast-math -O3 -fgraphite -fgraphite-identity -floop-strip-mine -fmodulo-sched-allow-regmoves -ftree-loop-vectorize -ftree-slp-vectorize -fvect-cost-model -fsingle-precision-constant -fpredictive-commoning -Wno-maybe-uninitialized -Wno-misleading-indentation -Wno-array-bounds -Wno-shift-overflow
-GRAPHITE	= -fgraphite-identity -floop-parallelize-all -ftree-loop-linear -floop-interchange -floop-strip-mine -floop-block -floop-flatten
-
 HOSTCC       = $(CCACHE) gcc
 HOSTCXX      = $(CCACHE) g++
-HOSTCFLAGS   = $(GRAPHITE) -Wall -Wmissing-prototypes -Wstrict-prototypes -Ofast -fomit-frame-pointer -fgcse-las -fgraphite -floop-flatten -floop-parallelize-all -ftree-loop-linear -floop-interchange -floop-strip-mine -floop-block -pipe -Wno-unused-parameter -Wno-sign-compare -Wno-missing-field-initializers -Wno-unused-variable -Wno-unused-value
-HOSTCXXFLAGS = -Ofast -fgcse-las -fgraphite -floop-flatten -floop-parallelize-all -ftree-loop-linear -floop-interchange -floop-strip-mine -floop-block -pipe
+HOSTCFLAGS   = -Wall -Wmissing-prototypes -Wstrict-prototypes -O2 -fomit-frame-pointer -std=gnu89
+HOSTCXXFLAGS = -O2
 
 ifeq ($(shell $(HOSTCC) -v 2>&1 | grep -c "clang version"), 1)
 HOSTCFLAGS  += -Wno-unused-value -Wno-unused-parameter \
