@@ -42,11 +42,7 @@ static unsigned int input_boost_off_ms = 750;
 module_param(input_boost_off_ms, uint, 0644);
 
 #ifdef CONFIG_DYNAMIC_STUNE_BOOST
-/* OOS 5.0.2 Top-app boost group */
-static int dynamic_stune_group_idx = 3;
-module_param(dynamic_stune_group_idx, uint, 0644);
-
-static int dynamic_stune_boost = 1;
+static int dynamic_stune_boost;
 module_param(dynamic_stune_boost, uint, 0644);
 #endif /* CONFIG_DYNAMIC_STUNE_BOOST */
 
@@ -194,7 +190,7 @@ static void do_input_boost_rem(struct work_struct *work)
 
 #ifdef CONFIG_DYNAMIC_STUNE_BOOST
 	/* Reset dynamic stune boost value to the default value */
-	dynamic_boost_write(dynamic_stune_group_idx, 0, true);
+	reset_stune_boost("top-app");
 #endif /* CONFIG_DYNAMIC_STUNE_BOOST */
 
 	/* Update policies for all online CPUs */
@@ -221,7 +217,7 @@ static void do_input_boost(struct kthread_work *work)
 
 #ifdef CONFIG_DYNAMIC_STUNE_BOOST
 	/* Set dynamic stune boost value */
-	dynamic_boost_write(dynamic_stune_group_idx, dynamic_stune_boost, false);
+	do_stune_boost("top-app", dynamic_stune_boost);
 #endif /* CONFIG_DYNAMIC_STUNE_BOOST */
 
 	/* Update policies for all online CPUs */
@@ -284,7 +280,7 @@ static void cpuboost_input_disconnect(struct input_handle *handle)
 {
 #ifdef CONFIG_DYNAMIC_STUNE_BOOST
 	/* Reset dynamic stune boost value to the default value */
-	dynamic_boost_write(dynamic_stune_group_idx, 0, true);
+	reset_stune_boost("top-app");
 #endif /* CONFIG_DYNAMIC_STUNE_BOOST */
 
 	input_close_device(handle);

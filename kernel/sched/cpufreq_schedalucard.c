@@ -21,9 +21,6 @@
 
 #include "sched.h"
 #include "tune.h"
-#ifdef CONFIG_STATE_NOTIFIER
-#include <linux/state_notifier.h>
-#endif
 
 unsigned long boosted_cpu_util(int cpu);
 
@@ -32,47 +29,22 @@ unsigned long boosted_cpu_util(int cpu);
 #define cpufreq_driver_fast_switch(x, y) 0
 #define cpufreq_enable_fast_switch(x)
 #define cpufreq_disable_fast_switch(x)
+#define LATENCY_MULTIPLIER			(1000)
 #define ACGOV_KTHREAD_PRIORITY	50
 
-#define UP_RATE_LIMIT_US		(1000)
-#define UP_RATE_LIMIT_US_BIGC		(1000)
-#define DOWN_RATE_LIMIT_US		(1000)
-#define FREQ_RESPONSIVENESS		1113600
-#define PUMP_INC_STEP_AT_MIN_FREQ	1
-#define PUMP_INC_STEP			1
-#define PUMP_DEC_STEP_AT_MIN_FREQ	1
-#define PUMP_DEC_STEP			1
-#define BOOST_PERC			0
-#ifdef CONFIG_STATE_NOTIFIER
-#define DEFAULT_RATE_LIMIT_SUSP_NS ((s64)(80000 * NSEC_PER_USEC))
+#define OVERWRITE_RATE_LIMIT_US
+#ifdef CONFIG_ARCH_MSM8998
+#undef OVERWRITE_RATE_LIMIT_US
 #endif
 
 struct acgov_tunables {
 	struct gov_attr_set attr_set;
-	unsigned int up_rate_limit_us;
-	unsigned int down_rate_limit_us;
-	/*
-	 * CPUs frequency scaling
-	 */
-	unsigned int cpu;
-	int freq_responsiveness;
-	int freq_responsiveness_index;
-	bool freq_responsiveness_jump;
-	int pump_inc_step;
-	int pump_inc_step_at_min_freq;
-	int pump_dec_step;
-	int pump_dec_step_at_min_freq;
-	unsigned int boost_perc;
+	spinlock_t rate_limit_us_lock;
+	unsigned int (*rate_limit_us)[2];
+	spinlock_t capacity_lock;
+	unsigned int (*capacity)[2];
+	int nelements;
 	bool iowait_boost_enable;
-	int eval_busy_for_freq;
-	spinlock_t target_capacity_lock;
-	unsigned long *up_target_capacity;
-	unsigned long *down_target_capacity;
-	int ntarget_capacity;
-	spinlock_t target_frequency_delay_lock;
-	unsigned int *up_target_frequency_delay;
-	unsigned int *down_target_frequency_delay;
-	int ntarget_frequency_delay;
 };
 
 struct acgov_policy {
@@ -83,9 +55,9 @@ struct acgov_policy {
 
 	raw_spinlock_t update_lock;  /* For shared policies */
 	u64 last_freq_update_time;
-	s64 min_rate_limit_ns;
-	s64 up_rate_delay_ns;
-	s64 down_rate_delay_ns;
+#ifndef CONFIG_MSM_TRACK_FREQ_TARGET_INDEX
+	int cur_index;
+#endif
 	unsigned int next_freq;
 
 	/* The next fields are only needed if fast switch cannot be used. */
@@ -103,8 +75,9 @@ struct acgov_cpu {
 	struct update_util_data update_util;
 	struct acgov_policy *sg_policy;
 
-	unsigned long iowait_boost;
-	unsigned long iowait_boost_max;
+	bool iowait_boost_pending;
+	unsigned int iowait_boost;
+	unsigned int iowait_boost_max;
 	u64 last_update;
 
 	/* The fields below are only needed when sharing a policy. */
@@ -119,209 +92,156 @@ struct acgov_cpu {
 };
 
 static DEFINE_PER_CPU(struct acgov_cpu, acgov_cpu);
-static DEFINE_PER_CPU(struct acgov_tunables, cached_tunables);
 
-#define LITTLE_NFREQS			17
-#define BIG_NFREQS			25
+#define LITTLE_NFREQS		22
+#define BIG_NFREQS			31
+#define DOWN_INDEX			0
+#define UP_INDEX			1
 
-static unsigned long little_up_target_capacity[LITTLE_NFREQS] = {
-	149,
-	205,
-	229,
-	253,
-	296,
-	350,
-	406,
-	469,
-	491,
-	527,
-	572,
-	584,
-	630,
-	666,
-	711,
-	763,
-	795
+/* Target capacity.  */
+static unsigned int little_capacity[LITTLE_NFREQS][2] = {
+	{0, 102},
+	{102, 123},
+	{123, 149},
+	{149, 175},
+	{175, 201},
+	{201, 227},
+	{227, 253},
+	{253, 278},
+	{278, 298},
+	{298, 324},
+	{324, 350},
+	{350, 369},
+	{369, 395},
+	{395, 421},
+	{421, 447},
+	{447, 472},
+	{472, 498},
+	{498, 524},
+	{524, 563},
+	{563, 589},
+	{589, 615},
+	{615, 641}
 };
 
-static unsigned long little_down_target_capacity[LITTLE_NFREQS] = {
-	0,
-	149,
-	205,
-	229,
-	253,
-	296,
-	350,
-	406,
-	469,
-	491,
-	527,
-	572,
-	584,
-	630,
-	666,
-	711,
-	763
+static unsigned int big_capacity[BIG_NFREQS][2] = {
+	{0, 101},
+	{101, 116},
+	{116, 141},
+	{141, 167},
+	{167, 193},
+	{193, 218},
+	{218, 244},
+	{244, 269},
+	{269, 301},
+	{301, 327},
+	{327, 353},
+	{353, 378},
+	{378, 397},
+	{397, 423},
+	{423, 449},
+	{449, 474},
+	{474, 500},
+	{500, 525},
+	{525, 551},
+	{551, 577},
+	{577, 602},
+	{602, 628},
+	{628, 653},
+	{653, 679},
+	{679, 705},
+	{705, 737},
+	{737, 756},
+	{756, 775},
+	{775, 781},
+	{781, 788},
+	{788, 820}
 };
 
-static unsigned long big_up_target_capacity[BIG_NFREQS] = {
-	149,
-	197,
-	229,
-	253,
-	296,
-	350,
-	372,
-	400,
-	445,
-	495,
-	527,
-	572,
-	598,
-	630,
-	666,
-	711,
-	743,
-	780,
-	812,
-	850,
-	868,
-	914,
-	961,
-	988,
-	1024
+static unsigned int little_rate_limit_us[LITTLE_NFREQS][2] = {
+	{20000, 20000},
+	{20000, 20000},
+	{20000, 20000},
+	{20000, 20000},
+	{20000, 20000},
+	{20000, 20000},
+	{20000, 20000},
+	{20000, 20000},
+	{20000, 20000},
+	{20000, 20000},
+	{20000, 20000},
+	{20000, 20000},
+	{20000, 20000},
+	{20000, 20000},
+	{20000, 20000},
+	{20000, 20000},
+	{20000, 20000},
+	{20000, 20000},
+	{20000, 20000},
+	{20000, 20000},
+	{20000, 20000},
+	{20000, 500}
 };
 
-static unsigned long big_down_target_capacity[BIG_NFREQS] = {
-	0,
-	149,
-	197,
-	229,
-	253,
-	296,
-	350,
-	372,
-	400,
-	445,
-	495,
-	527,
-	572,
-	598,
-	630,
-	666,
-	711,
-	743,
-	780,
-	812,
-	850,
-	868,
-	914,
-	961,
-	988
-};
-
-static unsigned int little_up_target_frequency_delay[LITTLE_NFREQS] = {
-	0,
-	0,
-	0,
-	0,
-	0,
-	0,
-	0,
-	0,
-	0,
-	0,
-	0,
-	0,
-	0,
-	0,
-	0,
-	0
-};
-
-static unsigned int little_down_target_frequency_delay[LITTLE_NFREQS] = {
-	0,
-	0,
-	0,
-	0,
-	0,
-	0,
-	0,
-	0,
-	0,
-	0,
-	0,
-	0,
-	0,
-	0,
-	0,
-	0
-};
-
-static unsigned int big_up_target_frequency_delay[BIG_NFREQS] = {
-	0,
-	0,
-	0,
-	0,
-	0,
-	0,
-	0,
-	0,
-	0,
-	0,
-	0,
-	0,
-	0,
-	0,
-	0,
-	0,
-	0,
-	0,
-	0,
-	0,
-	0,
-	0,
-	0,
-	0,
-	0
-};
-
-static unsigned int big_down_target_frequency_delay[BIG_NFREQS] = {
-	0,
-	0,
-	0,
-	0,
-	0,
-	0,
-	0,
-	0,
-	0,
-	0,
-	0,
-	0,
-	0,
-	0,
-	0,
-	0,
-	0,
-	0,
-	0,
-	0,
-	0,
-	0,
-	0,
-	0,
-	0
+static unsigned int big_rate_limit_us[BIG_NFREQS][2] = {
+	{20000, 20000},
+	{20000, 20000},
+	{20000, 20000},
+	{20000, 20000},
+	{20000, 20000},
+	{20000, 20000},
+	{20000, 20000},
+	{20000, 20000},
+	{20000, 20000},
+	{20000, 20000},
+	{20000, 20000},
+	{20000, 20000},
+	{20000, 20000},
+	{20000, 20000},
+	{20000, 20000},
+	{20000, 20000},
+	{20000, 20000},
+	{20000, 20000},
+	{20000, 20000},
+	{20000, 20000},
+	{20000, 20000},
+	{20000, 20000},
+	{20000, 20000},
+	{20000, 20000},
+	{20000, 20000},
+	{20000, 20000},
+	{20000, 20000},
+	{20000, 20000},
+	{20000, 20000},
+	{20000, 500000},
+	{500, 500}
 };
 
 /************************ Governor internals ***********************/
 
 static bool acgov_should_update_freq(struct acgov_policy *sg_policy, u64 time)
 {
-	s64 delta_ns;
+	struct cpufreq_policy *policy = sg_policy->policy;
+	s64 delta_ns, min_rate_limit_ns;
+	int index;
+	unsigned long flags;
 
 	if (sg_policy->work_in_progress)
 		return false;
+
+#ifdef CONFIG_MSM_TRACK_FREQ_TARGET_INDEX
+	index = policy->cur_index;
+#else
+	index = cpufreq_frequency_table_get_index(policy, policy->cur);
+	if (index < 0)
+		return false;
+
+	sg_policy->cur_index = index;
+#endif
+	spin_lock_irqsave(&sg_policy->tunables->rate_limit_us_lock, flags);
+	min_rate_limit_ns = min(sg_policy->tunables->rate_limit_us[index][UP_INDEX] * NSEC_PER_USEC,
+			sg_policy->tunables->rate_limit_us[index][DOWN_INDEX] * NSEC_PER_USEC);
+	spin_unlock_irqrestore(&sg_policy->tunables->rate_limit_us_lock, flags);
 
 	if (unlikely(sg_policy->need_freq_update)) {
 		sg_policy->need_freq_update = false;
@@ -332,52 +252,15 @@ static bool acgov_should_update_freq(struct acgov_policy *sg_policy, u64 time)
 		sg_policy->next_freq = UINT_MAX;
 		return true;
 	}
+	/*
+	 * next_freq value will be set to the current of cpu policy.
+	 */
+	sg_policy->next_freq = policy->cur;
 
 	delta_ns = time - sg_policy->last_freq_update_time;
 
 	/* No need to recalculate next freq for min_rate_limit_us at least */
-	return delta_ns >= sg_policy->min_rate_limit_ns;
-}
-
-static bool acgov_up_down_rate_limit(struct acgov_policy *sg_policy, u64 time,
-				     unsigned int next_freq)
-{
-	struct cpufreq_policy *policy = sg_policy->policy;
-	struct acgov_tunables *tunables = sg_policy->tunables;
-	s64 delta_ns;
-	s64 up_target_frequency_delay_ns = 0, down_target_frequency_delay_ns = 0;
-	unsigned long flags;
-#ifdef CONFIG_MSM_TRACK_FREQ_TARGET_INDEX
-	int index = policy->cur_index;
-#else
-	int index = cpufreq_frequency_table_get_index(policy, policy->cur);
-#endif
-
-	delta_ns = time - sg_policy->last_freq_update_time;
-#ifdef CONFIG_STATE_NOTIFIER
-	if (state_suspended) {
-		if (delta_ns < DEFAULT_RATE_LIMIT_SUSP_NS)
-			return true;
-	} else if (index >= 0
-				&& tunables->up_target_frequency_delay
-				&& tunables->down_target_frequency_delay) {
-		spin_lock_irqsave(&tunables->target_frequency_delay_lock, flags);
-		up_target_frequency_delay_ns =
-			tunables->up_target_frequency_delay[index] * NSEC_PER_USEC;
-		down_target_frequency_delay_ns =
-			tunables->down_target_frequency_delay[index] * NSEC_PER_USEC;
-		spin_unlock_irqrestore(&tunables->target_frequency_delay_lock, flags);
-	}
-#endif
-	if (next_freq > sg_policy->next_freq &&
-	    delta_ns < (sg_policy->up_rate_delay_ns + up_target_frequency_delay_ns))
-			return true;
-
-	if (next_freq < sg_policy->next_freq &&
-	    delta_ns < (sg_policy->down_rate_delay_ns + down_target_frequency_delay_ns))
-			return true;
-
-	return false;
+	return delta_ns >= min_rate_limit_ns;
 }
 
 static void acgov_update_commit(struct acgov_policy *sg_policy, u64 time,
@@ -385,10 +268,7 @@ static void acgov_update_commit(struct acgov_policy *sg_policy, u64 time,
 {
 	struct cpufreq_policy *policy = sg_policy->policy;
 
-	if (acgov_up_down_rate_limit(sg_policy, time, next_freq))
-		return;
-
-	if (next_freq == CPUFREQ_ENTRY_INVALID || policy->cur == next_freq)
+	if (sg_policy->next_freq == next_freq)
 		return;
 
 	sg_policy->next_freq = next_freq;
@@ -407,103 +287,72 @@ static void acgov_update_commit(struct acgov_policy *sg_policy, u64 time,
 	}
 }
 
-static unsigned int resolve_target_freq(struct cpufreq_policy *policy,
-					int index, int fr_index, unsigned int step, bool isup)
-{
-	struct cpufreq_frequency_table *table;
-	unsigned int target_freq = policy->cur;
-	int i = 0;
-
-	if (!policy || !step)
-		return CPUFREQ_ENTRY_INVALID;
-
-	table = policy->freq_table;
-	if (isup) {
-		if (fr_index > index) {
-			return table[fr_index].frequency;
-		}
-		for (i = (index + 1); (table[i].frequency != CPUFREQ_TABLE_END); i++) {
-			if (table[i].frequency != CPUFREQ_ENTRY_INVALID) {
-				target_freq = table[i].frequency;
-				step--;
-				if (step == 0) {
-					break;
-				}
-			}
-		}
-	} else {
-		for (i = (index - 1); i >= 0; i--) {
-			if (table[i].frequency != CPUFREQ_ENTRY_INVALID) {
-				target_freq = table[i].frequency;
-				step--;
-				if (step == 0) {
-					break;
-				}
-			}
-		}
-	}
-	return target_freq;
-}
-
 /**
  * get_next_freq - Compute a new frequency for a given cpufreq policy.
  * @sg_policy: schedalucard policy object to compute the new frequency for.
  * @util: Current CPU utilization.
  * @max: CPU capacity.
+ * @time: Updating time.
+ *
+ * next_freq = frequency taken from up_capacity/down_capacity table 
+ * according to the current CPU utilization and the up_rate_limit/down_rate_limit
+ * table value.
  *
  * The lowest driver-supported frequency which is equal or greater than the raw
  * next_freq (as calculated above) is returned, subject to policy min/max and
  * cpufreq driver limitations.
  */
-static unsigned int get_next_freq(struct acgov_policy *sg_policy, unsigned long util,
-				  unsigned long max)
+static unsigned int get_next_freq(struct acgov_policy *sg_policy,
+				  unsigned long util, unsigned long max, u64 time)
 {
 	struct cpufreq_policy *policy = sg_policy->policy;
 	struct acgov_tunables *tunables = sg_policy->tunables;
-	int pump_inc_step = tunables->pump_inc_step;
-	int pump_dec_step = tunables->pump_dec_step;
-	unsigned int next_freq = CPUFREQ_ENTRY_INVALID;
-	unsigned long down_cap = 0, up_cap = 0;
-	unsigned long cur_util =
-		util + ((util * tunables->boost_perc) / 100);
-	unsigned long flags;
-	int fr_index = -1;
+	struct cpufreq_frequency_table *table = policy->freq_table;
+	unsigned int next_freq = policy->cur;
+	s64 delta_ns;
+	unsigned long flags, rlflags;
+	int i;
 #ifdef CONFIG_MSM_TRACK_FREQ_TARGET_INDEX
 	int index = policy->cur_index;
 #else
-	int index = cpufreq_frequency_table_get_index(policy, policy->cur);
-
-	if (index < 0)
-		goto skip;
+	int index = sg_policy->cur_index;
 #endif
 
-	if (policy->cur < tunables->freq_responsiveness) {
-		pump_inc_step = tunables->pump_inc_step_at_min_freq;
-		pump_dec_step = tunables->pump_dec_step_at_min_freq;
-		if (tunables->freq_responsiveness_jump)
-			fr_index = tunables->freq_responsiveness_index;			
-	}
-	if (!tunables->up_target_capacity
-		|| !tunables->down_target_capacity)
-		return next_freq;
+	delta_ns = time - sg_policy->last_freq_update_time;
+	spin_lock_irqsave(&tunables->capacity_lock, flags);
+	spin_lock_irqsave(&tunables->rate_limit_us_lock, rlflags);
+	if (util >= tunables->capacity[index][UP_INDEX]
+		 && policy->cur < policy->max
+		 && delta_ns >=
+			 tunables->rate_limit_us[index][UP_INDEX] * NSEC_PER_USEC) {
+		for (i = index + 1; i < tunables->nelements; i++) {
+			if (table[i].frequency == CPUFREQ_ENTRY_INVALID)
+				continue;
 
-	spin_lock_irqsave(&tunables->target_capacity_lock, flags);
-	up_cap = tunables->up_target_capacity[index];
-	down_cap = tunables->down_target_capacity[index];
-	spin_unlock_irqrestore(&tunables->target_capacity_lock, flags);
+			next_freq = table[i].frequency;
+			if ((util <= tunables->capacity[i][UP_INDEX])
+				 || (delta_ns <
+					 tunables->rate_limit_us[i][UP_INDEX] * NSEC_PER_USEC))
+				break;
+		}
+	} else if (util < tunables->capacity[index][DOWN_INDEX]
+		 && policy->cur > policy->min
+		 && delta_ns >=
+			 tunables->rate_limit_us[index][DOWN_INDEX] * NSEC_PER_USEC) {
+		for (i = index - 1; i >= 0; i--) {
+			if (table[i].frequency == CPUFREQ_ENTRY_INVALID)
+				continue;
 
-	if (cur_util >= up_cap
-		&& policy->cur < policy->max) {
-		next_freq = resolve_target_freq(policy,
-			index, fr_index, pump_inc_step, true);
-	} else if (cur_util < down_cap
-		&& policy->cur > policy->min) {
-		next_freq = resolve_target_freq(policy,
-			index, fr_index, pump_dec_step, false);
+			next_freq = table[i].frequency;
+			if ((util >= tunables->capacity[i][DOWN_INDEX])
+				 || (delta_ns <
+					 tunables->rate_limit_us[i][DOWN_INDEX] * NSEC_PER_USEC))
+				break;
+		}
 	}
-#ifndef CONFIG_MSM_TRACK_FREQ_TARGET_INDEX
-skip:
-#endif
+	spin_unlock_irqrestore(&tunables->rate_limit_us_lock, rlflags);
+	spin_unlock_irqrestore(&tunables->capacity_lock, flags);
+
 	return next_freq;
 }
 
@@ -534,8 +383,9 @@ static void acgov_get_util(unsigned long *util, unsigned long *max, u64 time)
 
 	*util = boosted_cpu_util(cpu);
 	if (likely(use_pelt()))
-		*util = min((*util + rt), max_cap);
+		*util = *util + rt;
 
+	*util = min(*util, max_cap);
 	*max = max_cap;
 }
 
@@ -548,30 +398,54 @@ static void acgov_set_iowait_boost(struct acgov_cpu *sg_cpu, u64 time,
 		return;
 
 	if (flags & SCHED_CPUFREQ_IOWAIT) {
-		sg_cpu->iowait_boost = sg_cpu->iowait_boost_max;
+		if (sg_cpu->iowait_boost_pending)
+			return;
+
+		sg_cpu->iowait_boost_pending = true;
+
+		if (sg_cpu->iowait_boost) {
+			sg_cpu->iowait_boost <<= 1;
+			if (sg_cpu->iowait_boost > sg_cpu->iowait_boost_max)
+				sg_cpu->iowait_boost = sg_cpu->iowait_boost_max;
+		} else {
+			sg_cpu->iowait_boost = sg_cpu->sg_policy->policy->min;
+		}
 	} else if (sg_cpu->iowait_boost) {
 		s64 delta_ns = time - sg_cpu->last_update;
 
 		/* Clear iowait_boost if the CPU apprears to have been idle. */
-		if (delta_ns > TICK_NSEC)
+		if (delta_ns > TICK_NSEC) {
 			sg_cpu->iowait_boost = 0;
+			sg_cpu->iowait_boost_pending = false;
+		}
 	}
 }
 
 static void acgov_iowait_boost(struct acgov_cpu *sg_cpu, unsigned long *util,
 			       unsigned long *max)
 {
-	unsigned long boost_util = sg_cpu->iowait_boost;
-	unsigned long boost_max = sg_cpu->iowait_boost_max;
+	unsigned int boost_util, boost_max;
 
-	if (!boost_util)
+	if (!sg_cpu->iowait_boost)
 		return;
+
+	if (sg_cpu->iowait_boost_pending) {
+		sg_cpu->iowait_boost_pending = false;
+	} else {
+		sg_cpu->iowait_boost >>= 1;
+		if (sg_cpu->iowait_boost < sg_cpu->sg_policy->policy->min) {
+			sg_cpu->iowait_boost = 0;
+			return;
+		}
+	}
+
+	boost_util = sg_cpu->iowait_boost;
+	boost_max = sg_cpu->iowait_boost_max;
 
 	if (*util * boost_max < *max * boost_util) {
 		*util = boost_util;
 		*max = boost_max;
 	}
-	sg_cpu->iowait_boost >>= 1;
 }
 
 #ifdef CONFIG_NO_HZ_COMMON
@@ -595,9 +469,7 @@ static void acgov_update_single(struct update_util_data *hook, u64 time,
 	struct cpufreq_policy *policy = sg_policy->policy;
 	unsigned long util, max;
 	unsigned int next_f;
-	unsigned int busy_freq = sg_policy->tunables->freq_responsiveness;
-	int eval_busy = sg_policy->tunables->eval_busy_for_freq;
-	bool busy = false;
+	bool busy;
 
 	acgov_set_iowait_boost(sg_cpu, time, flags);
 	sg_cpu->last_update = time;
@@ -605,25 +477,23 @@ static void acgov_update_single(struct update_util_data *hook, u64 time,
 	if (!acgov_should_update_freq(sg_policy, time))
 		return;
 
-	if (eval_busy) {
-		busy = acgov_cpu_is_busy(sg_cpu);
-		if (eval_busy > 1)
-			busy_freq = policy->cur;
-	}
+	busy = acgov_cpu_is_busy(sg_cpu);
 
 	if (flags & SCHED_CPUFREQ_DL) {
 		next_f = policy->cpuinfo.max_freq;
 	} else {
 		acgov_get_util(&util, &max, time);
 		acgov_iowait_boost(sg_cpu, &util, &max);
-		next_f = get_next_freq(sg_policy, util, max);
+		next_f = get_next_freq(sg_policy, util, max, time);
 		/*
 		 * Do not reduce the frequency if the CPU has not been idle
-		 * recently, as the reduction is likely to be premature then.
+		 * recently and if the policy limits doesn't change, as 
+		 * the reduction is likely to be premature then.
 		 */
-		if (busy && next_f < busy_freq
-			&& sg_policy->next_freq != UINT_MAX)
-			next_f = policy->cur;
+		if (busy
+			 && next_f < sg_policy->next_freq
+			 && sg_policy->next_freq != UINT_MAX)
+			next_f = sg_policy->next_freq;
 	}
 	acgov_update_commit(sg_policy, time, next_f);
 }
@@ -650,6 +520,7 @@ static unsigned int acgov_next_freq_shared(struct acgov_cpu *sg_cpu, u64 time)
 		delta_ns = time - j_sg_cpu->last_update;
 		if (delta_ns > TICK_NSEC) {
 			j_sg_cpu->iowait_boost = 0;
+			j_sg_cpu->iowait_boost_pending = false;
 			continue;
 		}
 		if (j_sg_cpu->flags & SCHED_CPUFREQ_DL)
@@ -665,7 +536,7 @@ static unsigned int acgov_next_freq_shared(struct acgov_cpu *sg_cpu, u64 time)
 		acgov_iowait_boost(j_sg_cpu, &util, &max);
 	}
 
-	return get_next_freq(sg_policy, util, max);
+	return get_next_freq(sg_policy, util, max, time);
 }
 
 static void acgov_update_shared(struct update_util_data *hook, u64 time,
@@ -718,13 +589,13 @@ static void acgov_irq_work(struct irq_work *irq_work)
 	sg_policy = container_of(irq_work, struct acgov_policy, irq_work);
 
 	/*
-	 * For RT and deadline tasks, the alucardched governor shoots the
+	 * For RT and deadline tasks, the schedalucard governor shoots the
 	 * frequency to maximum. Special care must be taken to ensure that this
 	 * kthread doesn't result in the same behavior.
 	 *
 	 * This is (mostly) guaranteed by the work_in_progress flag. The flag is
 	 * updated only at the end of the acgov_work() function and before that
-	 * the alucardched governor rejects all other frequency scaling requests.
+	 * the schedalucard governor rejects all other frequency scaling requests.
 	 *
 	 * There is a very rare case though, where the RT thread yields right
 	 * after the work_in_progress flag is cleared. The effects of that are
@@ -743,98 +614,256 @@ static inline struct acgov_tunables *to_acgov_tunables(struct gov_attr_set *attr
 	return container_of(attr_set, struct acgov_tunables, attr_set);
 }
 
-static DEFINE_MUTEX(min_rate_lock);
-
-static void update_min_rate_limit_us(struct acgov_policy *sg_policy)
-{
-	mutex_lock(&min_rate_lock);
-	sg_policy->min_rate_limit_ns = min(sg_policy->up_rate_delay_ns,
-					   sg_policy->down_rate_delay_ns);
-	mutex_unlock(&min_rate_lock);
-}
-
 /* up_rate_limit_us */
 static ssize_t up_rate_limit_us_show(struct gov_attr_set *attr_set, char *buf)
 {
 	struct acgov_tunables *tunables = to_acgov_tunables(attr_set);
+	int i;
+	ssize_t ret = 0;
+	unsigned long flags;
 
-	return sprintf(buf, "%u\n", tunables->up_rate_limit_us);
+	if (!tunables->rate_limit_us)
+		return -EINVAL;
+
+	spin_lock_irqsave(&tunables->rate_limit_us_lock, flags);
+	for (i = 0; i < tunables->nelements; i++)
+		ret += sprintf(buf + ret, "%u%s", tunables->rate_limit_us[i][UP_INDEX],
+			       ":");
+	spin_unlock_irqrestore(&tunables->rate_limit_us_lock, flags);
+
+	sprintf(buf + ret - 1, "\n");
+
+	return ret;
+}
+
+static ssize_t up_rate_limit_us_store(struct gov_attr_set *attr_set,
+				      const char *buf, size_t count)
+{
+	struct acgov_tunables *tunables = to_acgov_tunables(attr_set);
+	const char *cp;
+	int i;
+	int ntokens = 1;
+	unsigned long flags;
+
+	if (!tunables->rate_limit_us)
+		return -EINVAL;
+
+	cp = buf;
+	while ((cp = strpbrk(cp + 1, ":")))
+		ntokens++;
+
+	if (ntokens != tunables->nelements)
+		return -EINVAL;
+
+	cp = buf;
+	spin_lock_irqsave(&tunables->rate_limit_us_lock, flags);
+	for (i = 0; i < ntokens; i++) {
+		if (sscanf(cp, "%u", &tunables->rate_limit_us[i][UP_INDEX]) != 1) {
+			spin_unlock_irqrestore(&tunables->rate_limit_us_lock, flags);
+		} else {
+			pr_debug("index[%d], val[%u]\n", i, tunables->rate_limit_us[i][UP_INDEX]);
+		}
+
+		cp = strpbrk(cp, ":");
+		if (!cp)
+			break;
+		cp++;
+	}
+	spin_unlock_irqrestore(&tunables->rate_limit_us_lock, flags);
+
+	return count;
 }
 
 /* down_rate_limit_us */
 static ssize_t down_rate_limit_us_show(struct gov_attr_set *attr_set, char *buf)
 {
 	struct acgov_tunables *tunables = to_acgov_tunables(attr_set);
+	int i;
+	ssize_t ret = 0;
+	unsigned long flags;
 
-	return sprintf(buf, "%u\n", tunables->down_rate_limit_us);
+	if (!tunables->rate_limit_us)
+		return -EINVAL;
+
+	spin_lock_irqsave(&tunables->rate_limit_us_lock, flags);
+	for (i = 0; i < tunables->nelements; i++)
+		ret += sprintf(buf + ret, "%u%s", tunables->rate_limit_us[i][DOWN_INDEX],
+			       ":");
+	spin_unlock_irqrestore(&tunables->rate_limit_us_lock, flags);
+
+	sprintf(buf + ret - 1, "\n");
+
+	return ret;
 }
 
-/* freq_responsiveness */
-static ssize_t freq_responsiveness_show(struct gov_attr_set *attr_set, char *buf)
+static ssize_t down_rate_limit_us_store(struct gov_attr_set *attr_set,
+				      const char *buf, size_t count)
 {
 	struct acgov_tunables *tunables = to_acgov_tunables(attr_set);
+	const char *cp;
+	int i;
+	int ntokens = 1;
+	unsigned long flags;
 
-	return sprintf(buf, "%d\n", tunables->freq_responsiveness);
+	if (!tunables->rate_limit_us)
+		return -EINVAL;
+
+	cp = buf;
+	while ((cp = strpbrk(cp + 1, ":")))
+		ntokens++;
+
+	if (ntokens != tunables->nelements)
+		return -EINVAL;
+
+	cp = buf;
+	spin_lock_irqsave(&tunables->rate_limit_us_lock, flags);
+	for (i = 0; i < ntokens; i++) {
+		if (sscanf(cp, "%u", &tunables->rate_limit_us[i][DOWN_INDEX]) != 1) {
+			spin_unlock_irqrestore(&tunables->rate_limit_us_lock, flags);
+		} else {
+			pr_debug("index[%d], val[%u]\n", i, tunables->rate_limit_us[i][DOWN_INDEX]);
+		}
+
+		cp = strpbrk(cp, ":");
+		if (!cp)
+			break;
+		cp++;
+	}
+	spin_unlock_irqrestore(&tunables->rate_limit_us_lock, flags);
+
+	return count;
 }
 
-/* freq_responsiveness_index */
-static ssize_t freq_responsiveness_index_show(struct gov_attr_set *attr_set, char *buf)
+/* up_capacity */
+static ssize_t up_capacity_show(struct gov_attr_set *attr_set, char *buf)
 {
 	struct acgov_tunables *tunables = to_acgov_tunables(attr_set);
+	int i;
+	ssize_t ret = 0;
+	unsigned long flags;
 
-	return sprintf(buf, "%d\n", tunables->freq_responsiveness_index);
+	if (!tunables->capacity)
+		return -EINVAL;
+
+	spin_lock_irqsave(&tunables->capacity_lock, flags);
+	for (i = 0; i < tunables->nelements; i++)
+		ret += sprintf(buf + ret, "%u%s", tunables->capacity[i][UP_INDEX],
+			       ":");
+	spin_unlock_irqrestore(&tunables->capacity_lock, flags);
+
+	sprintf(buf + ret - 1, "\n");
+
+	return ret;
 }
 
-/* freq_responsiveness_jump */
-static ssize_t freq_responsiveness_jump_show(struct gov_attr_set *attr_set,
-					char *buf)
+static ssize_t up_capacity_store(struct gov_attr_set *attr_set,
+				      const char *buf, size_t count)
 {
 	struct acgov_tunables *tunables = to_acgov_tunables(attr_set);
+	const char *cp;
+	int i;
+	int ntokens = 1;
+	unsigned int value = 0;
+	unsigned long flags;
 
-	return sprintf(buf, "%u\n", tunables->freq_responsiveness_jump);
+	if (!tunables->capacity)
+		return -EINVAL;
+
+	cp = buf;
+	while ((cp = strpbrk(cp + 1, ":")))
+		ntokens++;
+
+	if (ntokens != tunables->nelements)
+		return -EINVAL;
+
+	cp = buf;
+	spin_lock_irqsave(&tunables->capacity_lock, flags);
+	for (i = 0; i < ntokens; i++) {
+		if (sscanf(cp, "%u", &value) != 1) {
+			spin_unlock_irqrestore(&tunables->capacity_lock, flags);
+			return -EINVAL;
+		} else {
+			pr_debug("index[%d], val[%u]\n", i, tunables->capacity[i][UP_INDEX]);
+		}
+		if (!value)
+			value = 1;
+		tunables->capacity[i][UP_INDEX] = value;
+		cp = strpbrk(cp, ":");
+		if (!cp)
+			break;
+		cp++;
+	}
+	spin_unlock_irqrestore(&tunables->capacity_lock, flags);
+
+	return count;
 }
 
-/* pump_inc_step_at_min_freq */
-static ssize_t pump_inc_step_at_min_freq_show(struct gov_attr_set *attr_set, char *buf)
+/* down_capacity */
+static ssize_t down_capacity_show(struct gov_attr_set *attr_set, char *buf)
 {
 	struct acgov_tunables *tunables = to_acgov_tunables(attr_set);
+	int i;
+	ssize_t ret = 0;
+	unsigned long flags;
 
-	return sprintf(buf, "%d\n", tunables->pump_inc_step_at_min_freq);
+	if (!tunables->capacity)
+		return -EINVAL;
+
+	spin_lock_irqsave(&tunables->capacity_lock, flags);
+	for (i = 0; i < tunables->nelements; i++)
+		ret += sprintf(buf + ret, "%u%s", tunables->capacity[i][DOWN_INDEX],
+			       ":");
+	spin_unlock_irqrestore(&tunables->capacity_lock, flags);
+
+	sprintf(buf + ret - 1, "\n");
+
+	return ret;
 }
 
-/* pump_inc_step */
-static ssize_t pump_inc_step_show(struct gov_attr_set *attr_set, char *buf)
+static ssize_t down_capacity_store(struct gov_attr_set *attr_set,
+				      const char *buf, size_t count)
 {
 	struct acgov_tunables *tunables = to_acgov_tunables(attr_set);
+	const char *cp;
+	int i;
+	int ntokens = 1;
+	unsigned int value = 0;
+	unsigned long flags;
 
-	return sprintf(buf, "%d\n", tunables->pump_inc_step);
+	if (!tunables->capacity)
+		return -EINVAL;
+
+	cp = buf;
+	while ((cp = strpbrk(cp + 1, ":")))
+		ntokens++;
+
+	if (ntokens != tunables->nelements)
+		return -EINVAL;
+
+	cp = buf;
+	spin_lock_irqsave(&tunables->capacity_lock, flags);
+	for (i = 0; i < ntokens; i++) {
+		if (sscanf(cp, "%u", &value) != 1) {
+			spin_unlock_irqrestore(&tunables->capacity_lock, flags);
+			return -EINVAL;
+		} else {
+			if (!value
+				&& i > 0)
+				value = 1;
+			tunables->capacity[i][DOWN_INDEX] = value;
+			pr_debug("index[%d], val[%u]\n", i, tunables->capacity[i][DOWN_INDEX]);
+		}
+
+		cp = strpbrk(cp, ":");
+		if (!cp)
+			break;
+		cp++;
+	}
+	spin_unlock_irqrestore(&tunables->capacity_lock, flags);
+
+	return count;
 }
 
-/* pump_dec_step_at_min_freq */
-static ssize_t pump_dec_step_at_min_freq_show(struct gov_attr_set *attr_set, char *buf)
-{
-	struct acgov_tunables *tunables = to_acgov_tunables(attr_set);
-
-	return sprintf(buf, "%d\n", tunables->pump_dec_step_at_min_freq);
-}
-
-/* pump_dec_step */
-static ssize_t pump_dec_step_show(struct gov_attr_set *attr_set, char *buf)
-{
-	struct acgov_tunables *tunables = to_acgov_tunables(attr_set);
-
-	return sprintf(buf, "%d\n", tunables->pump_dec_step);
-}
-
-/* boost_perc */
-static ssize_t boost_perc_show(struct gov_attr_set *attr_set, char *buf)
-{
-	struct acgov_tunables *tunables = to_acgov_tunables(attr_set);
-
-	return sprintf(buf, "%u\n", tunables->boost_perc);
-}
-
-/* iowait_boost_enable */
 static ssize_t iowait_boost_enable_show(struct gov_attr_set *attr_set,
 					char *buf)
 {
@@ -843,301 +872,13 @@ static ssize_t iowait_boost_enable_show(struct gov_attr_set *attr_set,
 	return sprintf(buf, "%u\n", tunables->iowait_boost_enable);
 }
 
-/* eval_busy_for_freq */
-static ssize_t eval_busy_for_freq_show(struct gov_attr_set *attr_set,
-					char *buf)
-{
-	struct acgov_tunables *tunables = to_acgov_tunables(attr_set);
-
-	return sprintf(buf, "%u\n", tunables->eval_busy_for_freq);
-}
-
-/* up_target_capacity */
-static ssize_t up_target_capacity_show(struct gov_attr_set *attr_set,
-					char *buf)
-{
-	struct acgov_tunables *tunables = to_acgov_tunables(attr_set);
-	int i;
-	ssize_t ret = 0;
-	unsigned long flags;
-
-	if (!tunables->up_target_capacity)
-		return -EINVAL;
-
-	spin_lock_irqsave(&tunables->target_capacity_lock, flags);
-	for (i = 0; i < tunables->ntarget_capacity; i++)
-		ret += sprintf(buf + ret, "%lu%s", tunables->up_target_capacity[i],
-			       ":");
-	spin_unlock_irqrestore(&tunables->target_capacity_lock, flags);
-
-	sprintf(buf + ret - 1, "\n");
-
-	return ret;
-}
-
-/* down_target_capacity */
-static ssize_t down_target_capacity_show(struct gov_attr_set *attr_set,
-					char *buf)
-{
-	struct acgov_tunables *tunables = to_acgov_tunables(attr_set);
-	int i;
-	ssize_t ret = 0;
-	unsigned long flags;
-
-	if (!tunables->down_target_capacity)
-		return -EINVAL;
-
-	spin_lock_irqsave(&tunables->target_capacity_lock, flags);
-	for (i = 0; i < tunables->ntarget_capacity; i++)
-		ret += sprintf(buf + ret, "%lu%s", tunables->down_target_capacity[i],
-			       ":");
-	spin_unlock_irqrestore(&tunables->target_capacity_lock, flags);
-
-	sprintf(buf + ret - 1, "\n");
-
-	return ret;
-}
-
-/* up_target_frequency_delay */
-static ssize_t up_target_frequency_delay_show(struct gov_attr_set *attr_set,
-					char *buf)
-{
-	struct acgov_tunables *tunables = to_acgov_tunables(attr_set);
-	int i;
-	ssize_t ret = 0;
-	unsigned long flags;
-
-	if (!tunables->up_target_frequency_delay)
-		return -EINVAL;
-
-	spin_lock_irqsave(&tunables->target_frequency_delay_lock, flags);
-	for (i = 0; i < tunables->ntarget_frequency_delay; i++)
-		ret += sprintf(buf + ret, "%u%s", tunables->up_target_frequency_delay[i],
-			       ":");
-	spin_unlock_irqrestore(&tunables->target_frequency_delay_lock, flags);
-
-	sprintf(buf + ret - 1, "\n");
-
-	return ret;
-}
-
-/* down_target_frequency_delay */
-static ssize_t down_target_frequency_delay_show(struct gov_attr_set *attr_set,
-					char *buf)
-{
-	struct acgov_tunables *tunables = to_acgov_tunables(attr_set);
-	int i;
-	ssize_t ret = 0;
-	unsigned long flags;
-
-	if (!tunables->down_target_frequency_delay)
-		return -EINVAL;
-
-	spin_lock_irqsave(&tunables->target_frequency_delay_lock, flags);
-	for (i = 0; i < tunables->ntarget_frequency_delay; i++)
-		ret += sprintf(buf + ret, "%u%s", tunables->down_target_frequency_delay[i],
-			       ":");
-	spin_unlock_irqrestore(&tunables->target_frequency_delay_lock, flags);
-
-	sprintf(buf + ret - 1, "\n");
-
-	return ret;
-}
-
-/* up_rate_limit_us */
-static ssize_t up_rate_limit_us_store(struct gov_attr_set *attr_set,
-				      const char *buf, size_t count)
-{
-	struct acgov_tunables *tunables = to_acgov_tunables(attr_set);
-	struct acgov_policy *sg_policy;
-	unsigned int rate_limit_us;
-
-	if (kstrtouint(buf, 10, &rate_limit_us))
-		return -EINVAL;
-
-	tunables->up_rate_limit_us = rate_limit_us;
-
-	list_for_each_entry(sg_policy, &attr_set->policy_list, tunables_hook) {
-		sg_policy->up_rate_delay_ns = rate_limit_us * NSEC_PER_USEC;
-		update_min_rate_limit_us(sg_policy);
-	}
-
-	return count;
-}
-
-/* down_rate_limit_us */
-static ssize_t down_rate_limit_us_store(struct gov_attr_set *attr_set,
-					const char *buf, size_t count)
-{
-	struct acgov_tunables *tunables = to_acgov_tunables(attr_set);
-	struct acgov_policy *sg_policy;
-	unsigned int rate_limit_us;
-
-	if (kstrtouint(buf, 10, &rate_limit_us))
-		return -EINVAL;
-
-	tunables->down_rate_limit_us = rate_limit_us;
-
-	list_for_each_entry(sg_policy, &attr_set->policy_list, tunables_hook) {
-		sg_policy->down_rate_delay_ns = rate_limit_us * NSEC_PER_USEC;
-		update_min_rate_limit_us(sg_policy);
-	}
-
-	return count;
-}
-
-/* freq_responsiveness */
-static ssize_t freq_responsiveness_store(struct gov_attr_set *attr_set,
-					const char *buf, size_t count)
-{
-	struct acgov_tunables *tunables = to_acgov_tunables(attr_set);
-	struct cpufreq_policy *cpu_policy;
-	int input;
-
-	if (kstrtouint(buf, 10, &input))
-		return -EINVAL;
-
-	if (input == tunables->freq_responsiveness)
-		return count;
-
-	tunables->freq_responsiveness = input;
-	tunables->freq_responsiveness_index = -1;
-
-	cpu_policy = cpufreq_cpu_get(tunables->cpu);
-	if (!cpu_policy)
-		return count;
-
-	tunables->freq_responsiveness_index = 
-		cpufreq_frequency_table_get_index(cpu_policy, input);
-
-	cpufreq_cpu_put(cpu_policy);
-
-	return count;
-}
-
-/* freq_responsiveness_jump */
-static ssize_t freq_responsiveness_jump_store(struct gov_attr_set *attr_set,
-					 const char *buf, size_t count)
-{
-	struct acgov_tunables *tunables = to_acgov_tunables(attr_set);
-	bool enable;
-
-	if (strtobool(buf, &enable))
-		return -EINVAL;
-
-	tunables->freq_responsiveness_jump = enable;
-
-	return count;
-}
-
-/* pump_inc_step_at_min_freq */
-static ssize_t pump_inc_step_at_min_freq_store(struct gov_attr_set *attr_set,
-					const char *buf, size_t count)
-{
-	struct acgov_tunables *tunables = to_acgov_tunables(attr_set);
-	int input;
-
-	if (kstrtouint(buf, 10, &input))
-		return -EINVAL;
-
-	input = min(max(1, input), 6);
-
-	if (input == tunables->pump_inc_step_at_min_freq)
-		return count;
-
-	tunables->pump_inc_step_at_min_freq = input;
-
-	return count;
-}
-
-/* pump_inc_step */
-static ssize_t pump_inc_step_store(struct gov_attr_set *attr_set,
-					const char *buf, size_t count)
-{
-	struct acgov_tunables *tunables = to_acgov_tunables(attr_set);
-	int input;
-
-	if (kstrtouint(buf, 10, &input))
-		return -EINVAL;
-
-	input = min(max(1, input), 6);
-
-	if (input == tunables->pump_inc_step)
-		return count;
-
-	tunables->pump_inc_step = input;
-
-	return count;
-}
-
-/* pump_dec_step_at_min_freq */
-static ssize_t pump_dec_step_at_min_freq_store(struct gov_attr_set *attr_set,
-					const char *buf, size_t count)
-{
-	struct acgov_tunables *tunables = to_acgov_tunables(attr_set);
-	int input;
-
-	if (kstrtouint(buf, 10, &input))
-		return -EINVAL;
-
-	input = min(max(1, input), 6);
-
-	if (input == tunables->pump_dec_step_at_min_freq)
-		return count;
-
-	tunables->pump_dec_step_at_min_freq = input;
-
-	return count;
-}
-
-/* pump_dec_step */
-static ssize_t pump_dec_step_store(struct gov_attr_set *attr_set,
-					const char *buf, size_t count)
-{
-	struct acgov_tunables *tunables = to_acgov_tunables(attr_set);
-	int input;
-
-	if (kstrtouint(buf, 10, &input))
-		return -EINVAL;
-
-	input = min(max(1, input), 6);
-
-	if (input == tunables->pump_dec_step)
-		return count;
-
-	tunables->pump_dec_step = input;
-
-	return count;
-}
-
-/* boost_perc */
-static ssize_t boost_perc_store(struct gov_attr_set *attr_set,
-					const char *buf, size_t count)
-{
-	struct acgov_tunables *tunables = to_acgov_tunables(attr_set);
-	int input;
-
-	if (kstrtouint(buf, 10, &input))
-		return -EINVAL;
-
-	input = min(max(0, input), 20);
-
-	if (input == tunables->boost_perc)
-		return count;
-
-	tunables->boost_perc = input;
-
-	return count;
-}
-
-/* iowait_boost_enable */
 static ssize_t iowait_boost_enable_store(struct gov_attr_set *attr_set,
 					 const char *buf, size_t count)
 {
 	struct acgov_tunables *tunables = to_acgov_tunables(attr_set);
 	bool enable;
 
-	if (strtobool(buf, &enable))
+	if (kstrtobool(buf, &enable))
 		return -EINVAL;
 
 	tunables->iowait_boost_enable = enable;
@@ -1145,220 +886,18 @@ static ssize_t iowait_boost_enable_store(struct gov_attr_set *attr_set,
 	return count;
 }
 
-/* eval_busy_for_freq */
-static ssize_t eval_busy_for_freq_store(struct gov_attr_set *attr_set,
-					 const char *buf, size_t count)
-{
-	struct acgov_tunables *tunables = to_acgov_tunables(attr_set);
-	int input;
-
-	if (kstrtouint(buf, 10, &input))
-		return -EINVAL;
-
-	input = min(max(0, input), 2);
-
-	if (input == tunables->eval_busy_for_freq)
-		return count;
-
-	tunables->eval_busy_for_freq = input;
-
-	return count;
-}
-
-/* up_target_capacity */
-static ssize_t up_target_capacity_store(struct gov_attr_set *attr_set,
-					 const char *buf, size_t count)
-{
-	struct acgov_tunables *tunables = to_acgov_tunables(attr_set);
-	const char *cp;
-	int i;
-	int ntokens = 1;
-	unsigned long flags;
-
-	if (!tunables->up_target_capacity)
-		return -EINVAL;
-
-	cp = buf;
-	while ((cp = strpbrk(cp + 1, ":")))
-		ntokens++;
-
-	if (ntokens != tunables->ntarget_capacity)
-		return -EINVAL;
-
-	cp = buf;
-	spin_lock_irqsave(&tunables->target_capacity_lock, flags);
-	for (i = 0; i < ntokens; i++) {
-		if (sscanf(cp, "%lu", &tunables->up_target_capacity[i]) != 1) {
-			spin_unlock_irqrestore(&tunables->target_capacity_lock, flags);
-			return -EINVAL;
-		} else {
-			pr_debug("CPU[%u], index[%d], val[%lu]\n", tunables->cpu, i, tunables->up_target_capacity[i]);
-		}
-
-		cp = strpbrk(cp, ":");
-		if (!cp)
-			break;
-		cp++;
-	}
-	spin_unlock_irqrestore(&tunables->target_capacity_lock, flags);
-
-	return count;
-}
-
-/* down_target_capacity */
-static ssize_t down_target_capacity_store(struct gov_attr_set *attr_set,
-					 const char *buf, size_t count)
-{
-	struct acgov_tunables *tunables = to_acgov_tunables(attr_set);
-	const char *cp;
-	int i;
-	int ntokens = 1;
-	unsigned long flags;
-
-	if (!tunables->down_target_capacity)
-		return -EINVAL;
-
-	cp = buf;
-	while ((cp = strpbrk(cp + 1, ":")))
-		ntokens++;
-
-	if (ntokens != tunables->ntarget_capacity)
-		return -EINVAL;
-
-	cp = buf;
-	spin_lock_irqsave(&tunables->target_capacity_lock, flags);
-	for (i = 0; i < ntokens; i++) {
-		if (sscanf(cp, "%lu", &tunables->down_target_capacity[i]) != 1) {
-			spin_unlock_irqrestore(&tunables->target_capacity_lock, flags);
-			return -EINVAL;
-		} else {
-			pr_debug("CPU[%u], index[%d], val[%lu]\n", tunables->cpu, i, tunables->down_target_capacity[i]);
-		}
-
-		cp = strpbrk(cp, ":");
-		if (!cp)
-			break;
-		cp++;
-	}
-	spin_unlock_irqrestore(&tunables->target_capacity_lock, flags);
-
-	return count;
-}
-
-/* up_target_frequency_delay */
-static ssize_t up_target_frequency_delay_store(struct gov_attr_set *attr_set,
-					 const char *buf, size_t count)
-{
-	struct acgov_tunables *tunables = to_acgov_tunables(attr_set);
-	const char *cp;
-	int i;
-	int ntokens = 1;
-	unsigned long flags;
-
-	if (!tunables->up_target_frequency_delay)
-		return -EINVAL;
-
-	cp = buf;
-	while ((cp = strpbrk(cp + 1, ":")))
-		ntokens++;
-
-	if (ntokens != tunables->ntarget_frequency_delay)
-		return -EINVAL;
-
-	cp = buf;
-	spin_lock_irqsave(&tunables->target_frequency_delay_lock, flags);
-	for (i = 0; i < ntokens; i++) {
-		if (sscanf(cp, "%u", &tunables->up_target_frequency_delay[i]) != 1) {
-			spin_unlock_irqrestore(&tunables->target_frequency_delay_lock, flags);
-			return -EINVAL;
-		} else {
-			pr_debug("CPU[%u], index[%d], val[%u]\n", tunables->cpu, i, tunables->up_target_frequency_delay[i]);
-		}
-
-		cp = strpbrk(cp, ":");
-		if (!cp)
-			break;
-		cp++;
-	}
-	spin_unlock_irqrestore(&tunables->target_frequency_delay_lock, flags);
-
-	return count;
-}
-
-/* down_target_frequency_delay */
-static ssize_t down_target_frequency_delay_store(struct gov_attr_set *attr_set,
-					 const char *buf, size_t count)
-{
-	struct acgov_tunables *tunables = to_acgov_tunables(attr_set);
-	const char *cp;
-	int i;
-	int ntokens = 1;
-	unsigned long flags;
-
-	if (!tunables->down_target_frequency_delay)
-		return -EINVAL;
-
-	cp = buf;
-	while ((cp = strpbrk(cp + 1, ":")))
-		ntokens++;
-
-	if (ntokens != tunables->ntarget_frequency_delay)
-		return -EINVAL;
-
-	cp = buf;
-	spin_lock_irqsave(&tunables->target_frequency_delay_lock, flags);
-	for (i = 0; i < ntokens; i++) {
-		if (sscanf(cp, "%u", &tunables->down_target_frequency_delay[i]) != 1) {
-			spin_unlock_irqrestore(&tunables->target_frequency_delay_lock, flags);
-			return -EINVAL;
-		} else {
-			pr_debug("CPU[%u], index[%d], val[%u]\n", tunables->cpu, i, tunables->down_target_frequency_delay[i]);
-		}
-
-		cp = strpbrk(cp, ":");
-		if (!cp)
-			break;
-		cp++;
-	}
-	spin_unlock_irqrestore(&tunables->target_frequency_delay_lock, flags);
-
-	return count;
-}
-
 static struct governor_attr up_rate_limit_us = __ATTR_RW(up_rate_limit_us);
 static struct governor_attr down_rate_limit_us = __ATTR_RW(down_rate_limit_us);
-static struct governor_attr freq_responsiveness = __ATTR_RW(freq_responsiveness);
-static struct governor_attr freq_responsiveness_index = __ATTR_RO(freq_responsiveness_index);
-static struct governor_attr freq_responsiveness_jump = __ATTR_RW(freq_responsiveness_jump);
-static struct governor_attr pump_inc_step_at_min_freq = __ATTR_RW(pump_inc_step_at_min_freq);
-static struct governor_attr pump_inc_step = __ATTR_RW(pump_inc_step);
-static struct governor_attr pump_dec_step_at_min_freq = __ATTR_RW(pump_dec_step_at_min_freq);
-static struct governor_attr pump_dec_step = __ATTR_RW(pump_dec_step);
-static struct governor_attr boost_perc = __ATTR_RW(boost_perc);
+static struct governor_attr up_capacity = __ATTR_RW(up_capacity);
+static struct governor_attr down_capacity = __ATTR_RW(down_capacity);
 static struct governor_attr iowait_boost_enable = __ATTR_RW(iowait_boost_enable);
-static struct governor_attr eval_busy_for_freq = __ATTR_RW(eval_busy_for_freq);
-static struct governor_attr up_target_capacity = __ATTR_RW(up_target_capacity);
-static struct governor_attr down_target_capacity = __ATTR_RW(down_target_capacity);
-static struct governor_attr up_target_frequency_delay = __ATTR_RW(up_target_frequency_delay);
-static struct governor_attr down_target_frequency_delay = __ATTR_RW(down_target_frequency_delay);
 
 static struct attribute *acgov_attributes[] = {
 	&up_rate_limit_us.attr,
 	&down_rate_limit_us.attr,
-	&freq_responsiveness.attr,
-	&freq_responsiveness_index.attr,
-	&freq_responsiveness_jump.attr,
-	&pump_inc_step_at_min_freq.attr,
-	&pump_inc_step.attr,
-	&pump_dec_step_at_min_freq.attr,
-	&pump_dec_step.attr,
-	&boost_perc.attr,
+	&up_capacity.attr,
+	&down_capacity.attr,
 	&iowait_boost_enable.attr,
-	&eval_busy_for_freq.attr,
-	&up_target_capacity.attr,
-	&down_target_capacity.attr,
-	&up_target_frequency_delay.attr,
-	&down_target_frequency_delay.attr,
 	NULL
 };
 
@@ -1443,10 +982,67 @@ static void acgov_kthread_stop(struct acgov_policy *sg_policy)
 static struct acgov_tunables *acgov_tunables_alloc(struct acgov_policy *sg_policy)
 {
 	struct acgov_tunables *tunables;
+	struct cpufreq_policy *policy = sg_policy->policy;
+	struct cpufreq_frequency_table *table = policy->freq_table;
+	unsigned int freq;
+	unsigned long max_cap;
+	unsigned long flags;
+	int i;
 
 	tunables = kzalloc(sizeof(*tunables), GFP_KERNEL);
 	if (tunables) {
 		gov_attr_set_init(&tunables->attr_set, &sg_policy->tunables_hook);
+		spin_lock_init(&tunables->rate_limit_us_lock);
+		spin_lock_init(&tunables->capacity_lock);
+		if (policy->cpu < 4) {
+			tunables->rate_limit_us = little_rate_limit_us;
+			tunables->capacity = little_capacity;
+			tunables->nelements = LITTLE_NFREQS;
+		} else {
+			tunables->rate_limit_us = big_rate_limit_us;
+			tunables->capacity = big_capacity;
+			tunables->nelements = BIG_NFREQS;
+		}
+		/* Auto-populate up_capacity/down_capacity */
+		max_cap = arch_scale_cpu_capacity(NULL, policy->cpu);
+		spin_lock_irqsave(&tunables->capacity_lock, flags);
+		for (i = 0; i < tunables->nelements; i++) {
+			if (table[i].frequency == CPUFREQ_ENTRY_INVALID)
+				continue;
+			freq = arch_scale_freq_invariant() ?
+				policy->cpuinfo.max_freq : table[i].frequency;
+			freq = freq + (freq >> 2);
+			tunables->capacity[i][UP_INDEX] = ((max_cap * table[i].frequency) / freq) + 1;
+			if (i == 0) {
+				tunables->capacity[i][DOWN_INDEX] = 0;
+			} else {
+				tunables->capacity[i][DOWN_INDEX] = tunables->capacity[i - 1][UP_INDEX];
+			}	
+		}
+		spin_unlock_irqrestore(&tunables->capacity_lock, flags);
+#ifdef OVERWRITE_RATE_LIMIT_US
+		spin_lock_irqsave(&tunables->rate_limit_us_lock, flags);		
+		if (policy->up_transition_delay_us && policy->down_transition_delay_us) {
+			for (i = 0; i < tunables->nelements; i++) {
+				tunables->rate_limit_us[i][UP_INDEX] = policy->up_transition_delay_us;
+				tunables->rate_limit_us[i][DOWN_INDEX] = policy->down_transition_delay_us;
+			}
+		} else {
+			unsigned int lat;
+
+			lat = policy->cpuinfo.transition_latency / NSEC_PER_USEC;
+			for (i = 0; i < tunables->nelements; i++) {
+				tunables->rate_limit_us[i][UP_INDEX] = LATENCY_MULTIPLIER;
+				tunables->rate_limit_us[i][DOWN_INDEX] = LATENCY_MULTIPLIER;
+				if (lat) {
+					tunables->rate_limit_us[i][UP_INDEX] *= lat;
+					tunables->rate_limit_us[i][DOWN_INDEX] *= lat;
+				}
+			}
+		}
+		spin_unlock_irqrestore(&tunables->rate_limit_us_lock, flags);
+#endif
+		tunables->iowait_boost_enable = policy->iowait_boost_enable;
 		if (!have_governor_per_policy())
 			global_tunables = tunables;
 	}
@@ -1458,117 +1054,10 @@ static void acgov_tunables_free(struct acgov_tunables *tunables)
 	if (!have_governor_per_policy())
 		global_tunables = NULL;
 
+	tunables->rate_limit_us = NULL;
+	tunables->capacity = NULL;
+
 	kfree(tunables);
-}
-
-static void store_tunables_data(struct acgov_tunables *tunables,
-		struct cpufreq_policy *policy)
-{
-	struct acgov_tunables *ptunables;
-	unsigned int cpu = cpumask_first(policy->related_cpus);
-
-	ptunables = &per_cpu(cached_tunables, cpu);
-	if (!ptunables)
-		return;
-	ptunables->up_rate_limit_us = tunables->up_rate_limit_us;
-	ptunables->down_rate_limit_us = tunables->down_rate_limit_us;
-	ptunables->freq_responsiveness = tunables->freq_responsiveness;
-	ptunables->freq_responsiveness_index = tunables->freq_responsiveness_index;
-	ptunables->freq_responsiveness_jump = tunables->freq_responsiveness_jump;
-	ptunables->pump_inc_step_at_min_freq = tunables->pump_inc_step_at_min_freq;
-	ptunables->pump_dec_step_at_min_freq = tunables->pump_dec_step_at_min_freq;
-	ptunables->pump_inc_step = tunables->pump_inc_step;
-	ptunables->pump_dec_step = tunables->pump_dec_step;
-	ptunables->boost_perc = tunables->boost_perc;
-	ptunables->iowait_boost_enable = tunables->iowait_boost_enable;
-	ptunables->eval_busy_for_freq = tunables->eval_busy_for_freq;
-	tunables->up_target_capacity = NULL;
-	tunables->down_target_capacity = NULL;
-	tunables->up_target_frequency_delay = NULL;
-	tunables->down_target_frequency_delay = NULL;
-	pr_debug("tunables data saved for cpu[%u]\n", cpu);
-}
-
-static void get_tunables_data(struct acgov_tunables *tunables,
-		struct cpufreq_policy *policy)
-{
-	struct acgov_tunables *ptunables;
-	unsigned int lat;
-	unsigned int cpu = cpumask_first(policy->related_cpus);
-
-	ptunables = &per_cpu(cached_tunables, cpu);
-	if (!ptunables)
-		goto initialize;
-
-	tunables->cpu = cpu;
-	if (cpu < 2) {
-		tunables->up_target_capacity = little_up_target_capacity;
-		tunables->down_target_capacity = little_down_target_capacity;
-		tunables->ntarget_capacity = LITTLE_NFREQS;
-		tunables->up_target_frequency_delay = little_up_target_frequency_delay;
-		tunables->down_target_frequency_delay = little_down_target_frequency_delay;
-		tunables->ntarget_frequency_delay = LITTLE_NFREQS;
-	} else {
-		tunables->up_target_capacity = big_up_target_capacity;
-		tunables->down_target_capacity = big_down_target_capacity;
-		tunables->ntarget_capacity = BIG_NFREQS;
-		tunables->up_target_frequency_delay = big_up_target_frequency_delay;
-		tunables->down_target_frequency_delay = big_down_target_frequency_delay;
-		tunables->ntarget_frequency_delay = BIG_NFREQS;
-	}
-	spin_lock_init(&tunables->target_capacity_lock);
-	spin_lock_init(&tunables->target_frequency_delay_lock);
-	if (ptunables->freq_responsiveness > 0) {
-		tunables->up_rate_limit_us = ptunables->up_rate_limit_us;
-		tunables->down_rate_limit_us = ptunables->down_rate_limit_us;
-		tunables->freq_responsiveness = ptunables->freq_responsiveness;
-		tunables->freq_responsiveness_index = ptunables->freq_responsiveness_index;
-		if (tunables->freq_responsiveness_index < 0) {
-			tunables->freq_responsiveness_index =
-				cpufreq_frequency_table_get_index(policy, tunables->freq_responsiveness);
-		}
-		tunables->freq_responsiveness_jump = ptunables->freq_responsiveness_jump;
-		tunables->pump_inc_step_at_min_freq = ptunables->pump_inc_step_at_min_freq;
-		tunables->pump_dec_step_at_min_freq = ptunables->pump_dec_step_at_min_freq;
-		tunables->pump_inc_step = ptunables->pump_inc_step;
-		tunables->pump_dec_step = ptunables->pump_dec_step;
-		tunables->boost_perc = ptunables->boost_perc;
-		tunables->iowait_boost_enable = ptunables->iowait_boost_enable;
-		tunables->eval_busy_for_freq = ptunables->eval_busy_for_freq;
-		pr_debug("tunables data restored for cpu[%u]\n", cpu);
-		goto out;
-	}
-
-initialize:
-#ifdef CONFIG_MACH_MSM8996_H1
-	if (cpu < 2)
-		tunables->up_rate_limit_us = UP_RATE_LIMIT_US;
-	else
-		tunables->up_rate_limit_us = UP_RATE_LIMIT_US_BIGC;
-
-	tunables->down_rate_limit_us = DOWN_RATE_LIMIT_US;
-#else
-	tunables->up_rate_limit_us = LATENCY_MULTIPLIER;
-	tunables->down_rate_limit_us = LATENCY_MULTIPLIER;
-#endif
-	lat = policy->cpuinfo.transition_latency / NSEC_PER_USEC;
-	if (lat) {
-		tunables->up_rate_limit_us *= lat;
-		tunables->down_rate_limit_us *= lat;
-	}
-	tunables->freq_responsiveness = FREQ_RESPONSIVENESS;
-	tunables->freq_responsiveness_index =
-		cpufreq_frequency_table_get_index(policy, FREQ_RESPONSIVENESS);
-	tunables->freq_responsiveness_jump = true;
-	tunables->pump_inc_step_at_min_freq = PUMP_INC_STEP_AT_MIN_FREQ;
-	tunables->pump_dec_step_at_min_freq = PUMP_DEC_STEP_AT_MIN_FREQ;
-	tunables->pump_inc_step = PUMP_INC_STEP;
-	tunables->pump_dec_step = PUMP_DEC_STEP;
-	tunables->boost_perc = BOOST_PERC;
-	tunables->eval_busy_for_freq = 0;
-	pr_debug("tunables data initialized for cpu[%u]\n", cpu);
-out:
-	return;
 }
 
 static int acgov_init(struct cpufreq_policy *policy)
@@ -1613,7 +1102,6 @@ static int acgov_init(struct cpufreq_policy *policy)
 		goto stop_kthread;
 	}
 
-	get_tunables_data(tunables, policy);
 	policy->governor_data = sg_policy;
 	sg_policy->tunables = tunables;
 
@@ -1654,7 +1142,6 @@ static int acgov_exit(struct cpufreq_policy *policy)
 
 	mutex_lock(&global_tunables_lock);
 
-	store_tunables_data(sg_policy->tunables, policy);
 	count = gov_attr_set_put(&tunables->attr_set, &sg_policy->tunables_hook);
 	policy->governor_data = NULL;
 	if (!count)
@@ -1664,8 +1151,8 @@ static int acgov_exit(struct cpufreq_policy *policy)
 
 	acgov_kthread_stop(sg_policy);
 	acgov_policy_free(sg_policy);
-	cpufreq_disable_fast_switch(policy);
 
+	cpufreq_disable_fast_switch(policy);
 	return 0;
 }
 
@@ -1674,13 +1161,8 @@ static int acgov_start(struct cpufreq_policy *policy)
 	struct acgov_policy *sg_policy = policy->governor_data;
 	unsigned int cpu;
 
-	sg_policy->up_rate_delay_ns =
-		sg_policy->tunables->up_rate_limit_us * NSEC_PER_USEC;
-	sg_policy->down_rate_delay_ns =
-		sg_policy->tunables->down_rate_limit_us * NSEC_PER_USEC;
-	update_min_rate_limit_us(sg_policy);
 	sg_policy->last_freq_update_time = 0;
-	sg_policy->next_freq = policy->cur;
+	sg_policy->next_freq = UINT_MAX;
 	sg_policy->work_in_progress = false;
 	sg_policy->need_freq_update = false;
 
@@ -1713,7 +1195,6 @@ static int acgov_stop(struct cpufreq_policy *policy)
 		irq_work_sync(&sg_policy->irq_work);
 		kthread_cancel_work_sync(&sg_policy->work);
 	}
-
 	return 0;
 }
 
