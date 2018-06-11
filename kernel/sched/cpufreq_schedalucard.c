@@ -90,7 +90,7 @@ struct acgov_cpu {
 
 static DEFINE_PER_CPU(struct acgov_cpu, acgov_cpu);
 
-#define LITTLE_NFREQS		17
+#define LITTLE_NFREQS		16
 #define BIG_NFREQS			25
 #define DOWN_INDEX			0
 #define UP_INDEX			1
@@ -113,7 +113,6 @@ static unsigned int little_capacity[LITTLE_NFREQS][2] = {
 	{630, 666},
 	{666, 711},
 	{711, 763},
-	{763, 793}
 };
 
 static unsigned int big_capacity[BIG_NFREQS][2] = {
@@ -145,7 +144,6 @@ static unsigned int big_capacity[BIG_NFREQS][2] = {
 };
 
 static unsigned int little_rate_limit_us[LITTLE_NFREQS][2] = {
-	{20000, 20000},
 	{20000, 20000},
 	{20000, 20000},
 	{20000, 20000},
@@ -969,7 +967,7 @@ static struct acgov_tunables *acgov_tunables_alloc(struct acgov_policy *sg_polic
 		gov_attr_set_init(&tunables->attr_set, &sg_policy->tunables_hook);
 		spin_lock_init(&tunables->rate_limit_us_lock);
 		spin_lock_init(&tunables->capacity_lock);
-		if (policy->cpu < 4) {
+		if (policy->cpu < 2) {
 			tunables->rate_limit_us = little_rate_limit_us;
 			tunables->capacity = little_capacity;
 			tunables->nelements = LITTLE_NFREQS;
