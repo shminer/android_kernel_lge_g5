@@ -272,6 +272,7 @@ static const struct kernel_param_ops param_ops_num_clusters = {
 };
 device_param_cb(num_clusters, &param_ops_num_clusters, NULL, 0644);
 
+#ifdef CONFIG_MSM_PERFORMANCE_HOTPLUG_ON
 static int set_max_cpus(const char *buf, const struct kernel_param *kp)
 {
 	unsigned int i, ntokens = 0;
@@ -329,7 +330,6 @@ static const struct kernel_param_ops param_ops_max_cpus = {
 	.get = get_max_cpus,
 };
 
-#ifdef CONFIG_MSM_PERFORMANCE_HOTPLUG_ON
 device_param_cb(max_cpus, &param_ops_max_cpus, NULL, 0644);
 #endif
 

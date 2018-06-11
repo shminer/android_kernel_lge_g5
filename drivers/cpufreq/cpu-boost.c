@@ -41,7 +41,7 @@ module_param(input_boost_ms, uint, 0644);
 static bool sched_boost_on_input;
 module_param(sched_boost_on_input, bool, 0644);
 
-static bool sched_boost_active;
+static bool sched_boost_active = true;
 
 static struct delayed_work input_boost_rem;
 static u64 last_input_time;
