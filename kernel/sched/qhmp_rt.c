@@ -5,7 +5,6 @@
 
 #include "sched.h"
 
-#include <linux/interrupt.h>
 #include <linux/slab.h>
 #include <trace/events/sched.h>
 
@@ -1179,25 +1178,12 @@ dec_hmp_sched_stats_rt(struct rq *rq, struct task_struct *p)
 	dec_cumulative_runnable_avg(&rq->hmp_stats, p);
 }
 
-#ifdef CONFIG_SCHED_QHMP
 static void
 fixup_hmp_sched_stats_rt(struct rq *rq, struct task_struct *p,
 			 u32 new_task_load)
 {
 	fixup_cumulative_runnable_avg(&rq->hmp_stats, p, new_task_load);
 }
-#else
-static void
-fixup_hmp_sched_stats_rt(struct rq *rq, struct task_struct *p,
-			 u32 new_task_load, u32 new_pred_demand)
-{
-	s64 task_load_delta = (s64)new_task_load - task_load(p);
-	s64 pred_demand_delta = PRED_DEMAND_DELTA;
-
-	fixup_cumulative_runnable_avg(&rq->hmp_stats, p, task_load_delta,
-				      pred_demand_delta);
-}
-#endif
 
 #else	/* CONFIG_SCHED_HMP */
 
@@ -1428,41 +1414,6 @@ static void yield_task_rt(struct rq *rq)
 #ifdef CONFIG_SMP
 static int find_lowest_rq(struct task_struct *task);
 
-/*
- * Determine if destination CPU explicity disable softirqs,
- * this is different from CPUs which are running softirqs.
- * pc is the preempt count to check.
- */
-static bool softirq_masked(int pc)
-{
-	return !!((pc & SOFTIRQ_MASK)>= SOFTIRQ_DISABLE_OFFSET);
-}
-
-/*
- * Return whether the task on the given cpu is currently non-preemptible
- * while handling a potentially long softint, or if the task is likely
- * to block preemptions soon because it is a ksoftirq thread that is
- * handling slow softints.
- */
-bool
-task_may_not_preempt(struct task_struct *task, int cpu)
-{
-	__u32 softirqs = per_cpu(active_softirqs, cpu) |
-			 __IRQ_STAT(cpu, __softirq_pending);
-	struct task_struct *cpu_ksoftirqd = per_cpu(ksoftirqd, cpu);
-	int task_pc = 0;
-
-	if (task)
-		task_pc = task_preempt_count(task);
-
-	if (softirq_masked(task_pc))
-		return true;
-
-	return ((softirqs & LONG_SOFTIRQ_MASK) &&
-		(task == cpu_ksoftirqd ||
-		 task_pc & SOFTIRQ_MASK));
-}
-
 static int
 select_task_rq_rt_hmp(struct task_struct *p, int cpu, int sd_flag, int flags)
 {
@@ -1482,7 +1433,6 @@ select_task_rq_rt(struct task_struct *p, int cpu, int sd_flag, int flags)
 {
 	struct task_struct *curr;
 	struct rq *rq;
-	bool may_not_preempt;
 
 	if (p->nr_cpus_allowed == 1)
 		goto out;
@@ -1500,12 +1450,7 @@ select_task_rq_rt(struct task_struct *p, int cpu, int sd_flag, int flags)
 	curr = ACCESS_ONCE(rq->curr); /* unlocked access */
 
 	/*
-	 * If the current task on @p's runqueue is a softirq task,
-	 * it may run without preemption for a time that is
-	 * ill-suited for a waiting RT task. Therefore, try to
-	 * wake this RT task on another runqueue.
-	 *
-	 * Also, if the current task on @p's runqueue is an RT task, then
+	 * If the current task on @p's runqueue is an RT task, then
 	 * try to see if we can wake this RT task up on another
 	 * runqueue. Otherwise simply start this RT task
 	 * on its current runqueue.
@@ -1526,21 +1471,12 @@ select_task_rq_rt(struct task_struct *p, int cpu, int sd_flag, int flags)
 	 * This test is optimistic, if we get it wrong the load-balancer
 	 * will have to sort it out.
 	 */
-	may_not_preempt = task_may_not_preempt(curr, cpu);
-	if (curr && (may_not_preempt ||
-		     (unlikely(rt_task(curr)) &&
-		      (curr->nr_cpus_allowed < 2 ||
-		       curr->prio <= p->prio)))) {
+	if (curr && unlikely(rt_task(curr)) &&
+	    (curr->nr_cpus_allowed < 2 ||
+	     curr->prio <= p->prio)) {
 		int target = find_lowest_rq(p);
- 		/*
-		 * If cpu is non-preemptible, prefer remote cpu
-		 * even if it's running a higher-prio task.
- 		 * Otherwise: Possible race. Don't bother moving it if the
-		 * destination CPU is not running a lower priority task.
- 		 */
-		if (target != -1 &&
-		    (may_not_preempt ||
-		     p->prio < cpu_rq(target)->rt.highest_prio.curr))
+
+		if (target != -1)
 			cpu = target;
 	}
 	rcu_read_unlock();
@@ -1732,18 +1668,16 @@ static struct task_struct *pick_highest_pushable_task(struct rq *rq, int cpu)
 static DEFINE_PER_CPU(cpumask_var_t, local_cpu_mask);
 
 #ifdef CONFIG_SCHED_HMP
-
 static int find_lowest_rq_hmp(struct task_struct *task)
 {
 	struct cpumask *lowest_mask = __get_cpu_var(local_cpu_mask);
-	struct cpumask candidate_mask = CPU_MASK_NONE;
-	struct sched_cluster *cluster;
+	int cpu_cost, min_cost = INT_MAX;
+	u64 cpu_load, min_load = ULLONG_MAX;
 	int best_cpu = -1;
 	int prev_cpu = task_cpu(task);
-	u64 cpu_load, min_load = ULLONG_MAX;
 	int i;
-	int restrict_cluster = sched_boost() ? 0 :
-				sysctl_sched_restrict_cluster_spill;
+	int restrict_tasks_spread = sched_boost() ? 0 :
+			sysctl_sched_restrict_tasks_spread;
 
 	/* Make sure the mask is initialized first */
 	if (unlikely(!lowest_mask))
@@ -1761,30 +1695,52 @@ static int find_lowest_rq_hmp(struct task_struct *task)
 	 * the best one based on our affinity and topology.
 	 */
 
-	for_each_sched_cluster(cluster) {
-		cpumask_and(&candidate_mask, &cluster->cpus, lowest_mask);
+	/* Skip performance considerations and optimize for power.
+	 * Worst case we'll be iterating over all CPUs here. CPU
+	 * online mask should be taken care of when constructing
+	 * the lowest_mask.
+	 */
+	for_each_cpu(i, lowest_mask) {
+		cpu_load = scale_load_to_cpu(
+			cpu_rq(i)->hmp_stats.cumulative_runnable_avg, i);
 
-		if (cpumask_empty(&candidate_mask))
+		cpu_cost = power_cost(cpu_load, i);
+		trace_sched_cpu_load(cpu_rq(i), idle_cpu(i), mostly_idle_cpu(i),
+				     sched_irqload(i), cpu_cost, cpu_temp(i));
+
+		if (sched_boost() && capacity(cpu_rq(i)) != max_capacity)
 			continue;
 
-		for_each_cpu(i, &candidate_mask) {
-			if (sched_cpu_high_irqload(i))
+		if (power_delta_exceeded(cpu_cost, min_cost)) {
+			if (cpu_cost > min_cost)
 				continue;
 
-			cpu_load = cpu_rq(i)->hmp_stats.cumulative_runnable_avg;
-			if (!restrict_cluster)
-				cpu_load = scale_load_to_cpu(cpu_load, i);
+			min_cost = cpu_cost;
+			min_load = ULLONG_MAX;
+			best_cpu = -1;
+		}
 
-			if (cpu_load < min_load ||
-				(cpu_load == min_load &&
-				(i == prev_cpu || (best_cpu != prev_cpu &&
-				cpus_share_cache(prev_cpu, i))))) {
-				min_load = cpu_load;
+		if (sched_cpu_high_irqload(i))
+			continue;
+
+		if (restrict_tasks_spread) {
+			if (best_cpu == -1) {
+				best_cpu = i;
+				continue;
+
+			}
+
+			if (cpu_cost < min_cost) {
+				min_cost = cpu_cost;
 				best_cpu = i;
 			}
+		} else if (cpu_load < min_load ||
+		    (cpu_load == min_load &&
+		     (i == prev_cpu || (best_cpu != prev_cpu &&
+					cpus_share_cache(prev_cpu, i))))) {
+			min_load = cpu_load;
+			best_cpu = i;
 		}
-		if (restrict_cluster && best_cpu != -1)
-			break;
 	}
 
 	return best_cpu;
@@ -1890,16 +1846,6 @@ static struct rq *find_lock_lowest_rq(struct task_struct *task, struct rq *rq)
 			break;
 
 		lowest_rq = cpu_rq(cpu);
-
-		if (lowest_rq->rt.highest_prio.curr <= task->prio) {
-			/*
-			 * Target rq has tasks of equal or higher priority,
-			 * retrying does not release any lock and is unlikely
-			 * to yield a different result.
-			 */
-			lowest_rq = NULL;
-			break;
-		}
 
 		/* if the prio of this runqueue changed, try again */
 		if (double_lock_balance(rq, lowest_rq)) {

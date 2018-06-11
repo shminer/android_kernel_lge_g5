@@ -109,43 +109,6 @@ struct cpufreq_policy {
 	 */
 	struct rw_semaphore	rwsem;
 
-
-	/*
-	 * Fast switch flags:
-	 * - fast_switch_possible should be set by the driver if it can
-	 *   guarantee that frequency can be changed on any CPU sharing the
-	 *   policy and that the change will affect all of the policy CPUs then.
-	 * - fast_switch_enabled is to be set by governors that support fast
-	 *   freqnency switching with the help of cpufreq_enable_fast_switch().
-	 */
-	bool                    fast_switch_possible;
-	bool                    fast_switch_enabled;
-
- 
-    /*
-	 * Remote DVFS flag (Not added to the driver structure as we don't want
-	 * to access another structure from scheduler hotpath).
-	 *
-	 * Should be set if any CPU (from same or different policy) can do DVFS
-	 * on behalf of any other CPU.
-	 */
-	bool			dvfs_possible_from_any_cpu;
-
-	/*
-	 * Preferred average time interval between consecutive invocations of
-	 * the driver to set the frequency for this policy.  To be set by the
-	 * scaling driver (0, which is the default, means no preference).
-	 */
-	unsigned int		up_transition_delay_us;
-	unsigned int		down_transition_delay_us;
-
-	/* Boost switch for tasks with p->in_iowait set */
-	bool iowait_boost_enable;
-
-	/* Cached frequency lookup from cpufreq_driver_resolve_freq. */
-	unsigned int cached_target_freq;
-	int cached_resolved_idx;
-
 	/* Synchronization for frequency transitions */
 	bool			transition_ongoing; /* Tracks transition status */
 	spinlock_t		transition_lock;
@@ -536,8 +499,6 @@ int cpufreq_driver_target(struct cpufreq_policy *policy,
 int __cpufreq_driver_target(struct cpufreq_policy *policy,
 				   unsigned int target_freq,
 				   unsigned int relation);
-unsigned int cpufreq_driver_resolve_freq(struct cpufreq_policy *policy,
-					 unsigned int target_freq);
 int cpufreq_register_governor(struct cpufreq_governor *governor);
 void cpufreq_unregister_governor(struct cpufreq_governor *governor);
 
@@ -566,9 +527,6 @@ extern struct cpufreq_governor cpufreq_gov_conservative;
 #elif defined(CONFIG_CPU_FREQ_DEFAULT_GOV_INTERACTIVE)
 extern struct cpufreq_governor cpufreq_gov_interactive;
 #define CPUFREQ_DEFAULT_GOVERNOR	(&cpufreq_gov_interactive)
-#elif defined(CONFIG_CPU_FREQ_DEFAULT_GOV_SCHED)
-extern struct cpufreq_governor cpufreq_gov_sched;
-#define CPUFREQ_DEFAULT_GOVERNOR	(&cpufreq_gov_sched)
 #elif defined(CONFIG_CPU_FREQ_DEFAULT_GOV_NIGHTMARE)
 extern struct cpufreq_governor cpufreq_gov_nightmare;
 #define CPUFREQ_DEFAULT_GOVERNOR	(&cpufreq_gov_nightmare)
@@ -748,7 +706,4 @@ int cpufreq_generic_init(struct cpufreq_policy *policy,
 
 void acct_update_power(struct task_struct *p, cputime_t cputime);
 
-struct sched_domain;
-unsigned long cpufreq_scale_freq_capacity(struct sched_domain *sd, int cpu);
-unsigned long cpufreq_scale_max_freq_capacity(int cpu);
 #endif /* _LINUX_CPUFREQ_H */
