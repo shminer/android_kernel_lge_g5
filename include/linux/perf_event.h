@@ -339,15 +339,10 @@ struct perf_event {
 	int				nr_siblings;
 	int				group_flags;
 	struct perf_event		*group_leader;
-
-	/*
-	 * Protect the pmu, attributes and context of a group leader.
-	 * Note: does not protect the pointer to the group_leader.
-	 */
-	struct mutex			group_leader_mutex;
 	struct pmu			*pmu;
 
 	enum perf_event_active_state	state;
+	enum perf_event_active_state hotplug_save_state;
 	unsigned int			attach_state;
 	local64_t			count;
 	atomic64_t			child_count;
@@ -482,7 +477,6 @@ struct perf_event_context {
 	 */
 	struct mutex			mutex;
 
-	struct list_head		active_ctx_list;
 	struct list_head		pinned_groups;
 	struct list_head		flexible_groups;
 	struct list_head		event_list;
@@ -531,12 +525,9 @@ struct perf_cpu_context {
 	struct perf_event_context	*task_ctx;
 	int				active_oncpu;
 	int				exclusive;
-
-	raw_spinlock_t			hrtimer_lock;
 	struct hrtimer			hrtimer;
 	ktime_t				hrtimer_interval;
-	unsigned int			hrtimer_active;
-
+	struct list_head		rotation_list;
 	struct pmu			*unique_pmu;
 	struct perf_cgroup		*cgrp;
 };
