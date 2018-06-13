@@ -119,18 +119,17 @@ static unsigned int __do_compat_ioctl_nr(unsigned int cmd32)
 static void  __copy_atomic_commit_struct(struct mdp_layer_commit  *commit,
 	struct mdp_layer_commit32 *commit32)
 {
-	unsigned int destSize = sizeof(commit->commit_v1.reserved);
-	unsigned int srcSize = sizeof(commit32->commit_v1.reserved);
-	unsigned int count = (destSize <= srcSize ? destSize : srcSize);
+	unsigned int destsize = sizeof(commit->commit_v1.reserved);
+	unsigned int srcsize = sizeof(commit32->commit_v1.reserved);
+	unsigned int count = (destsize <= srcsize ? destsize : srcsize);
 	commit->version = commit32->version;
 	commit->commit_v1.flags = commit32->commit_v1.flags;
 	commit->commit_v1.input_layer_cnt =
 		commit32->commit_v1.input_layer_cnt;
 	commit->commit_v1.left_roi = commit32->commit_v1.left_roi;
 	commit->commit_v1.right_roi = commit32->commit_v1.right_roi;
-
 	memcpy(&commit->commit_v1.reserved, &commit32->commit_v1.reserved,
-			count);
+		count);
 }
 
 static struct mdp_input_layer32 *__create_layer_list32(
@@ -229,6 +228,7 @@ static struct mdp_input_layer *__create_layer_list(
 		layer->transp_mask = layer32->transp_mask;
 		layer->bg_color = layer32->bg_color;
 		layer->blend_op = layer32->blend_op;
+		layer->color_space = layer32->color_space;
 		layer->src_rect = layer32->src_rect;
 		layer->dst_rect = layer32->dst_rect;
 		layer->buffer = layer32->buffer;
@@ -306,6 +306,7 @@ static int __compat_atomic_commit(struct fb_info *info, unsigned int cmd,
 	struct mdp_input_layer *layer_list = NULL;
 	struct mdp_input_layer32 *layer_list32 = NULL;
 	struct mdp_output_layer *output_layer = NULL;
+	struct mdp_frc_info *frc_info = NULL;
 
 	/* copy top level memory from 32 bit structure to kernel memory */
 	ret = copy_from_user(&commit32, (void __user *)argp,
@@ -316,6 +317,8 @@ static int __compat_atomic_commit(struct fb_info *info, unsigned int cmd,
 		ret = -EFAULT;
 		return ret;
 	}
+
+	memset(&commit, 0, sizeof(struct mdp_layer_commit));
 	__copy_atomic_commit_struct(&commit, &commit32);
 
 	if (commit32.commit_v1.output_layer) {
@@ -365,6 +368,29 @@ static int __compat_atomic_commit(struct fb_info *info, unsigned int cmd,
 		}
 	}
 
+	if (commit32.commit_v1.frc_info) {
+		int buffer_size = sizeof(struct mdp_frc_info);
+
+		frc_info = kzalloc(buffer_size, GFP_KERNEL);
+		if (!frc_info) {
+			ret = -ENOMEM;
+			goto frc_err;
+		}
+
+		ret = copy_from_user(frc_info,
+				compat_ptr(commit32.commit_v1.frc_info),
+				buffer_size);
+		if (ret) {
+			pr_err("fail to copy frc info from user, ptr %p\n",
+				compat_ptr(commit32.commit_v1.frc_info));
+			kfree(frc_info);
+			ret = -EFAULT;
+			goto frc_err;
+		}
+
+		commit.commit_v1.frc_info = frc_info;
+	}
+
 	ret = mdss_fb_atomic_commit(info, &commit, file);
 	if (ret)
 		pr_err("atomic commit failed ret:%d\n", ret);
@@ -377,6 +403,9 @@ static int __compat_atomic_commit(struct fb_info *info, unsigned int cmd,
 		kfree(layer_list[i].scale);
 		mdss_mdp_free_layer_pp_info(&layer_list[i]);
 	}
+
+	kfree(frc_info);
+frc_err:
 	kfree(layer_list);
 layer_list_err:
 	kfree(layer_list32);
@@ -3488,6 +3517,7 @@ static int __copy_layer_pp_info_igc_params(
 			compat_ptr(pp_info32->igc_cfg.c0_c1_data);
 		pp_info->igc_cfg.c2_data =
 			compat_ptr(pp_info32->igc_cfg.c2_data);
+		kfree(cfg_payload);
 		cfg_payload = NULL;
 		break;
 	}
@@ -3560,6 +3590,7 @@ static int __copy_layer_pp_info_hist_lut_params(
 		pp_info->hist_lut_cfg.len = pp_info32->hist_lut_cfg.len;
 		pp_info->hist_lut_cfg.data =
 				compat_ptr(pp_info32->hist_lut_cfg.data);
+		kfree(cfg_payload);
 		cfg_payload = NULL;
 		break;
 	}
@@ -3649,6 +3680,7 @@ static int __copy_layer_pp_info_pa_v2_params(
 		break;
 	default:
 		pr_debug("version invalid\n");
+		kfree(cfg_payload);
 		cfg_payload = NULL;
 		break;
 	}
@@ -3732,6 +3764,7 @@ static int __copy_layer_pp_info_pcc_params(
 		break;
 	default:
 		pr_debug("version invalid, fallback to legacy\n");
+		kfree(cfg_payload);
 		cfg_payload = NULL;
 		break;
 	}

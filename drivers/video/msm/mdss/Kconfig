@@ -62,6 +62,13 @@ config FB_MSM_MDSS_XLOG_DEBUG
 	features to: Dump MDSS registers during driver errors, panic
 	driver during fatal errors and enable some display-driver logging
 	into an internal buffer (this avoids logging overhead).
+	
+config FB_MSM_MDSS_KCAL_CTRL
+       depends on FB_MSM_MDSS
+       bool "MDSS color control"
+       ---help---
+         Enable sysfs for post-processing control of mdss-mdp5 display
+         controllers in MDSS.
 
 config LGE_MIPI_H1_INCELL_QHD_CMD_PANEL
 	bool "LGE_MIPI_H1_INCELL_QHD_CMD_PANEL"
@@ -275,3 +282,8 @@ config LGE_EXTERNAL_DISPLAY_BLOCK
 	---help---
 	Support EXTERNAL DISPLAY block
 
+config LCD_NOTIFY
+	bool "Enable lcd notify"
+	default n
+	help
+	  Call lcd notify handlers when the user requested sleep state

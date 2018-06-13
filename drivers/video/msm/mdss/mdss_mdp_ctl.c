@@ -1,4 +1,4 @@
-/* Copyright (c) 2012-2016, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2012-2017, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -77,8 +77,18 @@ static void __mdss_mdp_mixer_write_cfg(struct mdss_mdp_mixer *mixer,
 
 static inline u64 fudge_factor(u64 val, u32 numer, u32 denom)
 {
-	u64 result = (val * (u64)numer);
-	do_div(result, denom);
+	u64 result = val;
+
+	if (val) {
+		u64 temp = -1UL;
+
+		do_div(temp, val);
+		if (temp > numer) {
+			/* no overflow, so we can do the operation*/
+			result = (val * (u64)numer);
+			do_div(result, denom);
+		}
+	}
 	return result;
 }
 
@@ -706,6 +716,7 @@ int mdss_mdp_get_panel_params(struct mdss_mdp_pipe *pipe,
 		*v_total = mixer->height;
 		*xres = mixer->width;
 		*h_total = mixer->width;
+		*fps = DEFAULT_FRAME_RATE;
 	}
 
 	return 0;
@@ -717,7 +728,8 @@ int mdss_mdp_get_pipe_overlap_bw(struct mdss_mdp_pipe *pipe,
 	struct mdss_data_type *mdata = mdss_mdp_get_mdata();
 	struct mdss_mdp_mixer *mixer = pipe->mixer_left;
 	struct mdss_rect src, dst;
-	u32 v_total, fps, h_total, xres, src_h;
+	u32 v_total = 0, h_total = 0, xres = 0, src_h = 0;
+	u32 fps = DEFAULT_FRAME_RATE;
 	*quota = 0;
 	*quota_nocr = 0;
 
@@ -3499,7 +3511,51 @@ int mdss_mdp_ctl_setup(struct mdss_mdp_ctl *ctl)
 	ctl->mixer_left->valid_roi = true;
 	ctl->mixer_left->roi_changed = true;
 
-	rc = mdss_mdp_pp_default_overlay_config(ctl->mfd, ctl->panel_data);
+	if (ctl->mfd->split_mode == MDP_DUAL_LM_DUAL_DISPLAY) {
+		pr_debug("dual display detected\n");
+	} else {
+		if (split_fb)
+			width = ctl->mfd->split_fb_right;
+
+		if (width < ctl->width) {
+			if (ctl->mixer_right == NULL) {
+				ctl->mixer_right = mdss_mdp_mixer_alloc(ctl,
+					MDSS_MDP_MIXER_TYPE_INTF, true, 0);
+				if (!ctl->mixer_right) {
+					pr_err("unable to allocate right mixer\n");
+					if (ctl->mixer_left)
+						mdss_mdp_mixer_free(
+							ctl->mixer_left);
+					return -ENOMEM;
+				}
+			}
+			ctl->mixer_right->is_right_mixer = true;
+			ctl->mixer_right->width = width;
+			ctl->mixer_right->height = height;
+			ctl->mixer_right->roi = (struct mdss_rect)
+						{0, 0, width, height};
+			ctl->mixer_right->valid_roi = true;
+			ctl->mixer_right->roi_changed = true;
+		} else if (ctl->mixer_right) {
+			ctl->mixer_right->valid_roi = false;
+			ctl->mixer_right->roi_changed = false;
+			mdss_mdp_mixer_free(ctl->mixer_right);
+			ctl->mixer_right = NULL;
+		}
+
+		if (ctl->mixer_right) {
+			if (!is_dsc_compression(pinfo) ||
+				(pinfo->dsc_enc_total == 1))
+				ctl->opmode |= MDSS_MDP_CTL_OP_PACK_3D_ENABLE |
+				       MDSS_MDP_CTL_OP_PACK_3D_H_ROW_INT;
+		} else {
+			ctl->opmode &= ~(MDSS_MDP_CTL_OP_PACK_3D_ENABLE |
+				  MDSS_MDP_CTL_OP_PACK_3D_H_ROW_INT);
+		}
+	}
+
+	rc = mdss_mdp_pp_default_overlay_config(ctl->mfd, ctl->panel_data,
+						true);
 	/*
 	 * Ignore failure of PP config, ctl set-up can succeed.
 	 */
@@ -3507,49 +3563,6 @@ int mdss_mdp_ctl_setup(struct mdss_mdp_ctl *ctl)
 		pr_err("failed to set the pp config rc %dfb %d\n", rc,
 			ctl->mfd->index);
 		rc = 0;
-	}
-
-	if (ctl->mfd->split_mode == MDP_DUAL_LM_DUAL_DISPLAY) {
-		pr_debug("dual display detected\n");
-		return 0;
-	}
-
-	if (split_fb)
-		width = ctl->mfd->split_fb_right;
-
-	if (width < ctl->width) {
-		if (ctl->mixer_right == NULL) {
-			ctl->mixer_right = mdss_mdp_mixer_alloc(ctl,
-					MDSS_MDP_MIXER_TYPE_INTF, true, 0);
-			if (!ctl->mixer_right) {
-				pr_err("unable to allocate right mixer\n");
-				if (ctl->mixer_left)
-					mdss_mdp_mixer_free(ctl->mixer_left);
-				return -ENOMEM;
-			}
-		}
-		ctl->mixer_right->is_right_mixer = true;
-		ctl->mixer_right->width = width;
-		ctl->mixer_right->height = height;
-		ctl->mixer_right->roi = (struct mdss_rect)
-						{0, 0, width, height};
-		ctl->mixer_right->valid_roi = true;
-		ctl->mixer_right->roi_changed = true;
-	} else if (ctl->mixer_right) {
-		ctl->mixer_right->valid_roi = false;
-		ctl->mixer_right->roi_changed = false;
-		mdss_mdp_mixer_free(ctl->mixer_right);
-		ctl->mixer_right = NULL;
-	}
-
-	if (ctl->mixer_right) {
-		if (!is_dsc_compression(pinfo) ||
-		    (pinfo->dsc_enc_total == 1))
-			ctl->opmode |= MDSS_MDP_CTL_OP_PACK_3D_ENABLE |
-				       MDSS_MDP_CTL_OP_PACK_3D_H_ROW_INT;
-	} else {
-		ctl->opmode &= ~(MDSS_MDP_CTL_OP_PACK_3D_ENABLE |
-				  MDSS_MDP_CTL_OP_PACK_3D_H_ROW_INT);
 	}
 	return 0;
 }
@@ -3910,6 +3923,9 @@ int mdss_mdp_ctl_destroy(struct mdss_mdp_ctl *ctl)
 				     CTL_INTF_EVENT_FLAG_DEFAULT);
 	WARN(rc, "unable to close panel for intf=%d\n", ctl->intf_num);
 
+	(void) mdss_mdp_pp_default_overlay_config(ctl->mfd, ctl->panel_data,
+							false);
+
 	sctl = mdss_mdp_get_split_ctl(ctl);
 	if (sctl) {
 		pr_debug("destroying split display ctl=%d\n", sctl->num);
@@ -4107,9 +4123,11 @@ int mdss_mdp_ctl_start(struct mdss_mdp_ctl *ctl, bool handoff)
 		return 0;
 	}
 
-	ret = mdss_mdp_ctl_setup(ctl);
-	if (ret)
-		return ret;
+	if (mdss_mdp_ctl_is_power_off(ctl)) {
+		ret = mdss_mdp_ctl_setup(ctl);
+		if (ret)
+			return ret;
+	}
 
 	sctl = mdss_mdp_get_split_ctl(ctl);
 
@@ -4241,11 +4259,15 @@ end:
  */
 static void mdss_mdp_pipe_reset(struct mdss_mdp_mixer *mixer, bool is_recovery)
 {
-	unsigned long pipe_map = mixer->pipe_mapped;
+	unsigned long pipe_map;
 	u32 bit = 0;
 	struct mdss_data_type *mdata = mdss_mdp_get_mdata();
 	bool sw_rst_avail = mdss_mdp_pipe_is_sw_reset_available(mdata);
 
+	if (!mixer)
+		return;
+
+	pipe_map = mixer->pipe_mapped;
 	pr_debug("pipe_map=0x%lx\n", pipe_map);
 	for_each_set_bit_from(bit, &pipe_map, MAX_PIPES_PER_LM) {
 		struct mdss_mdp_pipe *pipe;
@@ -5242,6 +5264,8 @@ int mdss_mdp_ctl_update_fps(struct mdss_mdp_ctl *ctl)
 		goto exit;
 	}
 
+	mdss_mdp_ctl_perf_update(ctl, 1, false);
+
 	ret = ctl->ops.config_fps_fnc(ctl, new_fps);
 	if (!ret)
 		pr_debug("fps set to %d\n", new_fps);
@@ -5501,7 +5525,9 @@ int mdss_mdp_display_commit(struct mdss_mdp_ctl *ctl, void *arg,
 		} else {
 			sctl_flush_bits = sctl->flush_bits;
 		}
+		sctl->commit_in_progress = true;
 	}
+	ctl->commit_in_progress = true;
 	ctl_flush_bits = ctl->flush_bits;
 
 	ATRACE_END("postproc_programming");
@@ -5641,11 +5667,16 @@ int mdss_mdp_display_commit(struct mdss_mdp_ctl *ctl, void *arg,
 
 	ATRACE_BEGIN("flush_kickoff");
 	mdss_mdp_ctl_write(ctl, MDSS_MDP_REG_CTL_FLUSH, ctl_flush_bits);
-	if (sctl && sctl_flush_bits) {
-		mdss_mdp_ctl_write(sctl, MDSS_MDP_REG_CTL_FLUSH,
-			sctl_flush_bits);
-		sctl->flush_bits = 0;
+	if (sctl) {
+		if (sctl_flush_bits) {
+			mdss_mdp_ctl_write(sctl, MDSS_MDP_REG_CTL_FLUSH,
+				sctl_flush_bits);
+			sctl->flush_bits = 0;
+		}
+		sctl->commit_in_progress = false;
 	}
+	ctl->commit_in_progress = false;
+
 	MDSS_XLOG(ctl->intf_num, ctl_flush_bits, sctl_flush_bits,
 		split_lm_valid);
 	wmb();
