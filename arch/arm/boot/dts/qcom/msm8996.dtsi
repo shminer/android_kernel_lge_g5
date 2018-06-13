@@ -2749,19 +2749,18 @@
 		compatible = "qcom,msm-thermal";
 		reg = <0x70000 0x1000>;
 		qcom,sensor-id = <11>;
-		qcom,poll-ms = <100>;
+		qcom,poll-ms = <250>;
 		qcom,limit-temp = <60>;
 		qcom,temp-hysteresis = <10>;
 		qcom,therm-reset-temp = <115>;
 		qcom,freq-step = <4>;
-		qcom,core-limit-temp = <70>;
+		qcom,core-limit-temp = <80>;
 		qcom,core-temp-hysteresis = <10>;
 		qcom,hotplug-temp = <105>;
 		qcom,hotplug-temp-hysteresis = <40>;
-		qcom,freq-mitigation-temp = <90>;
-		qcom,freq-mitigation-temp-hysteresis = <40>;
-		qcom,freq-mitigation-value = <576000>;
-		qcom,online-hotplug-core;
+		qcom,freq-mitigation-temp = <95>;
+		qcom,freq-mitigation-temp-hysteresis = <10>;
+		qcom,freq-mitigation-value = <122880>;
 		qcom,synchronous-cluster-id = <0 1>;
 		qcom,synchronous-cluster-map = <0 2 &CPU0 &CPU1>,
 			<1 2 &CPU2 &CPU3>;
@@ -2796,15 +2795,13 @@
 		qcom,bcl-enable;
 		qcom,bcl-framework-interface;
 		qcom,bcl-freq-control-list = <&CPU2 &CPU3>;
-		qcom,bcl-hotplug-list = <&CPU2 &CPU3>;
-		qcom,bcl-soc-hotplug-list = <&CPU2 &CPU3>;
 		qcom,ibat-monitor {
 			qcom,low-threshold-uamp = <3400000>;
 			qcom,high-threshold-uamp = <4200000>;
-			qcom,mitigation-freq-khz = <576000>;
+			qcom,mitigation-freq-khz = <729600>;
 			qcom,vph-high-threshold-uv = <3500000>;
 			qcom,vph-low-threshold-uv = <3300000>;
-			qcom,soc-low-threshold = <10>;
+			qcom,soc-low-threshold = <7>;
 			qcom,thermal-handle = <&msm_thermal_freq>;
 		};
 	};
@@ -2837,9 +2834,9 @@
 	qcom,msm-core@70000 {
 		compatible = "qcom,apss-core-ea";
 		reg = <0x70000 0x1000>;
-		qcom,low-hyst-temp = <10>;
-		qcom,high-hyst-temp = <5>;
-		qcom,polling-interval = <50>;
+		qcom,low-hyst-temp = <100>;
+		qcom,high-hyst-temp = <100>;
+		qcom,polling-interval = <100>;
 
 		ea0: ea0 {
 			sensor = <&sensor_information4>;
