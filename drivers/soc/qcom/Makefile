@@ -99,4 +99,7 @@ obj-$(CONFIG_MSM_KERNEL_PROTECT) += kernel_protect.o
 obj-$(CONFIG_MSM_RTB) += msm_rtb-hotplug.o
 obj-$(CONFIG_MSM_REMOTEQDSS) += remoteqdss.o
 obj-$(CONFIG_QCOM_SMCINVOKE) += smcinvoke.o
+
+obj-$(CONFIG_STATE_NOTIFIER)		+= state_notifier.o
+
 obj-$(CONFIG_MSM_LIMITER_MSM8996)		+= msm_limiter_msm8996.o
