@@ -156,6 +156,8 @@ source "drivers/remoteproc/Kconfig"
 
 source "drivers/rpmsg/Kconfig"
 
+source "drivers/soc/Kconfig"
+
 source "drivers/devfreq/Kconfig"
 
 source "drivers/extcon/Kconfig"
@@ -177,8 +179,6 @@ source "drivers/ipack/Kconfig"
 source "drivers/reset/Kconfig"
 
 source "drivers/fmc/Kconfig"
-
-source "drivers/android/Kconfig"
 
 source "drivers/coresight/Kconfig"
 

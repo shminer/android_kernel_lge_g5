@@ -112,7 +112,6 @@
 #define BATT_MISSING_THERM_BIT		BIT(1)
 
 #define CFG_1A_REG			0x1A
-#define TEMP_MONITOR_EN_BIT		BIT(6)
 #define HOT_SOFT_VFLOAT_COMP_EN_BIT	BIT(3)
 #define COLD_SOFT_VFLOAT_COMP_EN_BIT	BIT(2)
 #define HOT_SOFT_CURRENT_COMP_EN_BIT	BIT(1)
@@ -1815,15 +1814,6 @@ static int smb135x_parallel_set_chg_present(struct smb135x_chg *chip,
 			return rc;
 		}
 
-		/* disable thermal monitoring for parallel-charger */
-		rc = smb135x_masked_write(chip, CFG_1A_REG,
-					TEMP_MONITOR_EN_BIT, 0);
-		if (rc < 0) {
-			dev_err(chip->dev,
-				"Couldn't disable temp-monitor rc=%d\n", rc);
-			return rc;
-		}
-
 		/* set the float voltage */
 		if (chip->vfloat_mv != -EINVAL) {
 			rc = smb135x_float_voltage_set(chip, chip->vfloat_mv);
@@ -2865,6 +2855,7 @@ static int usbin_uv_handler(struct smb135x_chg *chip, u8 rt_stat)
 	 * rt_stat indicates if usb is undervolted
 	 */
 	bool usb_present = !rt_stat;
+	union power_supply_propval prop = {0, };
 
 	if (usb_present) {
 		pr_debug("Set usb psy dp=f dm=f\n");
@@ -2874,6 +2865,16 @@ static int usbin_uv_handler(struct smb135x_chg *chip, u8 rt_stat)
 
 	pr_debug("chip->usb_present = %d usb_present = %d\n",
 			chip->usb_present, usb_present);
+	if (chip->usb_psy && !chip->usb_psy->get_property(chip->usb_psy,
+				POWER_SUPPLY_PROP_TYPE, &prop)) {
+		if (prop.intval == POWER_SUPPLY_TYPE_USB_DCP) {
+			if (chip->usb_present && !usb_present) {
+				/* For DCP and HVDCP removing */
+				chip->usb_present = usb_present;
+				handle_usb_removal(chip);
+			}
+		}
+	}
 
 	return 0;
 }

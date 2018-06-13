@@ -32,7 +32,6 @@
 #include <linux/kernel.h>
 #include <linux/gpio.h>
 #include <linux/soundwire/swr-wcd.h>
-
 #include <sound/pcm.h>
 #include <sound/pcm_params.h>
 #include <sound/soc.h>
@@ -45,11 +44,6 @@
 #include "wcd9xxx-resmgr-v2.h"
 #include "wcd_cpe_core.h"
 #include "wcdcal-hwdep.h"
-
-#ifdef CONFIG_SOUND_CONTROL
-#include <linux/sound_control.h>
-static struct snd_soc_codec *snd_control_codec;
-#endif
 
 #define TASHA_RX_PORT_START_NUMBER  16
 
@@ -10837,7 +10831,7 @@ static int tasha_get_channel_map(struct snd_soc_dai *dai,
 	case AIF4_PB:
 	case AIF_MIX1_PB:
 		if (!rx_slot || !rx_num) {
-			pr_err("%s: Invalid rx_slot %pK or rx_num %pK\n",
+			pr_err("%s: Invalid rx_slot %p or rx_num %p\n",
 				 __func__, rx_slot, rx_num);
 			return -EINVAL;
 		}
@@ -10856,7 +10850,7 @@ static int tasha_get_channel_map(struct snd_soc_dai *dai,
 	case AIF4_MAD_TX:
 	case AIF4_VIFEED:
 		if (!tx_slot || !tx_num) {
-			pr_err("%s: Invalid tx_slot %pK or tx_num %pK\n",
+			pr_err("%s: Invalid tx_slot %p or tx_num %p\n",
 				 __func__, tx_slot, tx_num);
 			return -EINVAL;
 		}
@@ -10894,7 +10888,7 @@ static int tasha_set_channel_map(struct snd_soc_dai *dai,
 	core = dev_get_drvdata(dai->codec->dev->parent);
 
 	if (!tx_slot || !rx_slot) {
-		pr_err("%s: Invalid tx_slot=%pK, rx_slot=%pK\n",
+		pr_err("%s: Invalid tx_slot=%p, rx_slot=%p\n",
 			__func__, tx_slot, rx_slot);
 		return -EINVAL;
 	}
@@ -11421,7 +11415,7 @@ static struct snd_soc_dai_driver tasha_dai[] = {
 		.capture = {
 			.stream_name = "AIF1 Capture",
 			.rates = WCD9335_RATES_MASK,
-			.formats = TASHA_FORMATS_S16_S24_LE,
+			.formats = TASHA_FORMATS,
 			.rate_max = 192000,
 			.rate_min = 8000,
 			.channels_min = 1,
@@ -11449,7 +11443,7 @@ static struct snd_soc_dai_driver tasha_dai[] = {
 		.capture = {
 			.stream_name = "AIF2 Capture",
 			.rates = WCD9335_RATES_MASK,
-			.formats = TASHA_FORMATS_S16_S24_LE,
+			.formats = TASHA_FORMATS,
 			.rate_max = 192000,
 			.rate_min = 8000,
 			.channels_min = 1,
@@ -11477,7 +11471,7 @@ static struct snd_soc_dai_driver tasha_dai[] = {
 		.capture = {
 			.stream_name = "AIF3 Capture",
 			.rates = WCD9335_RATES_MASK,
-			.formats = TASHA_FORMATS_S16_S24_LE,
+			.formats = TASHA_FORMATS,
 			.rate_max = 48000,
 			.rate_min = 8000,
 			.channels_min = 1,
@@ -11578,7 +11572,7 @@ static struct snd_soc_dai_driver tasha_i2s_dai[] = {
 		.capture = {
 			.stream_name = "AIF1 Capture",
 			.rates = WCD9335_RATES_MASK,
-			.formats = TASHA_FORMATS_S16_S24_LE,
+			.formats = TASHA_FORMATS,
 			.rate_max = 192000,
 			.rate_min = 8000,
 			.channels_min = 1,
@@ -11606,7 +11600,7 @@ static struct snd_soc_dai_driver tasha_i2s_dai[] = {
 		.capture = {
 			.stream_name = "AIF2 Capture",
 			.rates = WCD9335_RATES_MASK,
-			.formats = TASHA_FORMATS_S16_S24_LE,
+			.formats = TASHA_FORMATS,
 			.rate_max = 192000,
 			.rate_min = 8000,
 			.channels_min = 1,
@@ -13133,22 +13127,6 @@ static struct regulator *tasha_codec_find_ondemand_regulator(
 	return NULL;
 }
 
-#ifdef CONFIG_SOUND_CONTROL
-unsigned int sound_control_write(unsigned int reg, int val)
-{
-	int ori_val;
-	unsigned int boost_val;
-
-	ori_val = snd_soc_read(snd_control_codec, reg);
-
-	boost_val = ori_val + val;
-
-	snd_soc_write(snd_control_codec, reg, boost_val);
-
-	return boost_val;
-}
-#endif
-
 static int tasha_codec_probe(struct snd_soc_codec *codec)
 {
 	struct wcd9xxx *control;
@@ -13158,11 +13136,6 @@ static int tasha_codec_probe(struct snd_soc_codec *codec)
 	int i, ret;
 	void *ptr = NULL;
 	struct regulator *supply;
-
-#ifdef CONFIG_SOUND_CONTROL
-	pr_info("soundcontrol codec probe...\n");
-	snd_control_codec = codec;
-#endif
 
 	control = dev_get_drvdata(codec->dev->parent);
 
@@ -13353,7 +13326,7 @@ static int tasha_codec_probe(struct snd_soc_codec *codec)
 	snd_soc_dapm_disable_pin(dapm, "ANC EAR");
 	mutex_unlock(&codec->mutex);
 	snd_soc_dapm_sync(dapm);
-	
+
 	return ret;
 
 err_pdata:
@@ -13638,7 +13611,7 @@ static int tasha_swrm_clock(void *handle, bool enable)
 					0x10, 0x10);
 		}
 	}
-	dev_dbg(tasha->dev, "%s: swrm clock users %d\n",
+	dev_info(tasha->dev, "%s: swrm clock users %d\n",
 		__func__, tasha->swr_clk_users);
 	mutex_unlock(&tasha->swr_clk_lock);
 	return 0;

@@ -412,7 +412,7 @@ bool tcp_snd_wnd_test(const struct tcp_sock *tp, const struct sk_buff *skb,
 unsigned int tcp_cwnd_test(const struct tcp_sock *tp, const struct sk_buff *skb);
 int tcp_init_tso_segs(const struct sock *sk, struct sk_buff *skb,
 		      unsigned int mss_now);
-int __pskb_trim_head(struct sk_buff *skb, int len);
+void __pskb_trim_head(struct sk_buff *skb, int len);
 void tcp_queue_skb(struct sock *sk, struct sk_buff *skb);
 void tcp_init_nondata_skb(struct sk_buff *skb, u32 seq, u8 flags);
 void tcp_reset(struct sock *sk);
@@ -583,9 +583,9 @@ int tcp_recvmsg(struct kiocb *iocb, struct sock *sk, struct msghdr *msg,
 		size_t len, int nonblock, int flags, int *addr_len);
 void tcp_parse_options(const struct sk_buff *skb,
 		       struct tcp_options_received *opt_rx,
-#ifdef CONFIG_LGP_DATA_TCPIP_MPTCP
+		       #ifdef CONFIG_LGP_DATA_TCPIP_MPTCP
 		       struct mptcp_options_received *mopt_rx,
-#endif
+		       #endif
 		       int estab, struct tcp_fastopen_cookie *foc);
 const u8 *tcp_parse_md5sig_option(const struct tcphdr *th);
 
@@ -647,7 +647,7 @@ __u32 cookie_v4_init_sequence(struct request_sock *req, struct sock *sk,
 			      const struct sk_buff *skb, __u16 *mss);
 #else
 __u32 cookie_v4_init_sequence(struct sock *sk, const struct sk_buff *skb,
-			      __u16 *mss);
+                             __u16 *mss);
 #endif
 #endif
 
@@ -667,7 +667,7 @@ __u32 cookie_v6_init_sequence(struct request_sock *req, struct sock *sk,
 			      const struct sk_buff *skb, __u16 *mss);
 #else
 __u32 cookie_v6_init_sequence(struct sock *sk, const struct sk_buff *skb,
-			      __u16 *mss);
+                             __u16 *mss);
 #endif
 #endif
 /* tcp_output.c */
@@ -901,16 +901,16 @@ struct tcp_skb_cb {
 	/* 1 byte hole */
 	__u32		ack_seq;	/* Sequence number ACK'd	*/
 	union {
-#ifdef CONFIG_LGP_DATA_TCPIP_MPTCP
+		#ifdef CONFIG_LGP_DATA_TCPIP_MPTCP
 		union {
 			struct inet_skb_parm	h4;
-#else
+		#else
 		struct inet_skb_parm	h4;
 		#endif
 #if IS_ENABLED(CONFIG_IPV6)
 		struct inet6_skb_parm	h6;
 #endif
-	} header;	/* For incoming frames		*/
+		} header;	/* For incoming frames		*/
 #ifdef CONFIG_LGP_DATA_TCPIP_MPTCP
 #ifdef CONFIG_MPTCP
 		union {			/* For MPTCP outgoing frames */
@@ -1292,12 +1292,12 @@ u32 tcp_default_init_rwnd(u32 mss);
 /* Determine a window scaling and initial window to offer. */
 void tcp_select_initial_window(int __space, __u32 mss, __u32 *rcv_wnd,
 			       __u32 *window_clamp, int wscale_ok,
-#ifdef CONFIG_LGP_DATA_TCPIP_MPTCP
+			       #ifdef CONFIG_LGP_DATA_TCPIP_MPTCP
 			       __u8 *rcv_wscale, __u32 init_rcv_wnd,
 			       const struct sock *sk);
-#else
-			       __u8 *rcv_wscale, __u32 init_rcv_wnd);
-#endif
+				#else
+				__u8 *rcv_wscale, __u32 init_rcv_wnd);
+				#endif
 
 static inline int tcp_win_from_space(int space)
 {
@@ -1352,10 +1352,10 @@ static inline void tcp_openreq_init(struct request_sock *req,
 	ireq->wscale_ok = rx_opt->wscale_ok;
 	ireq->acked = 0;
 	ireq->ecn_ok = 0;
-#ifdef CONFIG_LGP_DATA_TCPIP_MPTCP
+	#ifdef CONFIG_LGP_DATA_TCPIP_MPTCP
 	ireq->mptcp_rqsk = 0;
 	ireq->saw_mpc = 0;
-#endif
+	#endif
 	ireq->ir_rmt_port = tcp_hdr(skb)->source;
 	ireq->ir_num = ntohs(tcp_hdr(skb)->dest);
 	ireq->ir_mark = inet_request_mark(sk, skb);
@@ -1650,10 +1650,11 @@ static inline void tcp_advance_send_head(struct sock *sk, const struct sk_buff *
 
 static inline void tcp_check_send_head(struct sock *sk, struct sk_buff *skb_unlinked)
 {
-	if (sk->sk_send_head == skb_unlinked)
-		sk->sk_send_head = NULL;
-	if (tcp_sk(sk)->highest_sack == skb_unlinked)
-		tcp_sk(sk)->highest_sack = NULL;
+    
+    if (sk->sk_send_head == skb_unlinked)
+        sk->sk_send_head = NULL;
+    if (tcp_sk(sk)->highest_sack == skb_unlinked)
+        tcp_sk(sk)->highest_sack = NULL;
 }
 
 static inline void tcp_init_send_head(struct sock *sk)
@@ -1753,12 +1754,12 @@ static inline void tcp_highest_sack_reset(struct sock *sk)
 	tcp_sk(sk)->highest_sack = tcp_write_queue_head(sk);
 }
 
-/* Called when old skb is about to be deleted and replaced by new skb */
-static inline void tcp_highest_sack_replace(struct sock *sk,
+/* Called when old skb is about to be deleted (to be combined with new skb) */
+static inline void tcp_highest_sack_combine(struct sock *sk,
 					    struct sk_buff *old,
 					    struct sk_buff *new)
 {
-	if (old == tcp_highest_sack(sk))
+	if (tcp_sk(sk)->sacked_out && (old == tcp_sk(sk)->highest_sack))
 		tcp_sk(sk)->highest_sack = new;
 }
 
@@ -1894,7 +1895,7 @@ struct tcp_request_sock_ops {
 			 struct sk_buff *skb, bool want_cookie);
 #else
 	void (*init_req)(struct request_sock *req, struct sock *sk,
-			 struct sk_buff *skb);
+                        struct sk_buff *skb);
 #endif
 #ifdef CONFIG_SYN_COOKIES
 #ifdef CONFIG_LGP_DATA_TCPIP_MPTCP
@@ -1902,7 +1903,7 @@ struct tcp_request_sock_ops {
 				 const struct sk_buff *skb, __u16 *mss);
 #else
 	__u32 (*cookie_init_seq)(struct sock *sk, const struct sk_buff *skb,
-				 __u16 *mss);
+                                __u16 *mss);
 #endif
 #endif
 	struct dst_entry *(*route_req)(struct sock *sk, struct flowi *fl,

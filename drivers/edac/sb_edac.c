@@ -1303,7 +1303,7 @@ static int get_memory_error_data(struct mem_ctl_info *mci,
 		switch(ch_way) {
 		case 2:
 		case 4:
-			sck_xch = (1 << sck_way) * (ch_way >> 1);
+			sck_xch = 1 << sck_way * (ch_way >> 1);
 			break;
 		default:
 			sprintf(msg, "Invalid mirror set. Can't decode addr");
@@ -1645,7 +1645,6 @@ static int ibridge_mci_bind_devs(struct mem_ctl_info *mci,
 			break;
 		case PCI_DEVICE_ID_INTEL_IBRIDGE_IMC_HA0_TA:
 			pvt->pci_ta = pdev;
-			break;
 		case PCI_DEVICE_ID_INTEL_IBRIDGE_IMC_HA0_RAS:
 			pvt->pci_ras = pdev;
 			break;
@@ -2048,7 +2047,7 @@ static int sbridge_mce_check_error(struct notifier_block *nb, unsigned long val,
 
 	mci = get_mci_for_node_id(mce->socketid);
 	if (!mci)
-		return NOTIFY_DONE;
+		return NOTIFY_BAD;
 	pvt = mci->pvt_info;
 
 	/*

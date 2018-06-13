@@ -339,15 +339,10 @@ struct perf_event {
 	int				nr_siblings;
 	int				group_flags;
 	struct perf_event		*group_leader;
-
-	/*
-	 * Protect the pmu, attributes and context of a group leader.
-	 * Note: does not protect the pointer to the group_leader.
-	 */
-	struct mutex			group_leader_mutex;
 	struct pmu			*pmu;
 
 	enum perf_event_active_state	state;
+	enum perf_event_active_state hotplug_save_state;
 	unsigned int			attach_state;
 	local64_t			count;
 	atomic64_t			child_count;
@@ -482,7 +477,6 @@ struct perf_event_context {
 	 */
 	struct mutex			mutex;
 
-	struct list_head		active_ctx_list;
 	struct list_head		pinned_groups;
 	struct list_head		flexible_groups;
 	struct list_head		event_list;
@@ -531,12 +525,9 @@ struct perf_cpu_context {
 	struct perf_event_context	*task_ctx;
 	int				active_oncpu;
 	int				exclusive;
-
-	raw_spinlock_t			hrtimer_lock;
 	struct hrtimer			hrtimer;
 	ktime_t				hrtimer_interval;
-	unsigned int			hrtimer_active;
-
+	struct list_head		rotation_list;
 	struct pmu			*unique_pmu;
 	struct perf_cgroup		*cgrp;
 };
@@ -667,7 +658,6 @@ static inline int is_software_event(struct perf_event *event)
 
 extern struct static_key perf_swevent_enabled[PERF_COUNT_SW_MAX];
 
-extern void ___perf_sw_event(u32, u64, struct pt_regs *, u64);
 extern void __perf_sw_event(u32, u64, struct pt_regs *, u64);
 
 #ifndef perf_arch_fetch_caller_regs
@@ -692,25 +682,14 @@ static inline void perf_fetch_caller_regs(struct pt_regs *regs)
 static __always_inline void
 perf_sw_event(u32 event_id, u64 nr, struct pt_regs *regs, u64 addr)
 {
-	if (static_key_false(&perf_swevent_enabled[event_id]))
-		__perf_sw_event(event_id, nr, regs, addr);
-}
+	struct pt_regs hot_regs;
 
-DECLARE_PER_CPU(struct pt_regs, __perf_regs[4]);
-
-/*
- * 'Special' version for the scheduler, it hard assumes no recursion,
- * which is guaranteed by us not actually scheduling inside other swevents
- * because those disable preemption.
- */
-static __always_inline void
-perf_sw_event_sched(u32 event_id, u64 nr, u64 addr)
-{
 	if (static_key_false(&perf_swevent_enabled[event_id])) {
-		struct pt_regs *regs = this_cpu_ptr(&__perf_regs[0]);
-
-		perf_fetch_caller_regs(regs);
-		___perf_sw_event(event_id, nr, regs, addr);
+		if (!regs) {
+			perf_fetch_caller_regs(&hot_regs);
+			regs = &hot_regs;
+		}
+		__perf_sw_event(event_id, nr, regs, addr);
 	}
 }
 
@@ -726,7 +705,7 @@ static inline void perf_event_task_sched_in(struct task_struct *prev,
 static inline void perf_event_task_sched_out(struct task_struct *prev,
 					     struct task_struct *next)
 {
-	perf_sw_event_sched(PERF_COUNT_SW_CONTEXT_SWITCHES, 1, 0);
+	perf_sw_event(PERF_COUNT_SW_CONTEXT_SWITCHES, 1, NULL, 0);
 
 	if (static_key_false(&perf_sched_events.key))
 		__perf_event_task_sched_out(prev, next);
@@ -841,8 +820,6 @@ static inline int perf_event_refresh(struct perf_event *event, int refresh)
 
 static inline void
 perf_sw_event(u32 event_id, u64 nr, struct pt_regs *regs, u64 addr)	{ }
-static inline void
-perf_sw_event_sched(u32 event_id, u64 nr, u64 addr)			{ }
 static inline void
 perf_bp_event(struct perf_event *event, void *data)			{ }
 

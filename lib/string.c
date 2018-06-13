@@ -26,11 +26,6 @@
 #include <linux/export.h>
 #include <linux/bug.h>
 #include <linux/errno.h>
-#include <linux/memcopy.h>
-
-#include <asm/byteorder.h>
-#include <asm/word-at-a-time.h>
-#include <asm/page.h>
 
 #ifndef __HAVE_ARCH_STRNCASECMP
 /**
@@ -157,91 +152,6 @@ size_t strlcpy(char *dest, const char *src, size_t size)
 	return ret;
 }
 EXPORT_SYMBOL(strlcpy);
-#endif
-
-#ifndef __HAVE_ARCH_STRSCPY
-/**
- * strscpy - Copy a C-string into a sized buffer
- * @dest: Where to copy the string to
- * @src: Where to copy the string from
- * @count: Size of destination buffer
- *
- * Copy the string, or as much of it as fits, into the dest buffer.
- * The routine returns the number of characters copied (not including
- * the trailing NUL) or -E2BIG if the destination buffer wasn't big enough.
- * The behavior is undefined if the string buffers overlap.
- * The destination buffer is always NUL terminated, unless it's zero-sized.
- *
- * Preferred to strlcpy() since the API doesn't require reading memory
- * from the src string beyond the specified "count" bytes, and since
- * the return value is easier to error-check than strlcpy()'s.
- * In addition, the implementation is robust to the string changing out
- * from underneath it, unlike the current strlcpy() implementation.
- *
- * Preferred to strncpy() since it always returns a valid string, and
- * doesn't unnecessarily force the tail of the destination buffer to be
- * zeroed.  If the zeroing is desired, it's likely cleaner to use strscpy()
- * with an overflow test, then just memset() the tail of the dest buffer.
- */
-ssize_t strscpy(char *dest, const char *src, size_t count)
-{
-	const struct word_at_a_time constants = WORD_AT_A_TIME_CONSTANTS;
-	size_t max = count;
-	long res = 0;
-
-	if (count == 0)
-		return -E2BIG;
-
-#ifdef CONFIG_HAVE_EFFICIENT_UNALIGNED_ACCESS
-	/*
-	 * If src is unaligned, don't cross a page boundary,
-	 * since we don't know if the next page is mapped.
-	 */
-	if ((long)src & (sizeof(long) - 1)) {
-		size_t limit = PAGE_SIZE - ((long)src & (PAGE_SIZE - 1));
-		if (limit < max)
-			max = limit;
-	}
-#else
-	/* If src or dest is unaligned, don't do word-at-a-time. */
-	if (((long) dest | (long) src) & (sizeof(long) - 1))
-		max = 0;
-#endif
-
-	while (max >= sizeof(unsigned long)) {
-		unsigned long c, data;
-
-		c = *(unsigned long *)(src+res);
-		if (has_zero(c, &data, &constants)) {
-			data = prep_zero_mask(c, data, &constants);
-			data = create_zero_mask(data);
-			*(unsigned long *)(dest+res) = c & zero_bytemask(data);
-			return res + find_zero(data);
-		}
-		*(unsigned long *)(dest+res) = c;
-		res += sizeof(unsigned long);
-		count -= sizeof(unsigned long);
-		max -= sizeof(unsigned long);
-	}
-
-	while (count) {
-		char c;
-
-		c = src[res];
-		dest[res] = c;
-		if (!c)
-			return res;
-		res++;
-		count--;
-	}
-
-	/* Hit buffer length without finding a NUL; force NUL-termination. */
-	if (res)
-		dest[res-1] = '\0';
-
-	return -E2BIG;
-}
-EXPORT_SYMBOL(strscpy);
 #endif
 
 #ifndef __HAVE_ARCH_STRCAT
@@ -640,30 +550,33 @@ bool sysfs_streq(const char *s1, const char *s2)
 EXPORT_SYMBOL(sysfs_streq);
 
 /**
- * __sysfs_match_string - matches given string in an array
- * @array: array of strings
- * @n: number of strings in the array or -1 for NULL terminated arrays
- * @str: string to match with
+ * strtobool - convert common user inputs into boolean values
+ * @s: input string
+ * @res: result
  *
- * Returns index of @str in the @array or -EINVAL, just like match_string().
- * Uses sysfs_streq instead of strcmp for matching.
+ * This routine returns 0 iff the first character is one of 'Yy1Nn0'.
+ * Otherwise it will return -EINVAL.  Value pointed to by res is
+ * updated upon finding a match.
  */
-int __sysfs_match_string(const char * const *array, size_t n, const char *str)
+int strtobool(const char *s, bool *res)
 {
-	const char *item;
-	int index;
-
-	for (index = 0; index < n; index++) {
-		item = array[index];
-		if (!item)
-			break;
-		if (sysfs_streq(item, str))
-			return index;
+	switch (s[0]) {
+	case 'y':
+	case 'Y':
+	case '1':
+		*res = true;
+		break;
+	case 'n':
+	case 'N':
+	case '0':
+		*res = false;
+		break;
+	default:
+		return -EINVAL;
 	}
-
-	return -EINVAL;
+	return 0;
 }
-EXPORT_SYMBOL(__sysfs_match_string);
+EXPORT_SYMBOL(strtobool);
 
 #ifndef __HAVE_ARCH_MEMSET
 /**
@@ -713,11 +626,11 @@ EXPORT_SYMBOL(memzero_explicit);
  */
 void *memcpy(void *dest, const void *src, size_t count)
 {
-	unsigned long dstp = (unsigned long)dest; 
-	unsigned long srcp = (unsigned long)src; 
+	char *tmp = dest;
+	const char *s = src;
 
-	/* Copy from the beginning to the end */ 
-	mem_copy_fwd(dstp, srcp, count); 
+	while (count--)
+		*tmp++ = *s++;
 	return dest;
 }
 EXPORT_SYMBOL(memcpy);
@@ -734,15 +647,21 @@ EXPORT_SYMBOL(memcpy);
  */
 void *memmove(void *dest, const void *src, size_t count)
 {
-	unsigned long dstp = (unsigned long)dest; 
-	unsigned long srcp = (unsigned long)src; 
+	char *tmp;
+	const char *s;
 
-	if (dest - src >= count) { 
-		/* Copy from the beginning to the end */ 
-		mem_copy_fwd(dstp, srcp, count); 
+	if (dest <= src) {
+		tmp = dest;
+		s = src;
+		while (count--)
+			*tmp++ = *s++;
 	} else {
-		/* Copy from the end to the beginning */ 
-		mem_copy_bwd(dstp, srcp, count); 
+		tmp = dest;
+		tmp += count;
+		s = src;
+		s += count;
+		while (count--)
+			*--tmp = *--s;
 	}
 	return dest;
 }

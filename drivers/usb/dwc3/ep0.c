@@ -228,7 +228,7 @@ int dwc3_gadget_ep0_queue(struct usb_ep *ep, struct usb_request *request,
 	spin_lock_irqsave(&dwc->lock, flags);
 	if (!dep->endpoint.desc) {
 		dwc3_trace(trace_dwc3_ep0,
-				"trying to queue request %pK to disabled %s",
+				"trying to queue request %p to disabled %s",
 				request, dep->name);
 		ret = -ESHUTDOWN;
 		goto out;
@@ -241,7 +241,7 @@ int dwc3_gadget_ep0_queue(struct usb_ep *ep, struct usb_request *request,
 	}
 
 	dwc3_trace(trace_dwc3_ep0,
-			"queueing request %pK to %s length %d state '%s'",
+			"queueing request %p to %s length %d state '%s'",
 			request, dep->name, request->length,
 			dwc3_ep0_state_string(dwc->ep0state));
 
@@ -862,11 +862,6 @@ static void dwc3_ep0_complete_data(struct dwc3 *dwc,
 		unsigned maxp = ep0->endpoint.maxpacket;
 
 		transfer_size += (maxp - (transfer_size % maxp));
-
-		/* Maximum of DWC3_EP0_BOUNCE_SIZE can only be received */
-		if (transfer_size > DWC3_EP0_BOUNCE_SIZE)
-			transfer_size = DWC3_EP0_BOUNCE_SIZE;
-
 		transferred = min_t(u32, ur->length,
 				transfer_size - length);
 		memcpy(ur->buf, dwc->ep0_bounce, transferred);
@@ -989,13 +984,10 @@ static void __dwc3_ep0_do_control_data(struct dwc3 *dwc,
 			return;
 		}
 
+		WARN_ON(req->request.length > DWC3_EP0_BOUNCE_SIZE);
+
 		maxpacket = dep->endpoint.maxpacket;
 		transfer_size = roundup(req->request.length, maxpacket);
-
-		if (transfer_size > DWC3_EP0_BOUNCE_SIZE) {
-			dev_WARN(dwc->dev, "bounce buf can't handle req len\n");
-			transfer_size = DWC3_EP0_BOUNCE_SIZE;
-		}
 
 		dwc->ep0_bounced = true;
 

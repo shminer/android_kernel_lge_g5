@@ -1,4 +1,4 @@
-/* Copyright (c) 2002,2007-2017, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2002,2007-2016, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -579,6 +579,7 @@ void adreno_cp_callback(struct adreno_device *adreno_dev, int bit)
 {
 	struct kgsl_device *device = KGSL_DEVICE(adreno_dev);
 
+	kgsl_schedule_work(&device->event_work);
 	adreno_dispatcher_schedule(device);
 }
 
@@ -591,19 +592,7 @@ static irqreturn_t adreno_irq_handler(struct kgsl_device *device)
 	unsigned int status = 0, tmp;
 	int i;
 
-	atomic_inc(&adreno_dev->pending_irq_refcnt);
-	smp_mb__after_atomic();
-
 	adreno_readreg(adreno_dev, ADRENO_REG_RBBM_INT_0_STATUS, &status);
-
-	/*
-	 * Clear all the interrupt bits but A5XX_INT_RBBM_AHB_ERROR. Because
-	 * even if we clear it here, it will stay high until it is cleared
-	 * in its respective handler. Otherwise, the interrupt handler will
-	 * fire again.
-	 */
-	adreno_writereg(adreno_dev, ADRENO_REG_RBBM_INT_CLEAR_CMD,
-				status & ~BIT(A5XX_INT_RBBM_AHB_ERROR));
 
 	/* Loop through all set interrupts and call respective handlers */
 	for (tmp = status; tmp != 0;) {
@@ -623,18 +612,9 @@ static irqreturn_t adreno_irq_handler(struct kgsl_device *device)
 
 	gpudev->irq_trace(adreno_dev, status);
 
-	/*
-	 * Clear A5XX_INT_RBBM_AHB_ERROR bit after this interrupt has been
-	 * cleared in its respective handler
-	 */
-	if (status & BIT(A5XX_INT_RBBM_AHB_ERROR))
+	if (status)
 		adreno_writereg(adreno_dev, ADRENO_REG_RBBM_INT_CLEAR_CMD,
-				BIT(A5XX_INT_RBBM_AHB_ERROR));
-
-	smp_mb__before_atomic();
-	atomic_dec(&adreno_dev->pending_irq_refcnt);
-	smp_mb__after_atomic();
-
+				status);
 	return ret;
 
 }
@@ -848,8 +828,6 @@ static struct {
 	 { ADRENO_QUIRK_FAULT_DETECT_MASK, "qcom,gpu-quirk-fault-detect-mask" },
 	 { ADRENO_QUIRK_DISABLE_RB_DP2CLOCKGATING,
 			"qcom,gpu-quirk-dp2clockgating-disable" },
-	 { ADRENO_QUIRK_DISABLE_LMLOADKILL,
-			"qcom,gpu-quirk-lmloadkill-disable" },
 };
 
 static int adreno_of_get_power(struct adreno_device *adreno_dev,
@@ -1219,8 +1197,7 @@ static int adreno_init(struct kgsl_device *device)
 
 	if (!adreno_is_a3xx(adreno_dev)) {
 		int r = kgsl_allocate_global(device,
-			&adreno_dev->cmdbatch_profile_buffer, PAGE_SIZE,
-			0, 0, "alwayson");
+			&adreno_dev->cmdbatch_profile_buffer, PAGE_SIZE, 0, 0);
 
 		adreno_dev->cmdbatch_profile_index = 0;
 
@@ -1843,16 +1820,6 @@ static int adreno_getproperty(struct kgsl_device *device,
 			status = 0;
 		}
 		break;
-	case KGSL_PROP_UNKNOWN:
-		{
-			int val = 0;
-			if (copy_to_user(value, &val, sizeof(int))) {
-				status = -EFAULT;
-				break;
-			}
-			status = 0;
-		}
-		break;
 	case KGSL_PROP_UCHE_GMEM_VADDR:
 		{
 			uint64_t gmem_vaddr = 0;
@@ -2087,7 +2054,7 @@ static int adreno_setproperty(struct kgsl_device_private *dev_priv,
 							KGSL_STATE_ACTIVE);
 				device->pwrctrl.ctrl_flags = KGSL_PWR_ON;
 				adreno_fault_detect_stop(adreno_dev);
-				kgsl_pwrscale_disable(device, true);
+				kgsl_pwrscale_disable(device);
 			}
 
 			mutex_unlock(&device->mutex);
@@ -2139,18 +2106,7 @@ inline unsigned int adreno_irq_pending(struct adreno_device *adreno_dev)
 
 	adreno_readreg(adreno_dev, ADRENO_REG_RBBM_INT_0_STATUS, &status);
 
-	/*
-	 * IRQ handler clears the RBBM INT0 status register immediately
-	 * entering the ISR before actually serving the interrupt because
-	 * of this we can't rely only on RBBM INT0 status only.
-	 * Use pending_irq_refcnt along with RBBM INT0 to correctly
-	 * determine whether any IRQ is pending or not.
-	 */
-	if ((status & gpudev->irq->mask) ||
-		atomic_read(&adreno_dev->pending_irq_refcnt))
-		return 1;
-	else
-		return 0;
+	return (status & gpudev->irq->mask) ? 1 : 0;
 }
 
 
@@ -2822,18 +2778,6 @@ static void adreno_regulator_disable_poll(struct kgsl_device *device)
 	adreno_iommu_sync(device, false);
 }
 
-static void adreno_gpu_model(struct kgsl_device *device, char *str,
-				size_t bufsz)
-{
-	struct adreno_device *adreno_dev = ADRENO_DEVICE(device);
-
-	snprintf(str, bufsz, "Adreno%d%d%dv%d",
-			ADRENO_CHIPID_CORE(adreno_dev->chipid),
-			 ADRENO_CHIPID_MAJOR(adreno_dev->chipid),
-			 ADRENO_CHIPID_MINOR(adreno_dev->chipid),
-			 ADRENO_CHIPID_PATCH(adreno_dev->chipid) + 1);
-}
-
 static const struct kgsl_functable adreno_functable = {
 	/* Mandatory functions */
 	.regread = adreno_regread,
@@ -2870,7 +2814,6 @@ static const struct kgsl_functable adreno_functable = {
 	.regulator_disable = adreno_regulator_disable,
 	.pwrlevel_change_settings = adreno_pwrlevel_change_settings,
 	.regulator_disable_poll = adreno_regulator_disable_poll,
-	.gpu_model = adreno_gpu_model,
 };
 
 static struct platform_driver adreno_platform_driver = {

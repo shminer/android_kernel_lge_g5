@@ -332,9 +332,6 @@ static void pci_read_bases(struct pci_dev *dev, unsigned int howmany, int rom)
 {
 	unsigned int pos, reg;
 
-	if (dev->non_compliant_bars)
-		return;
-
 	for (pos = 0; pos < howmany; pos++) {
 		struct resource *res = &dev->resource[pos];
 		reg = PCI_BASE_ADDRESS_0 + (pos << 2);
@@ -1381,16 +1378,8 @@ static void program_hpp_type0(struct pci_dev *dev, struct hpp_type0 *hpp)
 
 static void program_hpp_type1(struct pci_dev *dev, struct hpp_type1 *hpp)
 {
-	int pos;
-
-	if (!hpp)
-		return;
-
-	pos = pci_find_capability(dev, PCI_CAP_ID_PCIX);
-	if (!pos)
-		return;
-
-	dev_warn(&dev->dev, "PCI-X settings not supported\n");
+	if (hpp)
+		dev_warn(&dev->dev, "PCI-X settings not supported\n");
 }
 
 static void program_hpp_type2(struct pci_dev *dev, struct hpp_type2 *hpp)
@@ -1399,9 +1388,6 @@ static void program_hpp_type2(struct pci_dev *dev, struct hpp_type2 *hpp)
 	u32 reg32;
 
 	if (!hpp)
-		return;
-
-	if (!pci_is_pcie(dev))
 		return;
 
 	if (hpp->revision > 1) {

@@ -55,7 +55,7 @@ static long audio_ioctl_shared(struct file *file, unsigned int cmd,
 
 	switch (cmd) {
 	case AUDIO_START: {
-		pr_err("%s[%pK]: AUDIO_START session_id[%d]\n", __func__,
+		pr_err("%s[%p]: AUDIO_START session_id[%d]\n", __func__,
 			audio, audio->ac->session);
 		if (audio->feedback == NON_TUNNEL_MODE) {
 			/* Configure PCM output block */
@@ -106,7 +106,7 @@ static long audio_ioctl_shared(struct file *file, unsigned int cmd,
 			audio->enabled);
 		if (audio->stopped == 1)
 			audio->stopped = 0;
-		break;
+			break;
 		}
 	default:
 		pr_err("%s: Unknown ioctl cmd = %d", __func__, cmd);
@@ -162,7 +162,7 @@ static long audio_ioctl(struct file *file, unsigned int cmd,
 		break;
 	}
 	default: {
-		pr_debug("%s[%pK]: Calling utils ioctl\n", __func__, audio);
+		pr_debug("%s[%p]: Calling utils ioctl\n", __func__, audio);
 		rc = audio->codec_ioctl(file, cmd, arg);
 		break;
 	}
@@ -207,7 +207,7 @@ static long audio_compat_ioctl(struct file *file, unsigned int cmd,
 						amrwbplus_config_32;
 
 			memset(&amrwbplus_config_32, 0,
-					sizeof(amrwbplus_config_32));
+				sizeof(amrwbplus_config_32));
 
 			amrwbplus_config =
 				(struct msm_audio_amrwbplus_config_v2 *)
@@ -278,7 +278,7 @@ static long audio_compat_ioctl(struct file *file, unsigned int cmd,
 		break;
 	}
 	default: {
-		pr_debug("%s[%pK]: Calling utils ioctl\n", __func__, audio);
+		pr_debug("%s[%p]: Calling utils ioctl\n", __func__, audio);
 		rc = audio->codec_compat_ioctl(file, cmd, arg);
 		break;
 	}

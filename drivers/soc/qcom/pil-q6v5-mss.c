@@ -39,6 +39,7 @@
 
 #include <linux/time.h>
 
+
 /* Added getting MSM chip version info, 2014-12-21, secheol.pyo@lge.com*/
 #define FEATURE_LGE_MODEM_LDB_EXCEPTION
 #define FEATURE_LGE_MODEM_CHIPVER_INFO

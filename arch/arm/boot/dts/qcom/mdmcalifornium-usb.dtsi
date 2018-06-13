@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2015-2017, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2015-2016, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -37,11 +37,10 @@
 		qcom,usb-dbm = <&dbm_1p5>;
 
 		qcom,msm-bus,name = "usb3";
-		qcom,msm-bus,num-cases = <3>;
+		qcom,msm-bus,num-cases = <2>;
 		qcom,msm-bus,num-paths = <2>;
 		qcom,msm-bus,vectors-KBps =
 					<61 512 0 0>, <61 676 0 0>,
-					<61 512 0 680000>, <61 676 0 2400>,
 					<61 512 0 680000>, <61 676 0 2400>;
 		qcom,lpm-to-suspend-delay-ms = <2000>;
 
@@ -118,9 +117,11 @@
 	qusb_phy: qusb@79000 {
 		compatible = "qcom,qusb2phy";
 		reg = <0x00079000 0x180>,
+		      <0x08af8800 0x400>,
 		      <0x01841030 0x4>,
 		      <0x01956044 0x4>;
 		reg-names = "qusb_phy_base",
+			    "qscratch_base",
 			    "ref_clk_addr",
 			    "tcsr_phy_clk_scheme_sel";
 		vdd-supply = <&pmdcalifornium_l4>;
@@ -238,7 +239,7 @@
 					0x974 0x8d8 0x8dc 0x804 0x800
 					0x808>;
 		vdd-supply = <&pmdcalifornium_l4>;
-		core-supply = <&pmdcalifornium_l5>;
+		vdda18-supply = <&pmdcalifornium_l5>;
 		qcom,vdd-voltage-level = <0 928000 928000>;
 		qcom,vbus-valid-override;
 

@@ -1,19 +1,6 @@
 #
 # Makefile for the linux kernel.
 #
-#Disable Strict-Aliasing On Specific Modules:
-CFLAGS_fork.o := -fno-strict-aliasing
-CFLAGS_exit.o := -fno-strict-aliasing
-CFLAGS_sysctl_binary.o := -fno-strict-aliasing
-CFLAGS_sysctl.o := -fno-strict-aliasing
-CFLAGS_pid.o := -fno-strict-aliasing
-CFLAGS_signal.o := -fno-strict-aliasing
-CFLAGS_workqueue.o := -fno-strict-aliasing
-CFLAGS_cred.o := -fno-strict-aliasing
-CFLAGS_nsproxy.o := -fno-strict-aliasing
-CFLAGS_audit.o := -fno-strict-aliasing
-CFLAGS_auditfilter.o := -fno-strict-aliasing
-CFLAGS_cgroup.o := -fno-strict-aliasing
 
 obj-y     = fork.o exec_domain.o panic.o \
 	    cpu.o exit.o softirq.o resource.o \
@@ -29,17 +16,6 @@ ifdef CONFIG_FUNCTION_TRACER
 CFLAGS_REMOVE_cgroup-debug.o = -pg
 CFLAGS_REMOVE_irq_work.o = -pg
 endif
-
-# Prevents flicker of uninteresting __do_softirq()/__local_bh_disable_ip()
-# in coverage traces.
-KCOV_INSTRUMENT_softirq.o := n
-# These are called from save_stack_trace() on slub debug path,
-# and produce insane amounts of uninteresting coverage.
-KCOV_INSTRUMENT_module.o := n
-KCOV_INSTRUMENT_extable.o := n
-# Don't self-instrument.
-KCOV_INSTRUMENT_kcov.o := n
-KASAN_SANITIZE_kcov.o := n
 
 # cond_syscall is currently not LTO compatible
 CFLAGS_sys_ni.o = $(DISABLE_LTO)
@@ -89,7 +65,6 @@ obj-$(CONFIG_AUDITSYSCALL) += auditsc.o
 obj-$(CONFIG_AUDIT_WATCH) += audit_watch.o
 obj-$(CONFIG_AUDIT_TREE) += audit_tree.o
 obj-$(CONFIG_GCOV_KERNEL) += gcov/
-obj-$(CONFIG_KCOV) += kcov.o
 obj-$(CONFIG_KPROBES) += kprobes.o
 obj-$(CONFIG_KGDB) += debug/
 obj-$(CONFIG_DETECT_HUNG_TASK) += hung_task.o
@@ -153,6 +128,10 @@ X509_CERTIFICATES-$(CONFIG_MODULE_SIG) += signing_key.x509
 X509_CERTIFICATES-raw := $(sort $(foreach CERT,$(X509_CERTIFICATES-y), \
 				$(or $(realpath $(CERT)),$(CERT))))
 X509_CERTIFICATES := $(subst $(realpath $(objtree))/,,$(X509_CERTIFICATES-raw))
+
+ifeq ($(X509_CERTIFICATES),)
+$(warning *** No X.509 certificates found ***)
+endif
 
 ifneq ($(wildcard $(obj)/.x509.list),)
 ifneq ($(shell cat $(obj)/.x509.list),$(X509_CERTIFICATES))

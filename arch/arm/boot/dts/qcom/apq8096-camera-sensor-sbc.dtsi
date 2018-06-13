@@ -153,8 +153,6 @@
 		qcom,csiphy-sd-index = <1>;
 		qcom,csid-sd-index = <1>;
 		qcom,mount-angle = <0>;
-		//qcom,eeprom-src = <&eeprom1>;
-		//qcom,actuator-src = <&actuator1>;
 		cam_vdig-supply = <&vph_pwr_vreg>;
 		cam_vio-supply = <&vph_pwr_vreg>;
 		cam_vana-supply = <&vph_pwr_vreg>;

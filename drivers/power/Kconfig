@@ -805,13 +805,6 @@ config LGE_PM_OTP_SCENARIO_FOR_SPRINT
 	help
 	  Support otp scenario for sprint on LGE
 
-config LGE_PM_BCL_CTRL
-	bool "MSM8996 LGE BCL Feature"
-	depends on LGE_PM
-	default y
-	help
-	  Say Y here to enable support BCL lge feature.
-
 source "drivers/power/reset/Kconfig"
 
 endif # POWER_SUPPLY

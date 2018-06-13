@@ -171,13 +171,13 @@ $(TARGET_PREBUILT_INT_KERNEL): $(KERNEL_HEADERS_INSTALL) $(KERNEL_SOURCE_FILES) 
 ifeq ($(PRODUCT_SUPPORT_EXFAT), y)
 	# Make directory /system/lib/modules
 	@mkdir -p $(ANDROID_BUILD_TOP)/$(KERNEL_MODULES_OUT)
-	@cp -f $(ANDROID_BUILD_TOP)/kernel/tuxera_update.sh $(ANDROID_BUILD_TOP)
-	@sh tuxera_update.sh --target target/lg.d/mobile-msm8996 --use-cache --latest --max-cache-entries 2 --source-dir $(ANDROID_BUILD_TOP)/kernel --output-dir $(ANDROID_BUILD_TOP)/$(KERNEL_OUT) $(SUPPORT_EXFAT_TUXERA)
+	@cp -f $(ANDROID_BUILD_TOP)/kernel/msm-3.18/tuxera_update.sh $(ANDROID_BUILD_TOP)
+	@sh tuxera_update.sh --target target/lg.d/mobile-msm8996 --use-cache --latest --max-cache-entries 2 --source-dir $(ANDROID_BUILD_TOP)/kernel/msm-3.18 --output-dir $(ANDROID_BUILD_TOP)/$(KERNEL_OUT) $(SUPPORT_EXFAT_TUXERA)
 	@tar -xzf tuxera-exfat*.tgz
 	@mkdir -p $(TARGET_OUT_EXECUTABLES)
 	@cp $(ANDROID_BUILD_TOP)/tuxera-exfat*/exfat/kernel-module/texfat.ko $(ANDROID_BUILD_TOP)/$(TARGET_OUT_EXECUTABLES)/../lib/modules/
 	@cp $(ANDROID_BUILD_TOP)/tuxera-exfat*/exfat/tools/* $(TARGET_OUT_EXECUTABLES)
-	perl $(ANDROID_BUILD_TOP)/kernel/scripts/sign-file sha1 $(ANDROID_BUILD_TOP)/$(KERNEL_OUT)/signing_key.priv $(ANDROID_BUILD_TOP)/$(KERNEL_OUT)/signing_key.x509 $(ANDROID_BUILD_TOP)/$(KERNEL_MODULES_OUT)/texfat.ko
+	perl $(ANDROID_BUILD_TOP)/kernel/msm-3.18/scripts/sign-file sha1 $(ANDROID_BUILD_TOP)/$(KERNEL_OUT)/signing_key.priv $(ANDROID_BUILD_TOP)/$(KERNEL_OUT)/signing_key.x509 $(ANDROID_BUILD_TOP)/$(KERNEL_MODULES_OUT)/texfat.ko
 	@rm -f kheaders*.tar.bz2
 	@rm -f tuxera-exfat*.tgz
 	@rm -rf tuxera-exfat*

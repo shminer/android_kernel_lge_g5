@@ -49,6 +49,7 @@
 #include <linux/module.h>
 #include <linux/kthread.h>
 #include <linux/tick.h>
+#include <asm/cacheflush.h>
 
 #define CREATE_TRACE_POINTS
 
@@ -61,63 +62,6 @@ MODULE_ALIAS("rcupdate");
 #define MODULE_PARAM_PREFIX "rcupdate."
 
 module_param(rcu_expedited, int, 0);
-
-#ifndef CONFIG_TINY_RCU
-
-static atomic_t rcu_expedited_nesting =
-	ATOMIC_INIT(IS_ENABLED(CONFIG_RCU_EXPEDITE_BOOT) ? 1 : 0);
-
-/*
- * Should normal grace-period primitives be expedited?  Intended for
- * use within RCU.  Note that this function takes the rcu_expedited
- * sysfs/boot variable into account as well as the rcu_expedite_gp()
- * nesting.  So looping on rcu_unexpedite_gp() until rcu_gp_is_expedited()
- * returns false is a -really- bad idea.
- */
-bool rcu_gp_is_expedited(void)
-{
-	return rcu_expedited || atomic_read(&rcu_expedited_nesting);
-}
-EXPORT_SYMBOL_GPL(rcu_gp_is_expedited);
-
-/**
- * rcu_expedite_gp - Expedite future RCU grace periods
- *
- * After a call to this function, future calls to synchronize_rcu() and
- * friends act as the corresponding synchronize_rcu_expedited() function
- * had instead been called.
- */
-void rcu_expedite_gp(void)
-{
-	atomic_inc(&rcu_expedited_nesting);
-}
-EXPORT_SYMBOL_GPL(rcu_expedite_gp);
-
-/**
- * rcu_unexpedite_gp - Cancel prior rcu_expedite_gp() invocation
- *
- * Undo a prior call to rcu_expedite_gp().  If all prior calls to
- * rcu_expedite_gp() are undone by a subsequent call to rcu_unexpedite_gp(),
- * and if the rcu_expedited sysfs/boot parameter is not set, then all
- * subsequent calls to synchronize_rcu() and friends will return to
- * their normal non-expedited behavior.
- */
-void rcu_unexpedite_gp(void)
-{
-	atomic_dec(&rcu_expedited_nesting);
-}
-EXPORT_SYMBOL_GPL(rcu_unexpedite_gp);
-
-#endif /* #ifndef CONFIG_TINY_RCU */
-
-/*
- * Inform RCU of the end of the in-kernel boot sequence.
- */
-void rcu_end_inkernel_boot(void)
-{
-	if (IS_ENABLED(CONFIG_RCU_EXPEDITE_BOOT))
-		rcu_unexpedite_gp();
-}
 
 #ifdef CONFIG_PREEMPT_RCU
 
@@ -143,9 +87,17 @@ EXPORT_SYMBOL_GPL(__rcu_read_lock);
 void __rcu_read_unlock(void)
 {
 	struct task_struct *t = current;
+	register int rcu_read_lock_nesting = t->rcu_read_lock_nesting;
 
-	if (t->rcu_read_lock_nesting != 1) {
-		--t->rcu_read_lock_nesting;
+	if (unlikely(rcu_read_lock_nesting == 0)) {
+               __dma_flush_range((void *)&t->rcu_read_lock_nesting, (void *)&t->rcu_read_lock_nesting + (sizeof(int)));
+               rcu_read_lock_nesting = t->rcu_read_lock_nesting; /* retry to read rcu_read_lock_nesting */
+               printk_ratelimited(KERN_ERR "%s rcu_read_lock_nesting was zero, now is %d\n", __func__, rcu_read_lock_nesting);
+       }
+
+
+	if (rcu_read_lock_nesting != 1) {
+               t->rcu_read_lock_nesting = --rcu_read_lock_nesting;
 	} else {
 		barrier();  /* critical section before exit code. */
 		t->rcu_read_lock_nesting = INT_MIN;
@@ -256,13 +208,16 @@ EXPORT_SYMBOL_GPL(rcu_read_lock_bh_held);
 
 #endif /* #ifdef CONFIG_DEBUG_LOCK_ALLOC */
 
-/**
- * wakeme_after_rcu() - Callback function to awaken a task after grace period
- * @head: Pointer to rcu_head member within rcu_synchronize structure
- *
- * Awaken the corresponding task now that a grace period has elapsed.
+struct rcu_synchronize {
+	struct rcu_head head;
+	struct completion completion;
+};
+
+/*
+ * Awaken the corresponding synchronize_rcu() instance now that a
+ * grace period has elapsed.
  */
-void wakeme_after_rcu(struct rcu_head *head)
+static void wakeme_after_rcu(struct rcu_head  *head)
 {
 	struct rcu_synchronize *rcu;
 

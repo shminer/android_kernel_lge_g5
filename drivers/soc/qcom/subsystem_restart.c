@@ -1,4 +1,4 @@
-/* Copyright (c) 2011-2017, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2011-2015, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -152,7 +152,6 @@ struct restart_log {
  * @count: reference count of subsystem_get()/subsystem_put()
  * @id: ida
  * @restart_level: restart level (0 - panic, 1 - related, 2 - independent, etc.)
- * @keep_alive: whether keep alive during AP's panic
  * @restart_order: order of other devices this devices restarts with
  * @crash_count: number of times the device has crashed
  * @dentry: debugfs directory for this device
@@ -175,7 +174,6 @@ struct subsys_device {
 	int count;
 	int id;
 	int restart_level;
-	bool keep_alive;
 	int crash_count;
 	struct subsys_soc_restart_order *restart_order;
 #ifdef CONFIG_DEBUG_FS
@@ -314,31 +312,6 @@ static ssize_t system_debug_store(struct device *dev,
 	return orig_count;
 }
 
-static ssize_t keep_alive_show(struct device *dev,
-				struct device_attribute *attr, char *buf)
-{
-	struct subsys_device *subsys = to_subsys(dev);
-
-	return snprintf(buf, PAGE_SIZE, "%d\n", subsys->keep_alive);
-}
-
-static ssize_t keep_alive_store(struct device *dev,
-				struct device_attribute *attr, const char *buf,
-				size_t count)
-{
-	struct subsys_device *subsys = to_subsys(dev);
-	unsigned long value;
-
-	if (kstrtoul(buf, 0, &value) != 0)
-		return -EINVAL;
-	if (value > 1)
-		return -EINVAL;
-
-	subsys->keep_alive = (bool)value;
-
-	return count;
-}
-
 int subsys_get_restart_level(struct subsys_device *dev)
 {
 	return dev->restart_level;
@@ -381,7 +354,6 @@ static struct device_attribute subsys_attrs[] = {
 	__ATTR(restart_level, 0644, restart_level_show, restart_level_store),
 	__ATTR(firmware_name, 0644, firmware_name_show, firmware_name_store),
 	__ATTR(system_debug, 0644, system_debug_show, system_debug_store),
-	__ATTR(keep_alive, 0644, keep_alive_show, keep_alive_store),
 	__ATTR_NULL,
 };
 
@@ -641,18 +613,17 @@ static void subsystem_shutdown(struct subsys_device *dev, void *data)
 {
 	const char *name = dev->desc->name;
 
-	pr_info("[%s:%d]: Shutting down %s\n",
-			current->comm, current->pid, name);
+	pr_info("[%p]: Shutting down %s\n", current, name);
 #ifdef CONFIG_LGE_HANDLE_PANIC
 	if (dev->desc->shutdown(dev->desc, true) < 0) {
 		lge_set_subsys_crash_reason(name, LGE_ERR_SUB_SD);
-	panic("subsys-restart: [%s:%d]: Failed to shutdown %s!",
-			current->comm, current->pid, name);
+		panic("subsys-restart: [%p]: Failed to shutdown %s!",
+			current, name);
 	}
 #else
 	if (dev->desc->shutdown(dev->desc, true) < 0)
-		panic("subsys-restart: [%s:%d]: Failed to shutdown %s!",
-			current->comm, current->pid, name);
+		panic("subsys-restart: [%p]: Failed to shutdown %s!",
+			current, name);
 #endif
 	dev->crash_count++;
 	subsys_set_state(dev, SUBSYS_OFFLINE);
@@ -665,8 +636,7 @@ static void subsystem_ramdump(struct subsys_device *dev, void *data)
 
 	if (dev->desc->ramdump)
 		if (dev->desc->ramdump(is_ramdump_enabled(dev), dev->desc) < 0)
-			pr_warn("%s[%s:%d]: Ramdump failed.\n",
-				name, current->comm, current->pid);
+			pr_warn("%s[%p]: Ramdump failed.\n", name, current);
 	dev->do_ramdump_on_put = false;
 }
 
@@ -681,7 +651,7 @@ static void subsystem_powerup(struct subsys_device *dev, void *data)
 	const char *name = dev->desc->name;
 	int ret;
 
-	pr_info("[%s:%d]: Powering up %s\n", current->comm, current->pid, name);
+	pr_info("[%p]: Powering up %s\n", current, name);
 	init_completion(&dev->err_ready);
 
 	if (dev->desc->powerup(dev->desc) < 0) {
@@ -690,8 +660,7 @@ static void subsystem_powerup(struct subsys_device *dev, void *data)
 #ifdef CONFIG_LGE_HANDLE_PANIC
 		lge_set_subsys_crash_reason(name, LGE_ERR_SUB_PWR);
 #endif
-		panic("[%s:%d]: Powerup error: %s!",
-			current->comm, current->pid, name);
+		panic("[%p]: Powerup error: %s!", current, name);
 	}
 	enable_all_irqs(dev);
 
@@ -702,8 +671,8 @@ static void subsystem_powerup(struct subsys_device *dev, void *data)
 #ifdef CONFIG_LGE_HANDLE_PANIC
 		lge_set_subsys_crash_reason(name, LGE_ERR_SUB_TOW);
 #endif
-		panic("[%s:%d]: Timed out waiting for error ready: %s!",
-			current->comm, current->pid, name);
+		panic("[%p]: Timed out waiting for error ready: %s!",
+			current, name);
 	}
 	subsys_set_state(dev, SUBSYS_ONLINE);
 	subsys_set_crash_status(dev, false);
@@ -990,8 +959,8 @@ static void subsystem_restart_wq_func(struct work_struct *work)
 	 */
 	mutex_lock(&soc_order_reg_lock);
 
-	pr_debug("[%s:%d]: Starting restart sequence for %s\n",
-			current->comm, current->pid, desc->name);
+	pr_debug("[%p]: Starting restart sequence for %s\n", current,
+			desc->name);
 	notify_each_subsys_device(list, count, SUBSYS_BEFORE_SHUTDOWN, NULL);
 	for_each_subsys_device(list, count, NULL, subsystem_shutdown);
 	notify_each_subsys_device(list, count, SUBSYS_AFTER_SHUTDOWN, NULL);
@@ -1012,8 +981,8 @@ static void subsystem_restart_wq_func(struct work_struct *work)
 	for_each_subsys_device(list, count, NULL, subsystem_powerup);
 	notify_each_subsys_device(list, count, SUBSYS_AFTER_POWERUP, NULL);
 
-	pr_info("[%s:%d]: Restart sequence for %s completed.\n",
-			current->comm, current->pid, desc->name);
+	pr_info("[%p]: Restart sequence for %s completed.\n",
+			current, desc->name);
 
 	mutex_unlock(&soc_order_reg_lock);
 	mutex_unlock(&track->lock);
@@ -1106,9 +1075,8 @@ int subsystem_restart_dev(struct subsys_device *dev)
 	pr_info("Restart sequence requested for %s, restart_level = %s.\n",
 		name, restart_levels[dev->restart_level]);
 
-	if (disable_restart_work == DISABLE_SSR) {
-		pr_warn("subsys-restart: Ignoring restart request for %s.\n",
-									name);
+	if (WARN(disable_restart_work == DISABLE_SSR,
+		"subsys-restart: Ignoring restart request for %s.\n", name)) {
 		return 0;
 	}
 
@@ -1931,12 +1899,6 @@ EXPORT_SYMBOL(subsys_unregister);
 static int subsys_panic(struct device *dev, void *data)
 {
 	struct subsys_device *subsys = to_subsys(dev);
-
-	/* Keeping the subsys alive during panic */
-	if (!panic_timeout && subsys->keep_alive) {
-		dev_warn(dev, "keeping %s alive\n", subsys->desc->name);
-		return 0;
-	}
 
 	if (subsys->desc->crash_shutdown)
 		subsys->desc->crash_shutdown(subsys->desc);

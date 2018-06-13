@@ -111,7 +111,6 @@ static DEFINE_SPINLOCK(managed_page_count_lock);
 
 unsigned long totalram_pages __read_mostly;
 unsigned long totalreserve_pages __read_mostly;
-unsigned long totalcma_pages __read_mostly;
 /*
  * When calculating the number of globally allowed dirty pages, there
  * is a certain number of per-zone reserves that should not be
@@ -630,7 +629,7 @@ continue_merging:
 
 			if (migratetype != buddy_mt
 					&& (is_migrate_isolate(migratetype) ||
-						is_migrate_isolate(buddy_mt)))
+					is_migrate_isolate(buddy_mt)))
 				goto done_merging;
 		}
 		max_order++;
@@ -1089,13 +1088,13 @@ int move_freepages(struct zone *zone,
 #endif
 
 	for (page = start_page; page <= end_page;) {
+		/* Make sure we are not inadvertently changing nodes */
+		VM_BUG_ON_PAGE(page_to_nid(page) != zone_to_nid(zone), page);
+
 		if (!pfn_valid_within(page_to_pfn(page))) {
 			page++;
 			continue;
 		}
-
-		/* Make sure we are not inadvertently changing nodes */
-		VM_BUG_ON_PAGE(page_to_nid(page) != zone_to_nid(zone), page);
 
 		if (!PageBuddy(page)) {
 			page++;
@@ -1163,8 +1162,7 @@ static void change_pageblock_range(struct page *pageblock_page,
  * is worse than movable allocations stealing from unmovable and reclaimable
  * pageblocks.
  */
-static bool can_steal_fallback(unsigned int current_order, unsigned int start_order,
-			       int start_mt, int fallback_mt)
+static bool can_steal_fallback(unsigned int order, int start_mt)
 {
 	/*
 	 * Leaving this order check is intended, although there is
@@ -1173,17 +1171,12 @@ static bool can_steal_fallback(unsigned int current_order, unsigned int start_or
 	 * but, below check doesn't guarantee it and that is just heuristic
 	 * so could be changed anytime.
 	 */
-	if (current_order >= pageblock_order)
+	if (order >= pageblock_order)
 		return true;
 
-	/* don't let unmovable allocations cause migrations simply because of free pages */
-	if ((start_mt != MIGRATE_UNMOVABLE && current_order >= pageblock_order / 2) ||
-	        /* only steal reclaimable page blocks for unmovable allocations */
-	        (start_mt == MIGRATE_UNMOVABLE && fallback_mt != MIGRATE_MOVABLE && current_order >= pageblock_order / 2) ||
-	        /* reclaimable can steal aggressively */
+	if (order >= pageblock_order / 2 ||
 		start_mt == MIGRATE_RECLAIMABLE ||
-		/* allow unmovable allocs up to 64K without migrating blocks */
-		(start_mt == MIGRATE_UNMOVABLE && start_order >= 5) ||
+		start_mt == MIGRATE_UNMOVABLE ||
 		page_group_by_mobility_disabled)
 		return true;
 
@@ -1200,7 +1193,7 @@ static bool can_steal_fallback(unsigned int current_order, unsigned int start_or
 static void steal_suitable_fallback(struct zone *zone, struct page *page,
 							  int start_type)
 {
-	unsigned int current_order = page_order(page);
+	int current_order = page_order(page);
 	int pages;
 
 	/* Take ownership for orders >= pageblock_order */
@@ -1218,8 +1211,8 @@ static void steal_suitable_fallback(struct zone *zone, struct page *page,
 }
 
 /* Check whether there is a suitable fallback freepage with requested order. */
-static int find_suitable_fallback(struct free_area *area, unsigned int current_order,
-				  int migratetype, int start_order, bool *can_steal)
+static int find_suitable_fallback(struct free_area *area, unsigned int order,
+					int migratetype, bool *can_steal)
 {
 	int i;
 	int fallback_mt;
@@ -1236,7 +1229,7 @@ static int find_suitable_fallback(struct free_area *area, unsigned int current_o
 		if (list_empty(&area->free_list[fallback_mt]))
 			continue;
 
-		if (can_steal_fallback(current_order, start_order, migratetype, fallback_mt))
+		if (can_steal_fallback(order, migratetype))
 			*can_steal = true;
 
 		return fallback_mt;
@@ -1261,7 +1254,7 @@ __rmqueue_fallback(struct zone *zone, unsigned int order, int start_migratetype)
 				--current_order) {
 		area = &(zone->free_area[current_order]);
 		fallback_mt = find_suitable_fallback(area, current_order,
-			start_migratetype, order, &can_steal);
+				start_migratetype, &can_steal);
 		if (fallback_mt == -1)
 			continue;
 
@@ -1467,7 +1460,19 @@ static void drain_pages(unsigned int cpu)
 
 		pcp = &pset->pcp;
 		if (pcp->count) {
-			free_pcppages_bulk(zone, pcp->count, pcp);
+			int migratetype = 0;
+			struct list_head *list;
+
+			//check if all lists are free
+			list = &pcp->lists[migratetype];
+			while (list_empty(list)) {
+				if (++migratetype == MIGRATE_PCPTYPES)
+					break;
+				list = &pcp->lists[migratetype];
+			}
+
+			if (migratetype != MIGRATE_PCPTYPES)
+				free_pcppages_bulk(zone, pcp->count, pcp);
 			pcp->count = 0;
 		}
 		local_irq_restore(flags);
@@ -5554,18 +5559,15 @@ void __init free_area_init_nodes(unsigned long *max_zone_pfn)
 				sizeof(arch_zone_lowest_possible_pfn));
 	memset(arch_zone_highest_possible_pfn, 0,
 				sizeof(arch_zone_highest_possible_pfn));
-
-	start_pfn = find_min_pfn_with_active_regions();
-
-	for (i = 0; i < MAX_NR_ZONES; i++) {
+	arch_zone_lowest_possible_pfn[0] = find_min_pfn_with_active_regions();
+	arch_zone_highest_possible_pfn[0] = max_zone_pfn[0];
+	for (i = 1; i < MAX_NR_ZONES; i++) {
 		if (i == ZONE_MOVABLE)
 			continue;
-
-		end_pfn = max(max_zone_pfn[i], start_pfn);
-		arch_zone_lowest_possible_pfn[i] = start_pfn;
-		arch_zone_highest_possible_pfn[i] = end_pfn;
-
-		start_pfn = end_pfn;
+		arch_zone_lowest_possible_pfn[i] =
+			arch_zone_highest_possible_pfn[i-1];
+		arch_zone_highest_possible_pfn[i] =
+			max(max_zone_pfn[i], arch_zone_lowest_possible_pfn[i]);
 	}
 	arch_zone_lowest_possible_pfn[ZONE_MOVABLE] = 0;
 	arch_zone_highest_possible_pfn[ZONE_MOVABLE] = 0;
@@ -5684,8 +5686,8 @@ unsigned long free_reserved_area(void *start, void *end, int poison, char *s)
 	}
 
 	if (pages && s)
-		pr_info("Freeing %s memory: %ldK\n",
-			s, pages << (PAGE_SHIFT - 10));
+		pr_info("Freeing %s memory: %ldK (%p - %p)\n",
+			s, pages << (PAGE_SHIFT - 10), start, end);
 
 	return pages;
 }
@@ -5739,7 +5741,7 @@ void __init mem_init_print_info(const char *str)
 
 	printk("Memory: %luK/%luK available "
 	       "(%luK kernel code, %luK rwdata, %luK rodata, "
-	       "%luK init, %luK bss, %luK reserved, %luK cma-reserved"
+	       "%luK init, %luK bss, %luK reserved"
 #ifdef	CONFIG_HIGHMEM
 	       ", %luK highmem"
 #endif
@@ -5747,8 +5749,7 @@ void __init mem_init_print_info(const char *str)
 	       nr_free_pages() << (PAGE_SHIFT-10), physpages << (PAGE_SHIFT-10),
 	       codesize >> 10, datasize >> 10, rosize >> 10,
 	       (init_data_size + init_code_size) >> 10, bss_size >> 10,
-	       (physpages - totalram_pages - totalcma_pages) << (PAGE_SHIFT-10),
-	       totalcma_pages << (PAGE_SHIFT-10),
+	       (physpages - totalram_pages) << (PAGE_SHIFT-10),
 #ifdef	CONFIG_HIGHMEM
 	       totalhigh_pages << (PAGE_SHIFT-10),
 #endif
@@ -6650,7 +6651,7 @@ int alloc_contig_range(unsigned long start, unsigned long end,
 
 	/* Make sure the range is really isolated. */
 	if (test_pages_isolated(outer_start, end, false)) {
-		pr_info_ratelimited("%s: [%lx, %lx) PFNs busy\n",
+		pr_info("%s: [%lx, %lx) PFNs busy\n",
 			__func__, outer_start, end);
 		ret = -EBUSY;
 		goto done;

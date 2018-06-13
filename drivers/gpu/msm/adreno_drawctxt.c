@@ -1,4 +1,4 @@
-/* Copyright (c) 2002,2007-2017, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2002,2007-2016, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -213,12 +213,10 @@ static int adreno_drawctxt_wait_rb(struct adreno_device *adreno_dev,
 	BUG_ON(!mutex_is_locked(&device->mutex));
 
 	/*
-	 * If the context is invalid (OR) not submitted commands to GPU
-	 * then return immediately - we may end up waiting for a timestamp
-	 * that will never come
+	 * If the context is invalid then return immediately - we may end up
+	 * waiting for a timestamp that will never come
 	 */
-	if (kgsl_context_invalid(context) ||
-			!test_bit(KGSL_CONTEXT_PRIV_SUBMITTED, &context->priv))
+	if (kgsl_context_invalid(context))
 		goto done;
 
 	trace_adreno_drawctxt_wait_start(drawctxt->rb->id, context->id,
@@ -454,7 +452,7 @@ void adreno_drawctxt_detach(struct kgsl_context *context)
 	struct adreno_device *adreno_dev;
 	struct adreno_context *drawctxt;
 	struct adreno_ringbuffer *rb;
-	int ret = 0, count, i;
+	int ret, count, i;
 	struct kgsl_cmdbatch *list[ADRENO_CONTEXT_CMDQUEUE_SIZE];
 
 	if (context == NULL)
@@ -501,20 +499,13 @@ void adreno_drawctxt_detach(struct kgsl_context *context)
 
 	/*
 	 * If the wait for global fails due to timeout then nothing after this
-	 * point is likely to work very well - Get GPU snapshot and BUG_ON()
-	 * so we can take advantage of the debug tools to figure out what the
-	 * h - e - double hockey sticks happened. If EAGAIN error is returned
-	 * then recovery will kick in and there will be no more commands in the
-	 * RB pipe from this context which is waht we are waiting for, so ignore
-	 * -EAGAIN error
+	 * point is likely to work very well - BUG_ON() so we can take advantage
+	 * of the debug tools to figure out what the h - e - double hockey
+	 * sticks happened. If EAGAIN error is returned then recovery will kick
+	 * in and there will be no more commands in the RB pipe from this
+	 * context which is waht we are waiting for, so ignore -EAGAIN error
 	 */
-	if (ret && ret != -EAGAIN) {
-		KGSL_DRV_ERR(device, "Wait for global ts=%d type=%d error=%d\n",
-				drawctxt->internal_timestamp,
-				drawctxt->type, ret);
-		device->force_panic = 1;
-		kgsl_device_snapshot(device, context);
-	}
+	BUG_ON(ret && ret != -EAGAIN);
 
 	kgsl_sharedmem_writel(device, &device->memstore,
 			KGSL_MEMSTORE_OFFSET(context->id, soptimestamp),

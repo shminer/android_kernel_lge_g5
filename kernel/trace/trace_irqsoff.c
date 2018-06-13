@@ -15,8 +15,6 @@
 #include <linux/module.h>
 #include <linux/ftrace.h>
 #include <linux/fs.h>
-#define CREATE_TRACE_POINTS
-#include <trace/events/critical.h>
 
 #include "trace.h"
 
@@ -24,7 +22,6 @@ static struct trace_array		*irqsoff_trace __read_mostly;
 static int				tracer_enabled __read_mostly;
 
 static DEFINE_PER_CPU(int, tracing_cpu);
-static DEFINE_PER_CPU(int, tracing_events_cpu);
 
 static DEFINE_RAW_SPINLOCK(max_trace_lock);
 
@@ -121,12 +118,8 @@ static int func_prolog_dec(struct trace_array *tr,
 		return 0;
 
 	local_save_flags(*flags);
-	/*
-	 * Slight chance to get a false positive on tracing_cpu,
-	 * although I'm starting to think there isn't a chance.
-	 * Leave this for now just to be paranoid.
-	 */
-	if (!irqs_disabled_flags(*flags) && !preempt_count())
+	/* slight chance to get a false positive on tracing_cpu */
+	if (!irqs_disabled_flags(*flags))
 		return 0;
 
 	*data = per_cpu_ptr(tr->trace_buffer.data, cpu);
@@ -368,44 +361,6 @@ out:
 	__trace_function(tr, CALLER_ADDR0, parent_ip, flags, pc);
 }
 
-#ifdef CONFIG_TRACE_CRITICAL_SECTION_EVENTS
-/*
- * Called when either preempt or irq are turned off
- */
-static inline void
-start_critical_event(unsigned long ip, unsigned long parent_ip)
-{
-	int cpu;
-
-	cpu = raw_smp_processor_id();
-
-	if (per_cpu(tracing_events_cpu, cpu))
-		return;
-
-	trace_critical_start(ip, parent_ip);
-
-	per_cpu(tracing_events_cpu, cpu) = 1;
-}
-
-/*
- * Called when both preempt and irq are turned back on
- */
-static inline void
-stop_critical_event(unsigned long ip, unsigned long parent_ip)
-{
-	int cpu;
-
-	cpu = raw_smp_processor_id();
-
-	if (unlikely(per_cpu(tracing_events_cpu, cpu)))
-		per_cpu(tracing_events_cpu, cpu) = 0;
-	else
-		return;
-
-	trace_critical_end(ip, parent_ip);
-}
-#endif
-
 static inline void
 start_critical_timing(unsigned long ip, unsigned long parent_ip)
 {
@@ -478,10 +433,6 @@ stop_critical_timing(unsigned long ip, unsigned long parent_ip)
 /* start and stop critical timings used to for stoppage (in idle) */
 void start_critical_timings(void)
 {
-#ifdef CONFIG_TRACE_CRITICAL_SECTION_EVENTS
-	if (irqs_disabled() || preempt_count())
-		start_critical_event(CALLER_ADDR0, CALLER_ADDR1);
-#endif
 	if (preempt_trace() || irq_trace())
 		start_critical_timing(CALLER_ADDR0, CALLER_ADDR1);
 }
@@ -489,10 +440,6 @@ EXPORT_SYMBOL_GPL(start_critical_timings);
 
 void stop_critical_timings(void)
 {
-#ifdef CONFIG_TRACE_CRITICAL_SECTION_EVENTS
-	if (irqs_disabled() || preempt_count())
-		stop_critical_event(CALLER_ADDR0, CALLER_ADDR1);
-#endif
 	if (preempt_trace() || irq_trace())
 		stop_critical_timing(CALLER_ADDR0, CALLER_ADDR1);
 }
@@ -535,10 +482,6 @@ inline void print_irqtrace_events(struct task_struct *curr)
  */
 void trace_hardirqs_on(void)
 {
-#ifdef CONFIG_TRACE_CRITICAL_SECTION_EVENTS
-	if (!preempt_count())
-		stop_critical_event(CALLER_ADDR0, CALLER_ADDR1);
-#endif
 	if (!preempt_trace() && irq_trace())
 		stop_critical_timing(CALLER_ADDR0, CALLER_ADDR1);
 }
@@ -546,10 +489,6 @@ EXPORT_SYMBOL(trace_hardirqs_on);
 
 void trace_hardirqs_off(void)
 {
-#ifdef CONFIG_TRACE_CRITICAL_SECTION_EVENTS
-	if (!preempt_count())
-		start_critical_event(CALLER_ADDR0, CALLER_ADDR1);
-#endif
 	if (!preempt_trace() && irq_trace())
 		start_critical_timing(CALLER_ADDR0, CALLER_ADDR1);
 }
@@ -557,10 +496,6 @@ EXPORT_SYMBOL(trace_hardirqs_off);
 
 __visible void trace_hardirqs_on_caller(unsigned long caller_addr)
 {
-#ifdef CONFIG_TRACE_CRITICAL_SECTION_EVENTS
-	if (!preempt_count())
-		stop_critical_event(CALLER_ADDR0, caller_addr);
-#endif
 	if (!preempt_trace() && irq_trace())
 		stop_critical_timing(CALLER_ADDR0, caller_addr);
 }
@@ -568,10 +503,6 @@ EXPORT_SYMBOL(trace_hardirqs_on_caller);
 
 __visible void trace_hardirqs_off_caller(unsigned long caller_addr)
 {
-#ifdef CONFIG_TRACE_CRITICAL_SECTION_EVENTS
-	if (!preempt_count())
-		start_critical_event(CALLER_ADDR0, caller_addr);
-#endif
 	if (!preempt_trace() && irq_trace())
 		start_critical_timing(CALLER_ADDR0, caller_addr);
 }
@@ -583,20 +514,12 @@ EXPORT_SYMBOL(trace_hardirqs_off_caller);
 #ifdef CONFIG_PREEMPT_TRACER
 void trace_preempt_on(unsigned long a0, unsigned long a1)
 {
-#ifdef CONFIG_TRACE_CRITICAL_SECTION_EVENTS
-	if (!irqs_disabled())
-		stop_critical_event(a0, a1);
-#endif
 	if (preempt_trace() && !irq_trace())
 		stop_critical_timing(a0, a1);
 }
 
 void trace_preempt_off(unsigned long a0, unsigned long a1)
 {
-#ifdef CONFIG_TRACE_CRITICAL_SECTION_EVENTS
-	if (!irqs_disabled())
-		start_critical_event(a0, a1);
-#endif
 	if (preempt_trace() && !irq_trace())
 		start_critical_timing(a0, a1);
 }

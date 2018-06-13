@@ -66,7 +66,8 @@ static int broadcast_tdmb_set_channel(void __user *arg)
 
     if(copy_from_user(&udata, arg, sizeof(struct broadcast_tdmb_set_ch_info)))
     {
-        printk("broadcast_tdmb_set_ch copy_from_user!!! \n");
+        printk("broadcast_tdmb_set_ch fail!!! \n");
+        rc = ERROR;
     }
     else
     {
@@ -88,13 +89,8 @@ static int broadcast_tdmb_detect_sync(void __user *arg)
 {
     int rc = ERROR;
     int udata;
-
-    if(copy_from_user(&udata, arg, sizeof(int)))
-    {
-        printk("broadcast_tdmb_detect_sync copy_from_user error!!! \n");
-        return rc;
-    }
-
+    int __user* puser = (int __user*)arg;
+    udata = *puser;
     rc = device_drv->broadcast_drv_if_detect_sync(udata);
 
     return rc;
@@ -126,15 +122,10 @@ static int broadcast_tdmb_get_ch_info(void __user *arg)
     int rc = ERROR;
     char fic_kernel_buffer[400];
     unsigned int fic_len = 0;
-    struct broadcast_tdmb_ch_info userdata;
 
-    if(copy_from_user(&userdata, arg, sizeof(struct broadcast_tdmb_ch_info)))
-    {
-        printk("broadcast_tdmb_get_ch_info copy_from_user error!!! \n");
-        return rc;
-    }
+    struct broadcast_tdmb_ch_info __user* puserdata = (struct broadcast_tdmb_ch_info __user*)arg;
 
-    if(userdata.ch_buf_addr == 0)
+    if((puserdata == NULL)||( puserdata->ch_buf_addr == 0))
     {
         printk("broadcast_tdmb_get_ch_info argument error\n");
         return rc;
@@ -145,7 +136,7 @@ static int broadcast_tdmb_get_ch_info(void __user *arg)
 
     if(rc == OK)
     {
-        if(copy_to_user((void __user*)((unsigned long)userdata.ch_buf_addr), (void*)fic_kernel_buffer, fic_len))
+        if(copy_to_user((void __user*)((unsigned long)puserdata->ch_buf_addr), (void*)fic_kernel_buffer, fic_len))
         {
             fic_len = 0;
             rc = ERROR;
@@ -157,12 +148,7 @@ static int broadcast_tdmb_get_ch_info(void __user *arg)
         rc = ERROR;
     }
 
-    userdata.buf_len = fic_len;
-    if(copy_to_user((void *)(unsigned long)arg, &userdata, sizeof(struct broadcast_tdmb_ch_info)))
-    {
-        printk("broadcast_tdmb_get_ch_info copy_to_user error!!! \n");
-        rc = ERROR;
-    }
+    puserdata->buf_len = fic_len;
 
     return rc;
 }
@@ -175,59 +161,41 @@ static int broadcast_tdmb_get_dmb_data(void __user *arg)
     unsigned int     read_packet_cnt     = 0;
     unsigned int     copied_buffer_size     = 0;
 
-    struct broadcast_tdmb_data_info userdata;
-
-    if(copy_from_user(&userdata, arg, sizeof(struct broadcast_tdmb_data_info)))
-    {
-        printk("broadcast_tdmb_get_dmb_data copy_from_user error!!! \n");
-        return rc;
-    }
+    struct broadcast_tdmb_data_info __user* puserdata = (struct broadcast_tdmb_data_info  __user*)arg;
 
     while(1)
     {
-        rc = device_drv->broadcast_drv_if_get_msc(&read_buffer_ptr, &read_buffer_size, userdata.data_buf_size - copied_buffer_size);
+        rc = device_drv->broadcast_drv_if_get_msc(&read_buffer_ptr, &read_buffer_size, puserdata->data_buf_size - copied_buffer_size);
         if((rc != OK) ||(read_buffer_size ==0))
         {
             break;
         }
 
-        if (userdata.data_buf_size < copied_buffer_size + read_buffer_size )
+        if ( puserdata->data_buf_size < copied_buffer_size + read_buffer_size )
         {
             printk("broadcast_tdmb_get_dmb_data, output buffer is small\n");
             break;
         }
- 
-        if(copy_to_user((void __user*)(((unsigned long)userdata.data_buf_addr) + copied_buffer_size), (void*)read_buffer_ptr, read_buffer_size))
+        if(copy_to_user((void __user*)(((unsigned long)puserdata->data_buf_addr) + copied_buffer_size), (void*)read_buffer_ptr, read_buffer_size))
         {
-            userdata.copied_size= 0;
-            userdata.packet_cnt = 0;
-            if(copy_to_user((void *)(unsigned long)arg, &userdata, sizeof(struct broadcast_tdmb_data_info)))
-            {
-                printk("broadcast_tdmb_get_dmb_data copy_to_user1 error!!! \n");
-            }
-
+            puserdata->copied_size= 0;
+            puserdata->packet_cnt = 0;
             rc = ERROR;
+            printk("broadcast_tdmb_get_dmb_data copy_to_user error\n");
             break;
         }
         else
         {
             copied_buffer_size += read_buffer_size;
-            userdata.copied_size = copied_buffer_size;
+            puserdata->copied_size = copied_buffer_size;
 
             read_packet_cnt = copied_buffer_size/188;
-            userdata.packet_cnt = read_packet_cnt;
-
-            if(copy_to_user((void *)(unsigned long)arg, &userdata, sizeof(struct broadcast_tdmb_data_info)))
-            {
-                printk("broadcast_tdmb_get_dmb_data copy_to_user2 error!!! \n");
-                rc = ERROR;
-            }
-
+            puserdata->packet_cnt = read_packet_cnt;
             rc = OK;
         }
     }
 
-    if(userdata.copied_size)
+    if(puserdata->copied_size)
     {
         rc = OK;
     }
@@ -246,12 +214,9 @@ static int8 broadcast_tdmb_reset_ch(void)
 static int8 broadcast_tdmb_user_stop(void __user *arg)
 {
     int udata;
+    int __user* puser = (int __user*)arg;
 
-    if(copy_from_user(&udata, arg, sizeof(int)))
-    {
-        printk("broadcast_tdmb_user_stop copy_from_user error!!! \n");
-        return ERROR;
-    }
+    udata = *puser;
 
     //printk("broadcast_tdmb_user_stop data =(%d)\n", udata);
     device_drv->broadcast_drv_if_user_stop( udata );
@@ -263,13 +228,9 @@ static int8 broadcast_tdmb_select_antenna(void __user *arg)
 {
     int rc = ERROR;
     int udata;
+    int __user* puser = (int __user*)arg;
 
-    if(copy_from_user(&udata, arg, sizeof(int)))
-    {
-        printk("broadcast_tdmb_select_antenna copy_from_user error!!! \n");
-        return rc;
-    }
-
+    udata = *puser;
     rc = device_drv->broadcast_drv_if_select_antenna(udata);
 
     return rc;
@@ -279,13 +240,9 @@ static int8 broadcast_tdmb_set_nation(void __user *arg)
 {
     int rc = ERROR;
     int udata;
+    int __user* puser = (int __user*)arg;
 
-    if(copy_from_user(&udata, arg, sizeof(int)))
-    {
-        printk("broadcast_tdmb_set_nation copy_from_user error!!! \n");
-        return rc;
-    }
-
+    udata = *puser;
     rc = device_drv->broadcast_drv_if_set_nation(udata);
 
     return rc;

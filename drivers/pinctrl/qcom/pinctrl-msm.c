@@ -30,8 +30,6 @@
 #include <linux/syscore_ops.h>
 #include <linux/reboot.h>
 #include <linux/irqchip/msm-mpm-irq.h>
-#include <linux/irqchip/qpnp-int.h>
-#include <linux/wakeup_reason.h>
 #include "../core.h"
 #include "../pinconf.h"
 #include "pinctrl-msm.h"
@@ -545,7 +543,6 @@ static void msm_gpio_dbg_show_one(struct seq_file *s,
 	seq_printf(s, " %s", val ? "HIGH" : "LOW" );
 #endif
 }
-
 static void msm_gpio_dbg_show(struct seq_file *s, struct gpio_chip *chip)
 {
 	unsigned gpio = chip->base;
@@ -805,7 +802,6 @@ static int msm_gpio_irq_set_wake(struct irq_data *d, unsigned int on)
 
 static struct irq_chip msm_gpio_irq_chip = {
 	.name           = "msmgpio",
-	.flags          = IRQCHIP_MASK_ON_SUSPEND,
 	.irq_mask       = msm_gpio_irq_mask,
 	.irq_unmask     = msm_gpio_irq_unmask,
 	.irq_ack        = msm_gpio_irq_ack,
@@ -813,7 +809,7 @@ static struct irq_chip msm_gpio_irq_chip = {
 	.irq_set_wake   = msm_gpio_irq_set_wake,
 };
 
-bool msm_gpio_irq_handler(unsigned int irq, struct irq_desc *desc)
+static void msm_gpio_irq_handler(unsigned int irq, struct irq_desc *desc)
 {
 	struct gpio_chip *gc = irq_desc_get_handler_data(desc);
 	const struct msm_pingroup *g;
@@ -823,7 +819,6 @@ bool msm_gpio_irq_handler(unsigned int irq, struct irq_desc *desc)
 	int handled = 0;
 	u32 val;
 	int i;
-	bool ret;
 
 	chained_irq_enter(chip, desc);
 
@@ -845,17 +840,16 @@ bool msm_gpio_irq_handler(unsigned int irq, struct irq_desc *desc)
 					i, val,
 					readl(pctrl->regs + g->intr_cfg_reg));
 #endif
-			handled += generic_handle_irq(irq_pin);
+			generic_handle_irq(irq_pin);
+			handled++;
 		}
 	}
 
-	ret = (handled != 0);
 	/* No interrupts were flagged */
 	if (handled == 0)
-		ret = handle_bad_irq(irq, desc);
+		handle_bad_irq(irq, desc);
 
 	chained_irq_exit(chip, desc);
-	return ret;
 }
 
 /*
@@ -980,7 +974,7 @@ static void msm_pinctrl_resume(void)
 	spin_lock_irqsave(&pctrl->lock, flags);
 	for_each_set_bit(i, pctrl->enabled_irqs, pctrl->chip.ngpio) {
 		g = &pctrl->soc->groups[i];
-		val = readl(pctrl->regs + g->intr_status_reg);
+		val = readl_relaxed(pctrl->regs + g->intr_status_reg);
 		if (val & BIT(g->intr_status_bit)) {
 			irq = irq_find_mapping(pctrl->chip.irqdomain, i);
 			desc = irq_to_desc(irq);
@@ -988,9 +982,8 @@ static void msm_pinctrl_resume(void)
 				name = "stray irq";
 			else if (desc->action && desc->action->name)
 				name = desc->action->name;
-			log_base_wakeup_reason(irq);
-			pr_warning("%s: %d triggered %s\n",
-				__func__, irq, name);
+
+			pr_warn("%s: %d triggered %s\n", __func__, irq, name);
 		}
 	}
 	spin_unlock_irqrestore(&pctrl->lock, flags);

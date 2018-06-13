@@ -758,6 +758,34 @@ void hrtimers_resume(void)
 	clock_was_set_delayed();
 }
 
+static inline void timer_stats_hrtimer_set_start_info(struct hrtimer *timer)
+{
+#ifdef CONFIG_TIMER_STATS
+	if (timer->start_site)
+		return;
+	timer->start_site = __builtin_return_address(0);
+	memcpy(timer->start_comm, current->comm, TASK_COMM_LEN);
+	timer->start_pid = current->pid;
+#endif
+}
+
+static inline void timer_stats_hrtimer_clear_start_info(struct hrtimer *timer)
+{
+#ifdef CONFIG_TIMER_STATS
+	timer->start_site = NULL;
+#endif
+}
+
+static inline void timer_stats_account_hrtimer(struct hrtimer *timer)
+{
+#ifdef CONFIG_TIMER_STATS
+	if (likely(!timer_stats_active))
+		return;
+	timer_stats_update_stats(timer, timer->start_pid, timer->start_site,
+				 timer->function, timer->start_comm, 0);
+#endif
+}
+
 /*
  * Counterpart to lock_hrtimer_base above:
  */
@@ -784,9 +812,6 @@ u64 hrtimer_forward(struct hrtimer *timer, ktime_t now, ktime_t interval)
 	delta = ktime_sub(now, hrtimer_get_expires(timer));
 
 	if (delta.tv64 < 0)
-		return 0;
-
-	if (WARN_ON(timer->state & HRTIMER_STATE_ENQUEUED))
 		return 0;
 
 	if (interval.tv64 < timer->base->resolution.tv64)
@@ -879,10 +904,10 @@ out:
  * remove hrtimer, called with base lock held
  */
 static inline int
-remove_hrtimer(struct hrtimer *timer, struct hrtimer_clock_base *base, bool restart)
+remove_hrtimer(struct hrtimer *timer, struct hrtimer_clock_base *base)
 {
 	if (hrtimer_is_queued(timer)) {
-		unsigned long state = timer->state;
+		unsigned long state;
 		int reprogram;
 
 		/*
@@ -894,16 +919,14 @@ remove_hrtimer(struct hrtimer *timer, struct hrtimer_clock_base *base, bool rest
 		 * rare case and less expensive than a smp call.
 		 */
 		debug_deactivate(timer);
+		timer_stats_hrtimer_clear_start_info(timer);
 		reprogram = base->cpu_base == this_cpu_ptr(&hrtimer_bases);
-
-		if (!restart) {
-			/*
-			 * We must preserve the CALLBACK state flag here,
-			 * otherwise we could move the timer base in
-			 * switch_hrtimer_base.
-			 */
-			state &= HRTIMER_STATE_CALLBACK;
-		}
+		/*
+		 * We must preserve the CALLBACK state flag here,
+		 * otherwise we could move the timer base in
+		 * switch_hrtimer_base.
+		 */
+		state = timer->state & HRTIMER_STATE_CALLBACK;
 		__remove_hrtimer(timer, base, state, reprogram);
 		return 1;
 	}
@@ -921,7 +944,7 @@ int __hrtimer_start_range_ns(struct hrtimer *timer, ktime_t tim,
 	base = lock_hrtimer_base(timer, &flags);
 
 	/* Remove an active timer from the queue: */
-	ret = remove_hrtimer(timer, base, true);
+	ret = remove_hrtimer(timer, base);
 
 	if (mode & HRTIMER_MODE_REL) {
 		tim = ktime_add_safe(tim, base->get_time());
@@ -941,6 +964,8 @@ int __hrtimer_start_range_ns(struct hrtimer *timer, ktime_t tim,
 
 	/* Switch the timer base, if necessary: */
 	new_base = switch_hrtimer_base(timer, base, mode & HRTIMER_MODE_PINNED);
+
+	timer_stats_hrtimer_set_start_info(timer);
 
 	leftmost = enqueue_hrtimer(timer, new_base);
 
@@ -1040,7 +1065,7 @@ int hrtimer_try_to_cancel(struct hrtimer *timer)
 	base = lock_hrtimer_base(timer, &flags);
 
 	if (!hrtimer_callback_running(timer))
-		ret = remove_hrtimer(timer, base, false);
+		ret = remove_hrtimer(timer, base);
 
 	unlock_hrtimer_base(timer, &flags);
 
@@ -1129,6 +1154,12 @@ static void __hrtimer_init(struct hrtimer *timer, clockid_t clock_id,
 	base = hrtimer_clockid_to_base(clock_id);
 	timer->base = &cpu_base->clock_base[base];
 	timerqueue_init(&timer->node);
+
+#ifdef CONFIG_TIMER_STATS
+	timer->start_site = NULL;
+	timer->start_pid = -1;
+	memset(timer->start_comm, 0, TASK_COMM_LEN);
+#endif
 }
 
 /**
@@ -1176,6 +1207,7 @@ static void __run_hrtimer(struct hrtimer *timer, ktime_t *now)
 
 	debug_deactivate(timer);
 	__remove_hrtimer(timer, base, HRTIMER_STATE_CALLBACK, 0);
+	timer_stats_account_hrtimer(timer);
 	fn = timer->function;
 
 	/*
@@ -1193,14 +1225,11 @@ static void __run_hrtimer(struct hrtimer *timer, ktime_t *now)
 	 * Note: We clear the CALLBACK bit after enqueue_hrtimer and
 	 * we do not reprogramm the event hardware. Happens either in
 	 * hrtimer_start_range_ns() or in hrtimer_interrupt()
-	 *
-	 * Note: Because we dropped the cpu_base->lock above,
-	 * hrtimer_start_range_ns() can have popped in and enqueued
-	 * the timer for us already.
 	 */
-	if (restart != HRTIMER_NORESTART &&
-		!(timer->state & HRTIMER_STATE_ENQUEUED))
+	if (restart != HRTIMER_NORESTART) {
+		BUG_ON(timer->state != HRTIMER_STATE_CALLBACK);
 		enqueue_hrtimer(timer, base);
+	}
 
 	WARN_ON_ONCE(!(timer->state & HRTIMER_STATE_CALLBACK));
 
@@ -1556,7 +1585,7 @@ long hrtimer_nanosleep(struct timespec *rqtp, struct timespec __user *rmtp,
 			goto out;
 	}
 
-	restart = &current->restart_block;
+	restart = &current_thread_info()->restart_block;
 	restart->fn = hrtimer_nanosleep_restart;
 	restart->nanosleep.clockid = t.timer.base->clockid;
 	restart->nanosleep.rmtp = rmtp;

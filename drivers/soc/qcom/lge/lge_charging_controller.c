@@ -40,11 +40,11 @@ atomic_t in_call_status;
 #endif
 
 #define MODULE_NAME "lge_charging_controller"
-#define MONITOR_BATTEMP_POLLING_PERIOD  (60 * 100)
+#define MONITOR_BATTEMP_POLLING_PERIOD  (60 * HZ)
 #ifdef CONFIG_LGE_PM_USB_CURRENT_MAX_MODE
 #define USB_CURRENT_MAX_MODE_ICL	(900 * 1000)
 #define USB_CURRENT_NORMAL_MODE_ICL (500 * 1000)
-#define MONITOR_USB_CURRENT_MODE_CHECK_PERIOD  (90 * 100)
+#define MONITOR_USB_CURRENT_MODE_CHECK_PERIOD  (90 * HZ)
 #endif
 
 #ifdef CONFIG_LGE_PM_LLK_MODE
@@ -207,7 +207,7 @@ static int is_hvdcp_present(void)
 #define STEP_FCC_1ST				2500
 #define STEP_FCC_2ND				1800
 #define STEP_FCC_3RD				1800
-#define STEP_CHARGING_CHECK_TIME                (30 * 100)
+#define STEP_CHARGING_CHECK_TIME                (30 * HZ)
 #define USB_C_INPUT_CURRENT_MAX                 3000
 static void step_charging_check_work(struct work_struct *work)
 {
@@ -876,7 +876,7 @@ static int lgcc_set_thermal_chg_current(const char *val,
 			lgcc_thermal_mitigation, the_controller->chg_current_te);
 
 	cancel_delayed_work_sync(&the_controller->battemp_work);
-	schedule_delayed_work(&the_controller->battemp_work, 100*1);
+	schedule_delayed_work(&the_controller->battemp_work, HZ*1);
 
 	return 0;
 }
@@ -1098,17 +1098,17 @@ void start_lgcc_work(int mdelay){
 #ifdef CONFIG_LGE_PM_OTP_ENABLE
 	pr_err("start otp work\n");
 	schedule_delayed_work(&the_controller->battemp_work,
-		(delay * 100));
+		(delay * HZ));
 #endif
 
 	pr_err("start step_charging work\n");
 	schedule_delayed_work(&the_controller->step_charging_work,
-		(delay * 100));
+		(delay * HZ));
 
 #ifdef CONFIG_LGE_PM_USB_CURRENT_MAX_MODE
 	if (!lge_is_factory_cable())
 		schedule_delayed_work(&the_controller->usb_current_max_work,
-				(delay * 100));
+				(delay * HZ));
 #endif
 }
 EXPORT_SYMBOL(start_lgcc_work);

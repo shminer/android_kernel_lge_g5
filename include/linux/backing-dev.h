@@ -104,7 +104,7 @@ struct backing_dev_info {
 	struct dentry *debug_dir;
 	struct dentry *debug_stats;
 #endif
-#ifdef CONFIG_PM_SUSPEND_BG_SYNC
+#ifdef CONFIG_MACH_LGE
 	/*
 	 * "check_and_sync" is changed to "bg_sync" during suspend syncing filesystems.
 	 * Although below codes related with "check_and_sync" have to be deleted together,
@@ -220,8 +220,7 @@ static inline unsigned long bdi_stat_error(struct backing_dev_info *bdi)
 	return 1;
 #endif
 }
-
-#ifdef CONFIG_PM_SUSPEND_BG_SYNC
+#ifdef CONFIG_MACH_LGE
 /*
  * "check_and_sync" is changed to "bg_sync" during suspend syncing filesystems.
  * Although below codes related with "check_and_sync" have to be deleted together,

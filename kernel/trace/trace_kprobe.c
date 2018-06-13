@@ -671,25 +671,30 @@ static int create_trace_kprobe(int argc, char **argv)
 		pr_info("Probe point is not specified.\n");
 		return -EINVAL;
 	}
-
-	/* try to parse an address. if that fails, try to read the
-	 * input as a symbol. */
-	if (kstrtoul(argv[1], 0, (unsigned long *)&addr)) {
+	if (isdigit(argv[1][0])) {
+		if (is_return) {
+			pr_info("Return probe point must be a symbol.\n");
+			return -EINVAL;
+		}
+		/* an address specified */
+		ret = kstrtoul(&argv[1][0], 0, (unsigned long *)&addr);
+		if (ret) {
+			pr_info("Failed to parse address.\n");
+			return ret;
+		}
+	} else {
 		/* a symbol specified */
 		symbol = argv[1];
 		/* TODO: support .init module functions */
 		ret = traceprobe_split_symbol_offset(symbol, &offset);
 		if (ret) {
-			pr_info("Failed to parse either an address or a symbol.\n");
+			pr_info("Failed to parse symbol.\n");
 			return ret;
 		}
 		if (offset && is_return) {
 			pr_info("Return probe must be used without offset.\n");
 			return -EINVAL;
 		}
-	} else if (is_return) {
-		pr_info("Return probe point must be a symbol.\n");
-		return -EINVAL;
 	}
 	argc -= 2; argv += 2;
 
@@ -1153,7 +1158,7 @@ kprobe_perf_func(struct trace_kprobe *tk, struct pt_regs *regs)
 	size = ALIGN(__size + sizeof(u32), sizeof(u64));
 	size -= sizeof(u32);
 
-	entry = perf_trace_buf_prepare(size, call->event.type, NULL, &rctx);
+	entry = perf_trace_buf_prepare(size, call->event.type, regs, &rctx);
 	if (!entry)
 		return;
 
@@ -1184,7 +1189,7 @@ kretprobe_perf_func(struct trace_kprobe *tk, struct kretprobe_instance *ri,
 	size = ALIGN(__size + sizeof(u32), sizeof(u64));
 	size -= sizeof(u32);
 
-	entry = perf_trace_buf_prepare(size, call->event.type, NULL, &rctx);
+	entry = perf_trace_buf_prepare(size, call->event.type, regs, &rctx);
 	if (!entry)
 		return;
 
@@ -1479,11 +1484,6 @@ static __init int kprobe_trace_self_tests_init(void)
 
 end:
 	release_all_trace_kprobes();
-	/*
-	 * Wait for the optimizer work to finish. Otherwise it might fiddle
-	 * with probes in already freed __init text.
-	 */
-	wait_for_kprobe_optimizer();
 	if (warn)
 		pr_cont("NG: Some tests are failed. Please check them.\n");
 	else

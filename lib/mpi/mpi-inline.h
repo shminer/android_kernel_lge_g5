@@ -30,11 +30,7 @@
 #define G10_MPI_INLINE_H
 
 #ifndef G10_MPI_INLINE_DECL
-#if defined __GNUC_STDC_INLINE__ || defined __GNUC_GNU_INLINE__
-#define G10_MPI_INLINE_DECL extern inline __attribute__ ((__gnu_inline__))
-#else
-+#define G10_MPI_INLINE_DECL extern inline
-#endif
+#define G10_MPI_INLINE_DECL  extern inline
 #endif
 
 G10_MPI_INLINE_DECL mpi_limb_t

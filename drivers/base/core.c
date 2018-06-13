@@ -1288,9 +1288,16 @@ void device_del(struct device *dev)
 		blocking_notifier_call_chain(&dev->bus->p->bus_notifier,
 					     BUS_NOTIFY_REMOVED_DEVICE, dev);
 	kobject_uevent(&dev->kobj, KOBJ_REMOVE);
+#if 0
+	cleanup_device_parent(dev);
+	mutex_lock(&gdp_mutex);
+	kobject_del(&dev->kobj);
+	mutex_unlock(&gdp_mutex);
+#else
 	glue_dir = get_glue_dir(dev);
 	kobject_del(&dev->kobj);
 	cleanup_glue_dir(dev, glue_dir);
+#endif
 	put_device(parent);
 }
 EXPORT_SYMBOL_GPL(device_del);

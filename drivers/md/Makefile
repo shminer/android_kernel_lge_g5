@@ -1,9 +1,6 @@
 #
 # Makefile for the kernel software RAID and LVM drivers.
 #
-CFLAGS_dm-crypt.o := -fno-strict-aliasing
-CFLAGS_dm-req-crypt.o := -fno-strict-aliasing
-
 
 dm-mod-y	+= dm.o dm-table.o dm-target.o dm-linear.o dm-stripe.o \
 		   dm-ioctl.o dm-io.o dm-kcopyd.o dm-sysfs.o dm-stats.o
@@ -18,6 +15,7 @@ dm-cache-y	+= dm-cache-target.o dm-cache-metadata.o dm-cache-policy.o
 dm-cache-mq-y   += dm-cache-policy-mq.o
 dm-cache-cleaner-y += dm-cache-policy-cleaner.o
 dm-era-y	+= dm-era-target.o
+dm-verity-y	+= dm-verity-target.o
 md-mod-y	+= md.o bitmap.o
 raid456-y	+= raid5.o
 
@@ -62,4 +60,8 @@ obj-$(CONFIG_DM_REQ_CRYPT)	+= dm-req-crypt.o
 
 ifeq ($(CONFIG_DM_UEVENT),y)
 dm-mod-objs			+= dm-uevent.o
+endif
+
+ifeq ($(CONFIG_DM_VERITY_FEC),y)
+dm-verity-objs			+= dm-verity-fec.o
 endif

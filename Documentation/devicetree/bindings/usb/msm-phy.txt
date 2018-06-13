@@ -104,7 +104,7 @@ Required properties:
  - <supply-name>-supply: phandle to the regulator device tree node
    Required "supply-name" examples are:
 	"vdd" : vdd supply for SSPHY digital circuit operation
-	"core" : high-voltage analog supply for SSPHY
+	"vdda18" : 1.8v high-voltage analog supply for SSPHY
  - qcom,vdd-voltage-level: This property must be a list of three integer
    values (no, min, max) where each value represents either a voltage in
    microvolts or a value corresponding to voltage corner
@@ -121,9 +121,6 @@ Optional properties:
    value, single ended clk value, delay after register write.
  - qcom,qmp-phy-reg-offset: If present stores phy register offsets in an order
    defined in the phy driver.
- - qcom,core-voltage-level: This property must be a list of three integer
-   values (no, min, max) where each value represents either a voltage in
-   microvolts or a value corresponding to voltage corner.
 
 Example:
 	ssphy0: ssphy@f9b38000 {
@@ -159,13 +156,13 @@ Required properties:
  - phy_type: Should be one of "ulpi" or "utmi". ChipIdea core uses "ulpi" mode.
 
 Optional properties:
- - reg-names: Additional registers corresponding with the following:
+ - reg: Address and length register set to control QUSB2 PHY
+   "qscratch_base" : QSCRATCH base register set.
    "tune2_efuse_addr": EFUSE based register address to read TUNE2 parameter.
    via the QSCRATCH interface.
    "emu_phy_base" : phy base address used for programming emulation target phy.
    "ref_clk_addr" : ref_clk bcr address used for on/off ref_clk before reset.
    "tcsr_phy_clk_scheme_sel": address used to determine QUSB PHY clk source.
-   "tcsr_phy_level_shift_keeper": address used to clamp QUSB PHY level shifter.
  - reg-names: Should be "qscratch_base". The qscratch register bank
    allows us to manipulate QUSB PHY bits eg. to enable D+ pull-up using s/w
    control in device mode. The reg-names property is required if the
@@ -186,8 +183,10 @@ Optional properties:
 Example:
 	qusb_phy: qusb@f9b39000 {
 		compatible = "qcom,qusb2phy";
-		reg = <0x00079000 0x7000>;
-		reg-names = "qusb_phy_base";
+		reg = <0x00079000 0x7000>,
+			<0x08af8800 0x400>;
+		reg-names = "qusb_phy_base",
+			    "qscratch_base";
 		vdd-supply = <&pm8994_s2_corner>;
 		vdda18-supply = <&pm8994_l6>;
 		vdda33-supply = <&pm8994_l24>;

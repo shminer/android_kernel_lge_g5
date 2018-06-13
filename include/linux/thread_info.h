@@ -2,8 +2,6 @@
  *
  * Copyright (C) 2002  David Howells (dhowells@redhat.com)
  * - Incorporating suggestions made by Linus Torvalds
- *
- * Copyright (c) 2014, NVIDIA CORPORATION.  All rights reserved.
  */
 
 #ifndef _LINUX_THREAD_INFO_H
@@ -11,7 +9,6 @@
 
 #include <linux/types.h>
 #include <linux/bug.h>
-#include <asm/relaxed.h>
 
 struct timespec;
 struct compat_timespec;
@@ -89,12 +86,6 @@ static inline int test_and_clear_ti_thread_flag(struct thread_info *ti, int flag
 	return test_and_clear_bit(flag, (unsigned long *)&ti->flags);
 }
 
-static inline int test_ti_thread_flag_relaxed(struct thread_info *ti, int flag)
-{
-	ti->flags = cpu_relaxed_read_long(&ti->flags);
-	return test_bit(flag, (unsigned long *)&ti->flags);
-}
-
 static inline int test_ti_thread_flag(struct thread_info *ti, int flag)
 {
 	return test_bit(flag, (unsigned long *)&ti->flags);
@@ -110,12 +101,8 @@ static inline int test_ti_thread_flag(struct thread_info *ti, int flag)
 	test_and_clear_ti_thread_flag(current_thread_info(), flag)
 #define test_thread_flag(flag) \
 	test_ti_thread_flag(current_thread_info(), flag)
-#define test_thread_flag_relaxed(flag) \
-	test_ti_thread_flag_relaxed(current_thread_info(), flag)
 
 #define tif_need_resched() test_thread_flag(TIF_NEED_RESCHED)
-
-#define tif_need_resched_relaxed() test_thread_flag_relaxed(TIF_NEED_RESCHED)
 
 #if defined TIF_RESTORE_SIGMASK && !defined HAVE_SET_RESTORE_SIGMASK
 /*
@@ -157,31 +144,6 @@ static inline bool test_and_clear_restore_sigmask(void)
 #ifndef HAVE_SET_RESTORE_SIGMASK
 #error "no set_restore_sigmask() provided and default one won't work"
 #endif
-
-#ifndef CONFIG_HAVE_ARCH_WITHIN_STACK_FRAMES
-static inline int arch_within_stack_frames(const void * const stack,
-					   const void * const stackend,
-					   const void *obj, unsigned long len)
-{
-	return 0;
-}
-#endif
-
-#ifdef CONFIG_HARDENED_USERCOPY
-extern void __check_object_size(const void *ptr, unsigned long n,
-					bool to_user);
-
-static __always_inline void check_object_size(const void *ptr, unsigned long n,
-					      bool to_user)
-{
-	if (!__builtin_constant_p(n))
-		__check_object_size(ptr, n, to_user);
-}
-#else
-static inline void check_object_size(const void *ptr, unsigned long n,
-				     bool to_user)
-{ }
-#endif /* CONFIG_HARDENED_USERCOPY */
 
 #endif	/* __KERNEL__ */
 

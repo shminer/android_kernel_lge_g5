@@ -313,7 +313,7 @@ out_entries:
 
 static void neigh_get_hash_rnd(u32 *x)
 {
-	prandom_bytes(x, sizeof(*x));
+	get_random_bytes(x, sizeof(*x));
 	*x |= 1;
 }
 
@@ -876,8 +876,7 @@ static void neigh_probe(struct neighbour *neigh)
 	if (skb)
 		skb = skb_copy(skb, GFP_ATOMIC);
 	write_unlock(&neigh->lock);
-	if (neigh->ops->solicit)
-		neigh->ops->solicit(neigh, skb);
+	neigh->ops->solicit(neigh, skb);
 	atomic_inc(&neigh->probes);
 	kfree_skb(skb);
 }

@@ -277,11 +277,11 @@ static void nft_match_eval(const struct nft_expr *expr,
 		return;
 	}
 
-	switch (ret ? 1 : 0) {
-	case 1:
+	switch(ret) {
+	case true:
 		data[NFT_REG_VERDICT].verdict = NFT_CONTINUE;
 		break;
-	case 0:
+	case false:
 		data[NFT_REG_VERDICT].verdict = NFT_BREAK;
 		break;
 	}

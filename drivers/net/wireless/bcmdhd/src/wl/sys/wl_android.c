@@ -437,10 +437,6 @@ static struct genl_multicast_group wl_genl_mcast = {
 };
 #endif /* LINUX_VERSION_CODE >= KERNEL_VERSION(3, 13, 0) */
 #endif /* WL_GENL */
-#ifdef CUSTOMER_HW10
-#define CMD_SET_BCNTIMEOUT "SET_BCNTIMEOUT"
-#define CMD_GET_BCNTIMEOUT "GET_BCNTIMEOUT"
-#endif /* CUSTOMER_HW10 */
 
 /**
  * Extern function declarations (TODO: move them to dhd_linux.h)
@@ -4601,21 +4597,7 @@ int wl_android_priv_cmd(struct net_device *net, struct ifreq *ifr, int cmd)
 	    bytes_written = wl_android_get_idle_time(net, command, priv_cmd.total_len);
 	}
 #endif /* DHD_PCIE_RUNTIMEPM */
-#ifdef CUSTOMER_HW10
-	else if (strnicmp(command, CMD_SET_BCNTIMEOUT, strlen(CMD_SET_BCNTIMEOUT)) == 0) {
-		int bcn_timeout;
-		sscanf(command, "%*s %10d", &bcn_timeout);
-		bytes_written = wldev_iovar_setint(net, "bcn_timeout", bcn_timeout);
-	}
-	else if (strnicmp(command, CMD_GET_BCNTIMEOUT, strlen(CMD_GET_BCNTIMEOUT)) == 0) {
-		int bcn_timeout = 0;
-		if (wldev_iovar_getint(net, "bcn_timeout", &bcn_timeout))
-			bytes_written = -EFAULT;
-		else
-			bytes_written = snprintf(command, priv_cmd.total_len, "%s %d",
-			CMD_GET_BCNTIMEOUT, bcn_timeout);
-	}
-#endif /* CUSTOMER_HW10 */
+
 	else {
 		DHD_ERROR(("Unknown PRIVATE command %s - ignored\n", command));
 		bytes_written = scnprintf(command, sizeof("FAIL"), "FAIL");

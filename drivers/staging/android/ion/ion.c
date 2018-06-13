@@ -224,10 +224,10 @@ static struct ion_buffer *ion_buffer_create(struct ion_heap *heap,
 			"heap->ops->map_dma should return ERR_PTR on error"))
 		table = ERR_PTR(-EINVAL);
 	if (IS_ERR(table)) {
-		ret = -EINVAL;
-		goto err1;
+		heap->ops->free(buffer);
+		kfree(buffer);
+		return ERR_CAST(table);
 	}
-
 	buffer->sg_table = table;
 	if (ion_buffer_fault_user_mappings(buffer)) {
 		int num_pages = PAGE_ALIGN(buffer->size) / PAGE_SIZE;
@@ -237,7 +237,7 @@ static struct ion_buffer *ion_buffer_create(struct ion_heap *heap,
 		buffer->pages = vmalloc(sizeof(struct page *) * num_pages);
 		if (!buffer->pages) {
 			ret = -ENOMEM;
-			goto err;
+			goto err1;
 		}
 
 		for_each_sg(table->sgl, sg, table->nents, i) {
@@ -246,6 +246,9 @@ static struct ion_buffer *ion_buffer_create(struct ion_heap *heap,
 			for (j = 0; j < sg->length / PAGE_SIZE; j++)
 				buffer->pages[k++] = page++;
 		}
+
+		if (ret)
+			goto err;
 	}
 
 	mutex_init(&buffer->lock);
@@ -269,8 +272,10 @@ static struct ion_buffer *ion_buffer_create(struct ion_heap *heap,
 
 err:
 	heap->ops->unmap_dma(heap, buffer);
-err1:
 	heap->ops->free(buffer);
+err1:
+	if (buffer->pages)
+		vfree(buffer->pages);
 err2:
 	kfree(buffer);
 	return ERR_PTR(ret);
@@ -436,12 +441,13 @@ int ion_handle_put(struct ion_handle *handle)
 /* Must hold the client lock */
 static void user_ion_handle_get(struct ion_handle *handle)
 {
-	if (handle->user_ref_count++ == 0)
+	if (handle->user_ref_count++ == 0) {
 		kref_get(&handle->ref);
+	}
 }
 
 /* Must hold the client lock */
-static struct ion_handle *user_ion_handle_get_check_overflow(struct ion_handle *handle)
+static struct ion_handle* user_ion_handle_get_check_overflow(struct ion_handle *handle)
 {
 	if (handle->user_ref_count + 1 == 0)
 		return ERR_PTR(-EOVERFLOW);
@@ -452,7 +458,7 @@ static struct ion_handle *user_ion_handle_get_check_overflow(struct ion_handle *
 /* passes a kref to the user ref count.
  * We know we're holding a kref to the object before and
  * after this call, so no need to reverify handle. */
-static struct ion_handle *pass_to_user(struct ion_handle *handle)
+static struct ion_handle* pass_to_user(struct ion_handle *handle)
 {
 	struct ion_client *client = handle->client;
 	struct ion_handle *ret;
@@ -467,10 +473,11 @@ static struct ion_handle *pass_to_user(struct ion_handle *handle)
 /* Must hold the client lock */
 static int user_ion_handle_put_nolock(struct ion_handle *handle)
 {
-	int ret;
+	int ret = 0;
 
-	if (--handle->user_ref_count == 0)
+	if (--handle->user_ref_count == 0) {
 		ret = ion_handle_put_nolock(handle);
+	}
 
 	return ret;
 }
@@ -686,7 +693,6 @@ static void ion_free_nolock(struct ion_client *client, struct ion_handle *handle
 	ion_handle_put_nolock(handle);
 }
 
-/* Must hold the client lock */
 static void user_ion_free_nolock(struct ion_client *client, struct ion_handle *handle)
 {
 	bool valid_handle;
@@ -698,7 +704,7 @@ static void user_ion_free_nolock(struct ion_client *client, struct ion_handle *h
 		WARN(1, "%s: invalid handle passed to free.\n", __func__);
 		return;
 	}
-	if (handle->user_ref_count == 0) {
+	if (!handle->user_ref_count > 0) {
 		WARN(1, "%s: User does not have access!\n", __func__);
 		return;
 	}
@@ -1951,7 +1957,6 @@ static int debug_shrink_get(void *data, u64 *val)
 
 DEFINE_SIMPLE_ATTRIBUTE(debug_shrink_fops, debug_shrink_get,
 			debug_shrink_set, "%llu\n");
-
 #endif
 
 void ion_device_add_heap(struct ion_device *dev, struct ion_heap *heap)

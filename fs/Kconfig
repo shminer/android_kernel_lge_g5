@@ -61,8 +61,6 @@ config FILE_LOCKING
           for filesystems like NFS and for the flock() system
           call. Disabling this option saves about 11k.
 
-source "fs/crypto/Kconfig"
-
 source "fs/notify/Kconfig"
 
 source "fs/quota/Kconfig"
@@ -91,7 +89,6 @@ if BLOCK
 menu "DOS/FAT/NT Filesystems"
 
 source "fs/fat/Kconfig"
-source "fs/exfat/Kconfig"
 source "fs/ntfs/Kconfig"
 
 endmenu
@@ -261,7 +258,6 @@ config NFS_COMMON
 	depends on NFSD || NFS_FS || LOCKD
 	default y
 
-
 source "net/sunrpc/Kconfig"
 source "fs/ceph/Kconfig"
 source "fs/cifs/Kconfig"
@@ -279,12 +275,5 @@ config FILE_TABLE_DEBUG
 	bool "Enable FILE_TABLE_DEBUG"
 	help
 	  This option enables debug of the open files using a global filetable
-
-config DYNAMIC_FSYNC
-	bool "dynamic file sync control"
-	depends on !PM_SUSPEND_BG_SYNC
-	default n
-	help
-	  An experimental file sync control using new power_suspend driver 	  
 
 endmenu

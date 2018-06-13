@@ -107,10 +107,10 @@ static void set_ping_group_range(struct ctl_table *table, kgid_t low, kgid_t hig
 	kgid_t *data = table->data;
 	struct net *net =
 		container_of(table->data, struct net, ipv4.ping_group_range.range);
-	write_seqlock_bh(&net->ipv4.ip_local_ports.lock);
+	write_seqlock(&net->ipv4.ip_local_ports.lock);
 	data[0] = low;
 	data[1] = high;
-	write_sequnlock_bh(&net->ipv4.ip_local_ports.lock);
+	write_sequnlock(&net->ipv4.ip_local_ports.lock);
 }
 
 /* Validate changes from /proc interface. */
@@ -211,7 +211,7 @@ static int proc_allowed_congestion_control(struct ctl_table *ctl,
 	if (!tbl.data)
 		return -ENOMEM;
 
-	tcp_get_available_congestion_control(tbl.data, tbl.maxlen);
+	tcp_get_allowed_congestion_control(tbl.data, tbl.maxlen);
 	ret = proc_dostring(&tbl, write, buffer, lenp, ppos);
 	if (write && ret == 0)
 		ret = tcp_set_allowed_congestion_control(tbl.data);

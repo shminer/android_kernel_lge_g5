@@ -159,7 +159,7 @@ int sch_direct_xmit(struct sk_buff *skb, struct Qdisc *q,
 	if (validate)
 		skb = validate_xmit_skb_list(skb, dev);
 
-	if (likely(skb)) {
+	if (skb) {
 		HARD_TX_LOCK(dev, txq, smp_processor_id());
 		if (!netif_xmit_frozen_or_stopped(txq)) {
 			if (unlikely(skb->fast_forwarded))
@@ -170,9 +170,6 @@ int sch_direct_xmit(struct sk_buff *skb, struct Qdisc *q,
 		}
 
 		HARD_TX_UNLOCK(dev, txq);
-	} else {
-		spin_lock(root_lock);
-		return qdisc_qlen(q);
 	}
 	spin_lock(root_lock);
 
@@ -281,9 +278,6 @@ static void dev_watchdog(unsigned long arg)
 	struct net_device *dev = (struct net_device *)arg;
 
 	netif_tx_lock(dev);
-	if (!dev->watchdog_timeo)
-		return;
-
 	if (!qdisc_tx_is_noop(dev)) {
 		if (netif_device_present(dev) &&
 		    netif_running(dev) &&
@@ -327,11 +321,8 @@ static void dev_watchdog(unsigned long arg)
 
 void __netdev_watchdog_up(struct net_device *dev)
 {
-	if (!dev->watchdog_timeo)
-		return;
-
 	if (dev->netdev_ops->ndo_tx_timeout) {
-		if (dev->watchdog_timeo < 0)
+		if (dev->watchdog_timeo <= 0)
 			dev->watchdog_timeo = 5*HZ;
 		if (!mod_timer(&dev->watchdog_timer,
 			       round_jiffies(jiffies + dev->watchdog_timeo)))

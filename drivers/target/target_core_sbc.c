@@ -946,15 +946,9 @@ sbc_parse_cdb(struct se_cmd *cmd, struct sbc_ops *ops)
 			return ret;
 		break;
 	case VERIFY:
-	case VERIFY_16:
 		size = 0;
-		if (cdb[0] == VERIFY) {
-			sectors = transport_get_sectors_10(cdb);
-			cmd->t_task_lba = transport_lba_32(cdb);
-		} else {
-			sectors = transport_get_sectors_16(cdb);
-			cmd->t_task_lba = transport_lba_64(cdb);
-		}
+		sectors = transport_get_sectors_10(cdb);
+		cmd->t_task_lba = transport_lba_32(cdb);
 		cmd->execute_cmd = sbc_emulate_noop;
 		goto check_lba;
 	case REZERO_UNIT:

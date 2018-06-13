@@ -4144,82 +4144,6 @@ static struct regulator_ops cpr3_regulator_ops = {
 	.list_corner_voltage	= cpr3_regulator_list_corner_voltage,
 };
 
-#ifdef CONFIG_REGULATOR_CPR3_VOLTAGE_CONTROL
-int cpr_regulator_get_ceiling_voltage(struct regulator *regulator,
-		int cori)
-{
-	struct cpr3_regulator *cpr_vreg = regulator_get_drvdata(regulator);
-	cori--;
-	if (cori >= 0 && cori < cpr_vreg->corner_count)
-		return cpr_vreg->corner[cori].ceiling_volt;
-
-	return -EINVAL;
-}
-int cpr_regulator_get_floor_voltage(struct regulator *regulator,
-		int cori)
-{
-	struct cpr3_regulator *cpr_vreg = regulator_get_drvdata(regulator);
-	cori--;
-	if (cori >= 0 && cori < cpr_vreg->corner_count)
-		return cpr_vreg->corner[cori].floor_volt;
-
-	return -EINVAL;
-}
-int cpr_regulator_get_last_voltage(struct regulator *regulator,
-		int cori)
-{
-	struct cpr3_regulator *cpr_vreg = regulator_get_drvdata(regulator);
-	cori--;
-	if (cori >= 0 && cori < cpr_vreg->corner_count)
-		return cpr_vreg->corner[cori].last_volt;
-
-	return -EINVAL;
-}
-
-int cpr_regulator_set_ceiling_voltage(struct regulator *regulator,
-		int cori, int volt)
-{
-	struct cpr3_regulator *cpr_vreg = regulator_get_drvdata(regulator);
-	cori--;
-	if (cori >= 0 && cori < cpr_vreg->corner_count) {
-		mutex_lock(&cpr_vreg->thread->ctrl->lock);
-		cpr_vreg->corner[cori].ceiling_volt = volt;
-		mutex_unlock(&cpr_vreg->thread->ctrl->lock);
-		return 0;
-	}
-
-	return -EINVAL;
-}
-int cpr_regulator_set_floor_voltage(struct regulator *regulator,
-		int cori, int volt)
-{
-	struct cpr3_regulator *cpr_vreg = regulator_get_drvdata(regulator);
-	cori--;
-	if (cori >= 0 && cori < cpr_vreg->corner_count) {
-		mutex_lock(&cpr_vreg->thread->ctrl->lock);
-		cpr_vreg->corner[cori].floor_volt = volt;
-		mutex_unlock(&cpr_vreg->thread->ctrl->lock);
-		return 0;
-	}
-
-	return -EINVAL;
-}
-int cpr_regulator_set_last_voltage(struct regulator *regulator,
-		int cori, int volt)
-{
-	struct cpr3_regulator *cpr_vreg = regulator_get_drvdata(regulator);
-	cori--;
-	if (cori >= 0 && cori < cpr_vreg->corner_count) {
-		mutex_lock(&cpr_vreg->thread->ctrl->lock);
-		cpr_vreg->corner[cori].last_volt = volt;
-		mutex_unlock(&cpr_vreg->thread->ctrl->lock);
-		return 0;
-	}
-
-	return -EINVAL;
-}
-#endif
-
 /**
  * cprh_regulator_get_voltage() - get the voltage corner for the CPR3 regulator
  *			associated with the regulator device
@@ -5967,11 +5891,14 @@ static int cpr3_panic_callback(struct notifier_block *nfb,
 				struct cpr3_controller, panic_notifier);
 	struct cpr3_panic_regs_info *regs_info = ctrl->panic_regs_info;
 	struct cpr3_reg_info *reg;
+	void __iomem *virt_addr;
 	int i = 0;
 
 	for (i = 0; i < regs_info->reg_count; i++) {
 		reg = &(regs_info->regs[i]);
-		reg->value = readl_relaxed(reg->virt_addr);
+		virt_addr = ioremap(reg->addr, 0x4);
+		reg->value = readl_relaxed(virt_addr);
+		iounmap(virt_addr);
 		pr_err("%s[0x%08x] = 0x%08x\n", reg->name, reg->addr,
 			reg->value);
 	}
@@ -6172,12 +6099,11 @@ int cpr3_regulator_unregister(struct cpr3_controller *ctrl)
 	if (ctrl->irq && !cpumask_empty(&ctrl->irq_affinity_mask))
 		unregister_hotcpu_notifier(&ctrl->cpu_hotplug_notifier);
 
-	if (ctrl->ctrl_type == CPR_CTRL_TYPE_CPR4) {
+	if (ctrl->ctrl_type == CPR_CTRL_TYPE_CPR4)
 		rc = cpr3_ctrl_clear_cpr4_config(ctrl);
 		if (rc)
 			cpr3_err(ctrl, "failed to clear CPR4 configuration,rc=%d\n",
 				rc);
-	}
 
 	cpr3_ctrl_loop_disable(ctrl);
 

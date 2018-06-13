@@ -20,7 +20,6 @@
 
 #include <asm/alternative.h>
 #include <asm/assembler.h>
-#include <asm/cache.h>
 #include <asm/cpufeature.h>
 #include <asm/sysreg.h>
 

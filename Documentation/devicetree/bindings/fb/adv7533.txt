@@ -23,8 +23,6 @@ Optional properties:
 - qcom,max-voltage-level		Maximum voltage level to be supplied to bridge chip
 - qcom,enable-load			Load current to bridge chip when enabled
 - qcom,disable-load			Load current to bridge chip when disabled
-- qcom,post-on-sleep			Sleep time (ms) to indicate the sleep
-					time after the vreg is enabled
 
 Example:
 &soc {
@@ -48,7 +46,6 @@ Example:
 			qcom,max-voltage-level = <0>;
 			qcom,enable-load = <0>;
 			qcom,disable-load = <0>;
-			qcom,post-on-sleep = <10>;
 		};
 	};
 };

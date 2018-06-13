@@ -23,6 +23,8 @@
 #include <linux/tick.h>
 #include <trace/events/power.h>
 
+#include <trace/events/sched.h>
+
 #include "smpboot.h"
 
 #ifdef CONFIG_SMP
@@ -190,14 +192,14 @@ void cpu_hotplug_done(void)
 void cpu_hotplug_disable(void)
 {
 	cpu_maps_update_begin();
-	cpu_hotplug_disabled++;
+	cpu_hotplug_disabled = 1;
 	cpu_maps_update_done();
 }
 
 void cpu_hotplug_enable(void)
 {
 	cpu_maps_update_begin();
-	WARN_ON(--cpu_hotplug_disabled < 0);
+	cpu_hotplug_disabled = 0;
 	cpu_maps_update_done();
 }
 
@@ -390,7 +392,7 @@ static int __ref _cpu_down(unsigned int cpu, int tasks_frozen)
 	 * Wait for the stop thread to go away.
 	 */
 	while (!idle_cpu(cpu))
-		cpu_read_relax();
+		cpu_relax();
 
 	hotplug_cpu__broadcast_tick_pull(cpu);
 	/* This actually kills the CPU. */
@@ -403,6 +405,7 @@ static int __ref _cpu_down(unsigned int cpu, int tasks_frozen)
 
 out_release:
 	cpu_hotplug_done();
+	trace_sched_cpu_hotplug(cpu, err, 0);
 	if (!err)
 		cpu_notify_nofail(CPU_POST_DEAD | mod, hcpu);
 	return err;
@@ -506,45 +509,14 @@ out_notify:
 		__cpu_notify(CPU_UP_CANCELED | mod, hcpu, nr_calls, NULL);
 out:
 	cpu_hotplug_done();
+	trace_sched_cpu_hotplug(cpu, ret, 1);
 
 	return ret;
-}
-
-static int switch_to_rt_policy(void)
-{
-	struct sched_param param = { .sched_priority = MAX_RT_PRIO - 1 };
-	unsigned int policy = current->policy;
-	int err;
-
-	/* Nobody should be attempting hotplug from these policy contexts. */
-	if (policy == SCHED_BATCH || policy == SCHED_IDLE ||
-					policy == SCHED_DEADLINE)
-		return -EPERM;
-
-	if (policy == SCHED_FIFO || policy == SCHED_RR)
-		return 1;
-
-	/* Only SCHED_NORMAL left. */
-	err = sched_setscheduler_nocheck(current, SCHED_FIFO, &param);
-	return err;
-
-}
-
-static int switch_to_fair_policy(void)
-{
-	struct sched_param param = { .sched_priority = 0 };
-
-	return sched_setscheduler_nocheck(current, SCHED_NORMAL, &param);
 }
 
 int cpu_up(unsigned int cpu)
 {
 	int err = 0;
-	int switch_err = 0;
-
-	switch_err = switch_to_rt_policy();
-	if (switch_err < 0)
-		return switch_err;
 
 	if (!cpu_possible(cpu)) {
 		pr_err("can't online cpu %d because it is not configured as may-hotadd at boot time\n",
@@ -570,13 +542,6 @@ int cpu_up(unsigned int cpu)
 
 out:
 	cpu_maps_update_done();
-
-	if (!switch_err) {
-		switch_err = switch_to_fair_policy();
-		pr_err("Hotplug policy switch err. Task %s pid=%d\n",
-					current->comm, current->pid);
-	}
-
 	return err;
 }
 EXPORT_SYMBOL_GPL(cpu_up);
@@ -596,7 +561,7 @@ int disable_nonboot_cpus(void)
 	 */
 	cpumask_clear(frozen_cpus);
 
-	pr_debug("Disabling non-boot CPUs ...\n");
+	pr_info("Disabling non-boot CPUs ...\n");
 	for_each_online_cpu(cpu) {
 		if (cpu == first_cpu)
 			continue;
@@ -611,18 +576,13 @@ int disable_nonboot_cpus(void)
 		}
 	}
 
-	if (!error)
+	if (!error) {
 		BUG_ON(num_online_cpus() > 1);
-	else
+		/* Make sure the CPUs won't be enabled by someone else */
+		cpu_hotplug_disabled = 1;
+	} else {
 		pr_err("Non-boot CPUs are not disabled\n");
-
-	/*
-	 * Make sure the CPUs won't be enabled by someone else. We need to do
-	 * this even in case of failure as all disable_nonboot_cpus() users are
-	 * supposed to do enable_nonboot_cpus() on the failure path.
-	 */
-	cpu_hotplug_disabled++;
-
+	}
 	cpu_maps_update_done();
 	return error;
 }
@@ -638,15 +598,14 @@ void __weak arch_enable_nonboot_cpus_end(void)
 void __ref enable_nonboot_cpus(void)
 {
 	int cpu, error;
-	struct device *cpu_device;
 
 	/* Allow everyone to use the CPU hotplug again */
 	cpu_maps_update_begin();
-	WARN_ON(--cpu_hotplug_disabled < 0);
+	cpu_hotplug_disabled = 0;
 	if (cpumask_empty(frozen_cpus))
 		goto out;
 
-	pr_debug("Enabling non-boot CPUs ...\n");
+	pr_info("Enabling non-boot CPUs ...\n");
 
 	arch_enable_nonboot_cpus_begin();
 
@@ -655,13 +614,7 @@ void __ref enable_nonboot_cpus(void)
 		error = _cpu_up(cpu, 1);
 		trace_suspend_resume(TPS("CPU_ON"), cpu, false);
 		if (!error) {
-			pr_debug("CPU%d is up\n", cpu);
-			cpu_device = get_cpu_device(cpu);
-			if (!cpu_device)
-				pr_err("%s: failed to get cpu%d device\n",
-				       __func__, cpu);
-			else
-				kobject_uevent(&cpu_device->kobj, KOBJ_ONLINE);
+			pr_info("CPU%d is up\n", cpu);
 			continue;
 		}
 		pr_warn("Error taking CPU%d up: %d\n", cpu, error);

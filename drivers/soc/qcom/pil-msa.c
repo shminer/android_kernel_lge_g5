@@ -1,4 +1,4 @@
-/* Copyright (c) 2012-2017, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2012-2016, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -259,7 +259,7 @@ static int pil_msa_wait_for_mba_ready(struct q6v5_data *drv)
 	ret = readl_poll_timeout(drv->rmb_base + RMB_MBA_STATUS, status,
 				status != 0, POLL_INTERVAL_US, val);
 	if (ret) {
-		dev_err(dev, "MBA boot timed out\n");
+        dev_err(dev, "MBA boot timed out\n");
         modem_log_rmb_regs(drv->rmb_base);
         subsystem_restart("modem");
 		return ret;
@@ -540,14 +540,14 @@ int pil_mss_reset_load_mba(struct pil_desc *pil)
 {
 	struct q6v5_data *drv = container_of(pil, struct q6v5_data, desc);
 	struct modem_data *md = dev_get_drvdata(pil->dev);
-	const struct firmware *fw, *dp_fw = NULL;
+	const struct firmware *fw, *dp_fw;
 	char fw_name_legacy[10] = "mba.b00";
 	char fw_name[10] = "mba.mbn";
 	char *dp_name = "msadp";
 	char *fw_name_p;
 	void *mba_dp_virt;
 	dma_addr_t mba_dp_phys, mba_dp_phys_end;
-	int ret;
+	int ret, count;
 	const u8 *data;
 	struct device *dma_dev = md->mba_mem_dev_fixed ?: &md->mba_mem_dev;
 
@@ -595,7 +595,7 @@ int pil_mss_reset_load_mba(struct pil_desc *pil)
 				 __func__, drv->mba_dp_size);
 		ret = -ENOMEM;
 		subsystem_restart("modem");
-		goto err_invalid_fw;
+        goto err_invalid_fw;
 	}
 
 	/* Make sure there are no mappings in PKMAP and fixmap */
@@ -610,15 +610,16 @@ int pil_mss_reset_load_mba(struct pil_desc *pil)
 			&mba_dp_phys, &mba_dp_phys_end, drv->mba_dp_size);
 
 	/* Load the MBA image into memory */
-	if (fw->size <= SZ_1M) {
-		/* Ensures memcpy is done for max 1MB fw size */
-		memcpy(mba_dp_virt, data, fw->size);
-	} else {
+	count = fw->size;
+
+	if (count > SZ_1M) {
 		dev_err(pil->dev, "%s fw image loading into memory is failed due to fw size overflow\n",
 			__func__);
-		 ret = -EINVAL;
-		 goto err_mba_data;
+		ret = -EINVAL;
+		goto err_mba_data;
 	}
+
+	memcpy(mba_dp_virt, data, count);
 	/* Ensure memcpy of the MBA memory is done before loading the DP */
 	wmb();
 

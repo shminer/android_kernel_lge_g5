@@ -17,10 +17,6 @@
 #include <linux/balloon_compaction.h>
 #include <linux/page-isolation.h>
 #include <linux/kasan.h>
-#include <linux/fb.h>
-#include <linux/moduleparam.h>
-#include <linux/time.h>
-#include <linux/workqueue.h>
 #include "internal.h"
 
 #ifdef CONFIG_COMPACTION
@@ -378,24 +374,6 @@ static unsigned long isolate_freepages_block(struct compact_control *cc,
 
 		if (!valid_page)
 			valid_page = page;
-
-		/*
-		 * For compound pages such as THP and hugetlbfs, we can save
-		 * potentially a lot of iterations if we skip them at once.
-		 * The check is racy, but we can consider only valid values
-		 * and the only danger is skipping too much.
-		 */
-		if (PageCompound(page)) {
-			unsigned int comp_order = compound_order(page);
-
-			if (likely(comp_order < MAX_ORDER)) {
-				blockpfn += (1UL << comp_order) - 1;
-				cursor += (1UL << comp_order) - 1;
-			}
-
-			goto isolate_fail;
-		}
-
 		if (!PageBuddy(page))
 			goto isolate_fail;
 
@@ -427,23 +405,18 @@ static unsigned long isolate_freepages_block(struct compact_control *cc,
 
 		/* Found a free page, break it into order-0 pages */
 		isolated = split_free_page(page);
-		if (!isolated)
-			break;
-
 		total_isolated += isolated;
-		cc->nr_freepages += isolated;
 		for (i = 0; i < isolated; i++) {
 			list_add(&page->lru, freelist);
 			page++;
 		}
-		if (!strict && cc->nr_migratepages <= cc->nr_freepages) {
-			blockpfn += isolated;
-			break;
+
+		/* If a page was split, advance to the end of it */
+		if (isolated) {
+			blockpfn += isolated - 1;
+			cursor += isolated - 1;
+			continue;
 		}
-		/* Advance to the end of split page */
-		blockpfn += isolated - 1;
-		cursor += isolated - 1;
-		continue;
 
 isolate_fail:
 		if (strict)
@@ -452,16 +425,6 @@ isolate_fail:
 			continue;
 
 	}
-
-	if (locked)
-		spin_unlock_irqrestore(&cc->zone->lock, flags);
-
-	/*
-	 * There is a tiny chance that we have read bogus compound_order(),
-	 * so be careful to not go outside of the pageblock.
-	 */
-	if (unlikely(blockpfn > end_pfn))
-		blockpfn = end_pfn;
 
 	/* Record how far we have got within the block */
 	*start_pfn = blockpfn;
@@ -475,6 +438,9 @@ isolate_fail:
 	 */
 	if (strict && blockpfn < end_pfn)
 		total_isolated = 0;
+
+	if (locked)
+		spin_unlock_irqrestore(&cc->zone->lock, flags);
 
 	/* Update the pageblock-skip if the whole pageblock was scanned */
 	if (blockpfn == end_pfn)
@@ -846,8 +812,16 @@ isolate_migratepages_range(struct compact_control *cc, unsigned long start_pfn,
 		pfn = isolate_migratepages_block(cc, pfn, block_end_pfn,
 							ISOLATE_UNEVICTABLE);
 
-		if (!pfn)
+		/*
+		 * In case of fatal failure, release everything that might
+		 * have been isolated in the previous iteration, and signal
+		 * the failure back to caller.
+		 */
+		if (!pfn) {
+			putback_movable_pages(&cc->migratepages);
+			cc->nr_migratepages = 0;
 			break;
+		}
 
 		if (cc->nr_migratepages == COMPACT_CLUSTER_MAX)
 			break;
@@ -926,12 +900,7 @@ static void isolate_freepages(struct compact_control *cc)
 
 		/* Found a block suitable for isolating free pages from. */
 		isolated = isolate_freepages_block(cc, &isolate_start_pfn,
-						block_end_pfn, freelist, false);
-		/* If isolation failed early, do not continue needlessly */
-		if (!isolated && isolate_start_pfn < block_end_pfn &&
-		    cc->nr_migratepages > cc->nr_freepages)
-			break;
-
+					block_end_pfn, freelist, false);
 		nr_freepages += isolated;
 
 		/*
@@ -1467,47 +1436,6 @@ break_loop:
 	return rc;
 }
 
-static struct workqueue_struct *compaction_wq;
-static struct delayed_work compaction_work;
-static bool screen_on = true;
-static int compaction_timeout_ms = 900000;
-module_param_named(compaction_forced_timeout_ms, compaction_timeout_ms, int,
-			0644);
-static int compaction_soff_delay_ms = 3000;
-module_param_named(compaction_screen_off_delay_ms, compaction_soff_delay_ms, int,
-			0644);
-static unsigned long compaction_forced_timeout;
-
-
-static int fb_notifier_callback(struct notifier_block *self, unsigned long event, void *data)
-{
-	struct fb_event *evdata = data;
-	int *blank;
-
-	if ((event == FB_EVENT_BLANK) && evdata && evdata->data) {
-		blank = evdata->data;
-
-		switch (*blank) {
-		case FB_BLANK_POWERDOWN:
-			screen_on = false;
-			if (time_after(jiffies, compaction_forced_timeout) && !delayed_work_busy(&compaction_work)) {
-				compaction_forced_timeout = jiffies + msecs_to_jiffies(compaction_timeout_ms);
-				queue_delayed_work(compaction_wq, &compaction_work,
-					msecs_to_jiffies(compaction_soff_delay_ms));
-			}
-		break;
-		case FB_BLANK_UNBLANK:
-			screen_on = true;
-		break;
-		}
-	}
-
-	return 0;
-}
-
-static struct notifier_block compaction_notifier_block = {
-	.notifier_call = fb_notifier_callback,
-};
 
 /* Compact all zones within a node */
 static void __compact_pgdat(pg_data_t *pgdat, struct compact_control *cc)
@@ -1577,23 +1505,6 @@ static void compact_nodes(void)
 		compact_node(nid);
 }
 
-static void do_compaction(struct work_struct *work)
-{
-	/* Return early if the screen is on */
-	if (screen_on)
-		return;
-
-	pr_info("Scheduled memory compaction is starting\n");
-
-	/* Do full compaction */
-	compact_nodes();
-
-	/* Force compaction timeout */
-	compaction_forced_timeout = jiffies + msecs_to_jiffies(compaction_timeout_ms);
-
-	pr_info("Scheduled memory compaction is completed\n");
-}
-
 /* The written value is actually unused, all memory is compacted */
 int sysctl_compact_memory;
 
@@ -1643,20 +1554,5 @@ void compaction_unregister_node(struct node *node)
 	return device_remove_file(&node->dev, &dev_attr_compact);
 }
 #endif /* CONFIG_SYSFS && CONFIG_NUMA */
-
-static int  __init scheduled_compaction_init(void)
-{
-	compaction_wq = create_freezable_workqueue("compaction_wq");
-
-	if (!compaction_wq)
-		return -EFAULT;
-
-	INIT_DELAYED_WORK(&compaction_work, do_compaction);
-
-	fb_register_client(&compaction_notifier_block);
-
-	return 0;
-}
-late_initcall(scheduled_compaction_init);
 
 #endif /* CONFIG_COMPACTION */

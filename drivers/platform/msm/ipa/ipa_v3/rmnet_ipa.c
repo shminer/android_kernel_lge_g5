@@ -131,6 +131,7 @@ struct rmnet_ipa3_context {
 	u32 apps_to_ipa3_hdl;
 	u32 ipa3_to_apps_hdl;
 	struct mutex ipa_to_apps_pipe_handle_guard;
+	struct mutex add_mux_channel_lock;
 };
 
 static struct rmnet_ipa3_context *rmnet_ipa3_ctx;
@@ -1423,14 +1424,15 @@ static int ipa3_wwan_ioctl(struct net_device *dev, struct ifreq *ifr, int cmd)
 					rmnet_mux_val.mux_id);
 				return rc;
 			}
+			mutex_lock(&rmnet_ipa3_ctx->add_mux_channel_lock);
 			if (rmnet_ipa3_ctx->rmnet_index
 				>= MAX_NUM_OF_MUX_CHANNEL) {
 				IPAWANERR("Exceed mux_channel limit(%d)\n",
 				rmnet_ipa3_ctx->rmnet_index);
+				mutex_unlock(&rmnet_ipa3_ctx->
+					add_mux_channel_lock);
 				return -EFAULT;
 			}
-			extend_ioctl_data.u.rmnet_mux_val.vchannel_name
-				[IFNAMSIZ-1] = '\0';
 			IPAWANDBG("ADD_MUX_CHANNEL(%d, name: %s)\n",
 			extend_ioctl_data.u.rmnet_mux_val.mux_id,
 			extend_ioctl_data.u.rmnet_mux_val.vchannel_name);
@@ -1444,6 +1446,9 @@ static int ipa3_wwan_ioctl(struct net_device *dev, struct ifreq *ifr, int cmd)
 				extend_ioctl_data.u.rmnet_mux_val.vchannel_name,
 				sizeof(mux_channel[rmnet_index]
 					.vchannel_name));
+			mux_channel[rmnet_index].vchannel_name[
+				IFNAMSIZ - 1] = '\0';
+
 			IPAWANDBG("cashe device[%s:%d] in IPA_wan[%d]\n",
 				mux_channel[rmnet_index].vchannel_name,
 				mux_channel[rmnet_index].mux_id,
@@ -1459,6 +1464,8 @@ static int ipa3_wwan_ioctl(struct net_device *dev, struct ifreq *ifr, int cmd)
 					IPAWANERR("device %s reg IPA failed\n",
 						extend_ioctl_data.u.
 						rmnet_mux_val.vchannel_name);
+					mutex_unlock(&rmnet_ipa3_ctx->
+						add_mux_channel_lock);
 					return -ENODEV;
 				}
 				mux_channel[rmnet_index].mux_channel_set = true;
@@ -1471,6 +1478,7 @@ static int ipa3_wwan_ioctl(struct net_device *dev, struct ifreq *ifr, int cmd)
 				mux_channel[rmnet_index].ul_flt_reg = false;
 			}
 			rmnet_ipa3_ctx->rmnet_index++;
+			mutex_unlock(&rmnet_ipa3_ctx->add_mux_channel_lock);
 			break;
 		case RMNET_IOCTL_SET_EGRESS_DATA_FORMAT:
 			IPAWANDBG("get RMNET_IOCTL_SET_EGRESS_DATA_FORMAT\n");
@@ -2438,20 +2446,18 @@ static void rmnet_ipa_get_stats_and_update(void)
 	req.ipa_stats_type = QMI_IPA_STATS_TYPE_PIPE_V01;
 
 	rc = ipa3_qmi_get_data_stats(&req, resp);
-	if (rc) {
-		IPAWANERR("ipa3_qmi_get_data_stats failed: %d\n", rc);
-		kfree(resp);
-		return;
-	}
 
-	memset(&msg_meta, 0, sizeof(struct ipa_msg_meta));
-	msg_meta.msg_type = IPA_TETHERING_STATS_UPDATE_STATS;
-	msg_meta.msg_len = sizeof(struct ipa_get_data_stats_resp_msg_v01);
-	rc = ipa_send_msg(&msg_meta, resp, rmnet_ipa_free_msg);
-	if (rc) {
-		IPAWANERR("ipa_send_msg failed: %d\n", rc);
-		kfree(resp);
-		return;
+	if (!rc) {
+		memset(&msg_meta, 0, sizeof(struct ipa_msg_meta));
+		msg_meta.msg_type = IPA_TETHERING_STATS_UPDATE_STATS;
+		msg_meta.msg_len =
+			sizeof(struct ipa_get_data_stats_resp_msg_v01);
+		rc = ipa_send_msg(&msg_meta, resp, rmnet_ipa_free_msg);
+		if (rc) {
+			IPAWANERR("ipa_send_msg failed: %d\n", rc);
+			kfree(resp);
+			return;
+		}
 	}
 }
 
@@ -2500,20 +2506,18 @@ static void rmnet_ipa_get_network_stats_and_update(void)
 	req.mux_id_list[0] = ipa3_rmnet_ctx.metered_mux_id;
 
 	rc = ipa3_qmi_get_network_stats(&req, resp);
-	if (rc) {
-		IPAWANERR("ipa3_qmi_get_network_stats failed: %d\n", rc);
-		kfree(resp);
-		return;
-	}
 
-	memset(&msg_meta, 0, sizeof(struct ipa_msg_meta));
-	msg_meta.msg_type = IPA_TETHERING_STATS_UPDATE_NETWORK_STATS;
-	msg_meta.msg_len = sizeof(struct ipa_get_apn_data_stats_resp_msg_v01);
-	rc = ipa_send_msg(&msg_meta, resp, rmnet_ipa_free_msg);
-	if (rc) {
-		IPAWANERR("ipa_send_msg failed: %d\n", rc);
-		kfree(resp);
-		return;
+	if (!rc) {
+		memset(&msg_meta, 0, sizeof(struct ipa_msg_meta));
+		msg_meta.msg_type = IPA_TETHERING_STATS_UPDATE_NETWORK_STATS;
+		msg_meta.msg_len =
+			sizeof(struct ipa_get_apn_data_stats_resp_msg_v01);
+		rc = ipa_send_msg(&msg_meta, resp, rmnet_ipa_free_msg);
+		if (rc) {
+			IPAWANERR("ipa_send_msg failed: %d\n", rc);
+			kfree(resp);
+			return;
+		}
 	}
 }
 
@@ -2658,11 +2662,6 @@ int rmnet_ipa3_query_tethering_stats(struct wan_ioctl_query_tether_stats *data,
 	struct ipa_get_data_stats_req_msg_v01 *req;
 	struct ipa_get_data_stats_resp_msg_v01 *resp;
 	int pipe_len, rc;
-
-	if (data != NULL) {
-		data->upstreamIface[IFNAMSIZ-1] = '\0';
-		data->tetherIface[IFNAMSIZ-1] = '\0';
-	}
 
 	req = kzalloc(sizeof(struct ipa_get_data_stats_req_msg_v01),
 			GFP_KERNEL);
@@ -2900,6 +2899,7 @@ static int __init ipa3_wwan_init(void)
 	atomic_set(&rmnet_ipa3_ctx->is_ssr, 0);
 
 	mutex_init(&rmnet_ipa3_ctx->ipa_to_apps_pipe_handle_guard);
+	mutex_init(&rmnet_ipa3_ctx->add_mux_channel_lock);
 	rmnet_ipa3_ctx->ipa3_to_apps_hdl = -1;
 	/* Register for Modem SSR */
 	rmnet_ipa3_ctx->subsys_notify_handle = subsys_notif_register_notifier(
@@ -2915,6 +2915,7 @@ static void __exit ipa3_wwan_cleanup(void)
 {
 	int ret;
 	mutex_destroy(&rmnet_ipa3_ctx->ipa_to_apps_pipe_handle_guard);
+	mutex_destroy(&rmnet_ipa3_ctx->add_mux_channel_lock);
 	ret = subsys_notif_unregister_notifier(
 		rmnet_ipa3_ctx->subsys_notify_handle, &ipa3_ssr_notifier);
 	if (ret)

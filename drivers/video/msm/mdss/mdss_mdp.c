@@ -2820,8 +2820,7 @@ static int mdss_mdp_probe(struct platform_device *pdev)
 		MDSS_MDP_REG_SPLIT_DISPLAY_EN);
 	if (intf_sel != 0) {
 		for (i = 0; i < 4; i++)
-			if ((intf_sel >> i*8) & 0x000000FF)
-				num_of_display_on++;
+			num_of_display_on += ((intf_sel >> i*8) & 0x000000FF);
 
 		/*
 		 * For split display enabled - DSI0, DSI1 interfaces are
@@ -4885,8 +4884,7 @@ static void mdss_mdp_footswitch_ctrl(struct mdss_data_type *mdata, int on)
 	}
 }
 
-int mdss_mdp_secure_display_ctrl(struct mdss_data_type *mdata,
-	unsigned int enable)
+int mdss_mdp_secure_display_ctrl(unsigned int enable)
 {
 	struct sd_ctrl_req {
 		unsigned int enable;
@@ -4894,12 +4892,6 @@ int mdss_mdp_secure_display_ctrl(struct mdss_data_type *mdata,
 	unsigned int resp = -1;
 	int ret = 0;
 	struct scm_desc desc;
-
-	if ((enable && (mdss_get_sd_client_cnt() > 0)) ||
-		(!enable && (mdss_get_sd_client_cnt() > 1))) {
-		mdss_update_sd_client(mdata, enable);
-		return ret;
-	}
 
 	desc.args[0] = request.enable = enable;
 	desc.arginfo = SCM_ARGS(1);
@@ -4918,7 +4910,6 @@ int mdss_mdp_secure_display_ctrl(struct mdss_data_type *mdata,
 	if (ret)
 		return ret;
 
-	mdss_update_sd_client(mdata, enable);
 	return resp;
 }
 

@@ -262,6 +262,7 @@ config MSM_BT_POWER
 	  Provides a parameter to switch on/off power from PMIC
 	  to Bluetooth device.
 
+
 config BTFM_SLIM
 	tristate "MSM Bluetooth/FM Slimbus Driver"
 	depends on MSM_BT_POWER

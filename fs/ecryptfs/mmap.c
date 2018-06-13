@@ -512,12 +512,11 @@ static int ecryptfs_write_inode_size_to_xattr(struct inode *ecryptfs_inode)
 	rc = lower_inode->i_op->setxattr(lower_dentry, ECRYPTFS_XATTR_NAME,
 					 xattr_virt, size, 0);
 	mutex_unlock(&lower_inode->i_mutex);
-	if (rc) {
+	if (rc)
 		printk(KERN_ERR "Error whilst attempting to write inode size "
 		       "to lower file xattr; rc = [%d]\n", rc);
 		printk(KERN_ERR " [CCAudit] Error whilst attempting to write inode size "
 		       "to lower file xattr; rc = [%d]\n", rc);
-	}
 	kmem_cache_free(ecryptfs_xattr_cache, xattr_virt);
 out:
 	return rc;
@@ -625,16 +624,10 @@ static sector_t ecryptfs_bmap(struct address_space *mapping, sector_t block)
 	return rc;
 }
 
-void ecryptfs_freepage(struct page *page)
-{
-	zero_user(page, 0, PAGE_CACHE_SIZE);
-}
-
 const struct address_space_operations ecryptfs_aops = {
 	.writepage = ecryptfs_writepage,
 	.readpage = ecryptfs_readpage,
 	.write_begin = ecryptfs_write_begin,
 	.write_end = ecryptfs_write_end,
 	.bmap = ecryptfs_bmap,
-	.freepage = ecryptfs_freepage,
 };

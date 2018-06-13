@@ -137,15 +137,13 @@ static int tc_ctl_tfilter(struct sk_buff *skb, struct nlmsghdr *n)
 	unsigned long cl;
 	unsigned long fh;
 	int err;
-	int tp_created;
+	int tp_created = 0;
 
 	if ((n->nlmsg_type != RTM_GETTFILTER) &&
 	    !netlink_ns_capable(skb, net->user_ns, CAP_NET_ADMIN))
 		return -EPERM;
 
 replay:
-	tp_created = 0;
-
 	err = nlmsg_parse(n, sizeof(*t), tca, TCA_MAX, NULL);
 	if (err < 0)
 		return err;
@@ -563,9 +561,8 @@ void tcf_exts_change(struct tcf_proto *tp, struct tcf_exts *dst,
 }
 EXPORT_SYMBOL(tcf_exts_change);
 
-#define tcf_exts_first_act(ext)					\
-	list_first_entry_or_null(&(exts)->actions,		\
-				 struct tc_action, list)
+#define tcf_exts_first_act(ext) \
+		list_first_entry(&(exts)->actions, struct tc_action, list)
 
 int tcf_exts_dump(struct sk_buff *skb, struct tcf_exts *exts)
 {
@@ -611,7 +608,7 @@ int tcf_exts_dump_stats(struct sk_buff *skb, struct tcf_exts *exts)
 {
 #ifdef CONFIG_NET_CLS_ACT
 	struct tc_action *a = tcf_exts_first_act(exts);
-	if (a != NULL && tcf_action_copy_stats(skb, a, 1) < 0)
+	if (tcf_action_copy_stats(skb, a, 1) < 0)
 		return -1;
 #endif
 	return 0;

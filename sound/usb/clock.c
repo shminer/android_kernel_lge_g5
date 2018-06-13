@@ -43,7 +43,7 @@ static struct uac_clock_source_descriptor *
 	while ((cs = snd_usb_find_csint_desc(ctrl_iface->extra,
 					     ctrl_iface->extralen,
 					     cs, UAC2_CLOCK_SOURCE))) {
-		if (cs->bLength >= sizeof(*cs) && cs->bClockID == clock_id)
+		if (cs->bClockID == clock_id)
 			return cs;
 	}
 
@@ -59,11 +59,8 @@ static struct uac_clock_selector_descriptor *
 	while ((cs = snd_usb_find_csint_desc(ctrl_iface->extra,
 					     ctrl_iface->extralen,
 					     cs, UAC2_CLOCK_SELECTOR))) {
-		if (cs->bLength >= sizeof(*cs) && cs->bClockID == clock_id) {
-			if (cs->bLength < 5 + cs->bNrInPins)
-				return NULL;
+		if (cs->bClockID == clock_id)
 			return cs;
-		}
 	}
 
 	return NULL;
@@ -78,7 +75,7 @@ static struct uac_clock_multiplier_descriptor *
 	while ((cs = snd_usb_find_csint_desc(ctrl_iface->extra,
 					     ctrl_iface->extralen,
 					     cs, UAC2_CLOCK_MULTIPLIER))) {
-		if (cs->bLength >= sizeof(*cs) && cs->bClockID == clock_id)
+		if (cs->bClockID == clock_id)
 			return cs;
 	}
 
@@ -162,8 +159,8 @@ static bool uac_clock_source_is_valid(struct snd_usb_audio *chip, int source_id)
 
 	if (err < 0) {
 		dev_warn(&dev->dev,
-			 "%s(): cannot get clock validity for id %d\n",
-			   __func__, source_id);
+			 "%s(): cannot get clock validity for id %d: %d\n",
+			   __func__, source_id, err);
 		return 0;
 	}
 

@@ -546,7 +546,7 @@ extra:
 
 static int alloc_requests(struct eth_dev *dev, struct gether *link, unsigned n)
 {
-	int	status = 0;
+	int	status;
 
 	spin_lock(&dev->req_lock);
 	/*
@@ -1053,9 +1053,6 @@ static void process_tx_w(struct work_struct *w)
 			return;
 		}
 
-		if (!in)
-			return;
-
 		ret = usb_ep_queue(in, req, GFP_KERNEL);
 		spin_lock_irqsave(&dev->req_lock, flags);
 		switch (ret) {
@@ -1296,6 +1293,23 @@ static netdev_tx_t eth_start_xmit(struct sk_buff *skb,
 	}
 
 	req->length = length;
+
+	/* throttle high/super speed IRQ rate back slightly */
+	if (gadget_is_dualspeed(dev->gadget) &&
+			 (dev->gadget->speed == USB_SPEED_HIGH ||
+			  dev->gadget->speed == USB_SPEED_SUPER)) {
+		spin_lock_irqsave(&dev->req_lock, flags);
+		dev->tx_qlen++;
+		if (dev->tx_qlen == MAX_TX_REQ_WITH_NO_INT) {
+			req->no_interrupt = 0;
+			dev->tx_qlen = 0;
+		} else {
+			req->no_interrupt = 1;
+		}
+		spin_unlock_irqrestore(&dev->req_lock, flags);
+	} else {
+		req->no_interrupt = 0;
+	}
 
 	retval = usb_ep_queue(in, req, GFP_ATOMIC);
 	switch (retval) {
@@ -1770,8 +1784,8 @@ struct eth_dev *gether_setup_name(struct usb_gadget *g,
 		free_netdev(net);
 		dev = ERR_PTR(status);
 	} else {
-		INFO(dev, "MAC %pKM\n", net->dev_addr);
-		INFO(dev, "HOST MAC %pKM\n", dev->host_mac);
+		INFO(dev, "MAC %pM\n", net->dev_addr);
+		INFO(dev, "HOST MAC %pM\n", dev->host_mac);
 
 		/*
 		 * two kinds of host-initiated state changes:
@@ -1852,7 +1866,7 @@ int gether_register_netdev(struct net_device *net)
 		dev_dbg(&g->dev, "register_netdev failed, %d\n", status);
 		return status;
 	} else {
-		INFO(dev, "HOST MAC %pKM\n", dev->host_mac);
+		INFO(dev, "HOST MAC %pM\n", dev->host_mac);
 
 		/* two kinds of host-initiated state changes:
 		 *  - iff DATA transfer is active, carrier is "on"
@@ -1868,7 +1882,7 @@ int gether_register_netdev(struct net_device *net)
 	if (status)
 		pr_warn("cannot set self ethernet address: %d\n", status);
 	else
-		INFO(dev, "MAC %pKM\n", dev->dev_mac);
+		INFO(dev, "MAC %pM\n", dev->dev_mac);
 
 	return status;
 }
@@ -1936,7 +1950,7 @@ int gether_get_host_addr_cdc(struct net_device *net, char *host_addr, int len)
 		return -EINVAL;
 
 	dev = netdev_priv(net);
-	snprintf(host_addr, len, "%pKm", dev->host_mac);
+	snprintf(host_addr, len, "%pm", dev->host_mac);
 
 	return strlen(host_addr);
 }

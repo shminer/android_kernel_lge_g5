@@ -1,4 +1,4 @@
-/* Copyright (c) 2012-2016, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2012-2017, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -57,7 +57,6 @@ struct snd_msm {
 
 #define CMD_EOS_MIN_TIMEOUT_LENGTH  50
 #define CMD_EOS_TIMEOUT_MULTIPLIER  (HZ * 50)
-#define MAX_PB_COPY_RETRIES         3
 
 static struct snd_pcm_hardware msm_pcm_hardware_capture = {
 	.info =                 (SNDRV_PCM_INFO_MMAP |
@@ -638,7 +637,6 @@ static int msm_pcm_playback_copy(struct snd_pcm_substream *substream, int a,
 	void *data = NULL;
 	uint32_t idx = 0;
 	uint32_t size = 0;
-	uint32_t retries = 0;
 
 	struct snd_pcm_runtime *runtime = substream->runtime;
 	struct msm_audio *prtd = runtime->private_data;
@@ -647,7 +645,7 @@ static int msm_pcm_playback_copy(struct snd_pcm_substream *substream, int a,
 	pr_debug("%s: prtd->out_count = %d\n",
 				__func__, atomic_read(&prtd->out_count));
 
-	while ((fbytes > 0) && (retries < MAX_PB_COPY_RETRIES)) {
+	while (fbytes > 0) {
 		if (prtd->reset_event) {
 			pr_err("%s: In SSR return ENETRESET before wait\n",
 				__func__);
@@ -676,13 +674,6 @@ static int msm_pcm_playback_copy(struct snd_pcm_substream *substream, int a,
 
 		data = q6asm_is_cpu_buf_avail(IN, prtd->audio_client, &size,
 			&idx);
-		if (data == NULL) {
-			retries++;
-			continue;
-		} else {
-			retries = 0;
-		}
-
 		if (fbytes > size)
 			xfer = size;
 		else
@@ -694,9 +685,6 @@ static int msm_pcm_playback_copy(struct snd_pcm_substream *substream, int a,
 						__func__, fbytes, xfer, size);
 			if (copy_from_user(bufptr, buf, xfer)) {
 				ret = -EFAULT;
-				pr_err("%s: copy_from_user failed\n",
-					__func__);
-				q6asm_cpu_buf_release(IN, prtd->audio_client);
 				goto fail;
 			}
 			buf += xfer;
@@ -710,8 +698,6 @@ static int msm_pcm_playback_copy(struct snd_pcm_substream *substream, int a,
 							0, 0, NO_TIMESTAMP);
 				if (ret < 0) {
 					ret = -EFAULT;
-					q6asm_cpu_buf_release(IN,
-						prtd->audio_client);
 					goto fail;
 				}
 			} else
@@ -720,9 +706,6 @@ static int msm_pcm_playback_copy(struct snd_pcm_substream *substream, int a,
 		}
 	}
 fail:
-	if (retries >= MAX_PB_COPY_RETRIES)
-		ret = -ENOMEM;
-
 	return  ret;
 }
 
@@ -767,6 +750,8 @@ static int msm_pcm_playback_close(struct snd_pcm_substream *substream)
 	msm_pcm_routing_dereg_phy_stream(soc_prtd->dai_link->be_id,
 						SNDRV_PCM_STREAM_PLAYBACK);
 	kfree(prtd);
+	runtime->private_data = NULL;
+
 	return 0;
 }
 
@@ -827,7 +812,6 @@ static int msm_pcm_capture_copy(struct snd_pcm_substream *substream,
 		if (copy_to_user(buf, bufptr+offset, xfer)) {
 			pr_err("Failed to copy buf to user\n");
 			ret = -EFAULT;
-			q6asm_cpu_buf_release(OUT, prtd->audio_client);
 			goto fail;
 		}
 		fbytes -= xfer;
@@ -843,7 +827,6 @@ static int msm_pcm_capture_copy(struct snd_pcm_substream *substream,
 		if (ret < 0) {
 			pr_err("q6asm read failed\n");
 			ret = -EFAULT;
-			q6asm_cpu_buf_release(OUT, prtd->audio_client);
 			goto fail;
 		}
 	} else
@@ -872,6 +855,7 @@ static int msm_pcm_capture_close(struct snd_pcm_substream *substream)
 	msm_pcm_routing_dereg_phy_stream(soc_prtd->dai_link->be_id,
 		SNDRV_PCM_STREAM_CAPTURE);
 	kfree(prtd);
+	runtime->private_data = NULL;
 
 	return 0;
 }

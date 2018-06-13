@@ -929,9 +929,6 @@ bytes respectively. Such letter suffixes can also be entirely omitted.
 			Enable debug messages at boot time.  See
 			Documentation/dynamic-debug-howto.txt for details.
 
-	module.async_probe [KNL]
-			Enable asynchronous probe on this module.
-
 	early_ioremap_debug [KNL]
 			Enable debug messages in early_ioremap support. This
 			is useful for tracking down temporary early mappings
@@ -2960,13 +2957,6 @@ bytes respectively. Such letter suffixes can also be entirely omitted.
 			quiescent states.  Units are jiffies, minimum
 			value is one, and maximum value is HZ.
 
-	rcutree.kthread_prio= 	 [KNL,BOOT]
-			Set the SCHED_FIFO priority of the RCU
-			per-CPU kthreads (rcuc/N). This value is also
-			used for the priority of the RCU boost threads
-			(rcub/N). Valid values are 1-99 and the default
-			is 1 (the least-favored priority).
-
 	rcutree.rcu_nocb_leader_stride= [KNL]
 			Set the number of NOCB kthread groups, which
 			defaults to the square root of the number of
@@ -3190,10 +3180,6 @@ bytes respectively. Such letter suffixes can also be entirely omitted.
 
 	ro		[KNL] Mount root device read-only on boot
 
-	rodata=		[KNL]
-		on	Mark read-only kernel memory as read-only (default).
-		off	Leave read-only kernel memory writable for debugging.
-
 	root=		[KNL] Root filesystem
 			See name_to_dev_t comment in init/do_mounts.c.
 
@@ -3353,13 +3339,6 @@ bytes respectively. Such letter suffixes can also be entirely omitted.
 	spia_fio_base=
 	spia_pedr=
 	spia_peddr=
-
-	stack_guard_gap=	[MM]
-			override the default stack gap protection. The value
-			is in page units and it defines how many pages prior
-			to (for stacks growing down) resp. after (for stacks
-			growing up) the main stack are reserved for no other
-			mapping. Default value is 256 pages.
 
 	stacktrace	[FTRACE]
 			Enabled the stack tracer on boot up.
@@ -3688,8 +3667,6 @@ bytes respectively. Such letter suffixes can also be entirely omitted.
 					sector if the number is odd);
 				i = IGNORE_DEVICE (don't bind to this
 					device);
-				j = NO_REPORT_LUNS (don't use report luns
-					command, uas only);
 				l = NOT_LOCKABLE (don't try to lock and
 					unlock ejectable media);
 				m = MAX_SECTORS_64 (don't transfer more

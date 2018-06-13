@@ -461,7 +461,7 @@ static void writeout_period(unsigned long t)
  * registered backing devices, which, for obvious reasons, can not
  * exceed 100%.
  */
-static unsigned int bdi_min_ratio = 5;
+static unsigned int bdi_min_ratio;
 
 int bdi_set_min_ratio(struct backing_dev_info *bdi, unsigned int min_ratio)
 {
@@ -503,7 +503,14 @@ int bdi_set_max_ratio(struct backing_dev_info *bdi, unsigned max_ratio)
 	return ret;
 }
 EXPORT_SYMBOL(bdi_set_max_ratio);
-#ifdef CONFIG_PM_SUSPEND_BG_SYNC
+#ifdef CONFIG_MACH_LGE
+/*
+ * "check_and_sync" is changed to "bg_sync" during suspend syncing filesystems.
+ * Although below codes related with "check_and_sync" have to be deleted together,
+ * We can't eliminate this codes because "max_sync_count" variable is using
+ * on another performance patch in 8937 n branch. (90559ec731b80801630051f8db5be5a0c651fb0f)
+ * When the variable will be not using anymore, we would erase this.
+ */
 int bdi_set_max_sync_count(struct backing_dev_info *bdi, unsigned max_sync_count)
 {
 	int ret = 0;

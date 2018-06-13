@@ -130,6 +130,12 @@ enum {
 };
 
 enum {
+	MDSS_PANEL_BLANK_BLANK = 0,
+	MDSS_PANEL_BLANK_UNBLANK,
+	MDSS_PANEL_BLANK_LOW_POWER,
+};
+
+enum {
 	MODE_GPIO_NOT_VALID = 0,
 	MODE_GPIO_HIGH,
 	MODE_GPIO_LOW,
@@ -181,7 +187,7 @@ enum {
 };
 
 struct mdss_intf_recovery {
-	int (*fxn)(void *ctx, int event);
+	void (*fxn)(void *ctx, int event);
 	void *data;
 };
 

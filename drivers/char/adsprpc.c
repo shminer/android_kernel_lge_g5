@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012-2017, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2012-2016, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -58,7 +58,6 @@
 #define ADSP_MMAP_HEAP_ADDR 4
 #define FASTRPC_ENOSUCH 39
 #define VMID_SSC_Q6     5
-#define VMID_ADSP_Q6    6
 
 #define RPC_TIMEOUT	(5 * HZ)
 #define BALIGN		128
@@ -213,7 +212,6 @@ struct fastrpc_apps {
 	spinlock_t hlock;
 	struct ion_client *client;
 	struct device *dev;
-	struct device *modem_cma_dev;
 	bool glink;
 };
 
@@ -264,12 +262,7 @@ static struct fastrpc_channel_ctx gcinfo[NUM_CHANNELS] = {
 		.subsys = "dsps",
 		.channel = SMD_APPS_DSPS,
 		.edge = "dsps",
-	},
-	{
-		.name = "mdsprpc-smd",
-		.subsys = "mdsp",
-		.channel = SMD_APPS_MODEM,
-		.edge = "mdsp",
+		.vmid = VMID_SSC_Q6,
 	},
 };
 
@@ -1400,12 +1393,10 @@ static int fastrpc_init_process(struct fastrpc_file *fl,
 		inbuf.pgid = current->tgid;
 		inbuf.namelen = strlen(current->comm) + 1;
 		inbuf.filelen = init->filelen;
-		if (init->filelen) {
-			VERIFY(err, !fastrpc_mmap_create(fl, init->filefd,
-				init->file, init->filelen, mflags, &file));
-			if (err)
-				goto bail;
-		}
+		VERIFY(err, !fastrpc_mmap_create(fl, init->filefd, init->file,
+					init->filelen, mflags, &file));
+		if (err)
+			goto bail;
 		inbuf.pageslen = 1;
 		VERIFY(err, !fastrpc_mmap_create(fl, init->memfd, init->mem,
 					init->memlen, mflags, &mem));
@@ -1745,26 +1736,17 @@ static int fastrpc_session_alloc(struct fastrpc_channel_ctx *chan, int *session)
 	struct fastrpc_apps *me = &gfa;
 	int idx = 0, err = 0;
 
-	switch (chan->channel) {
-	case SMD_APPS_QDSP:
+	if (chan->sesscount) {
 		idx = ffz(chan->bitmap);
 		VERIFY(err, idx < chan->sesscount);
 		if (err)
 			goto bail;
 		set_bit(idx, &chan->bitmap);
-		break;
-	case SMD_APPS_DSPS:
+	} else {
 		VERIFY(err, me->dev != NULL);
 		if (err)
 			goto bail;
 		chan->session[0].dev = me->dev;
-		break;
-	case SMD_APPS_MODEM:
-		VERIFY(err, me->modem_cma_dev != NULL);
-		if (err)
-			goto bail;
-		chan->session[0].dev = me->modem_cma_dev;
-		break;
 	}
 
 	chan->session[idx].smmu.faults = 0;
@@ -1871,10 +1853,8 @@ static int fastrpc_device_release(struct inode *inode, struct file *file)
 		file->private_data = 0;
 	}
 bail:
-	if (err) {
-		fastrpc_file_free(fl);
+	if (err)
 		kfree(pfl);
-	}
 	return err;
 }
 
@@ -1893,10 +1873,7 @@ static void file_free_work_handler(struct work_struct *w)
 			break;
 		}
 		mutex_unlock(&me->flfree_mutex);
-		if (freefl) {
-			fastrpc_file_free(freefl->fl);
-			kfree(freefl);
-		}
+		fastrpc_file_free(freefl->fl);
 		mutex_lock(&me->flfree_mutex);
 
 		if (hlist_empty(&me->fls)) {
@@ -1906,6 +1883,7 @@ static void file_free_work_handler(struct work_struct *w)
 			break;
 		}
 		mutex_unlock(&me->flfree_mutex);
+		kfree(freefl);
 	}
 	return;
 }
@@ -1969,7 +1947,7 @@ static int fastrpc_device_open(struct inode *inode, struct file *filp)
 
 	if (me->pending_free) {
 		event = wait_event_interruptible_timeout(wait_queue,
-						!me->pending_free, RPC_TIMEOUT);
+						me->pending_free, RPC_TIMEOUT);
 		if (event == 0)
 			pr_err("timed out..list is still not empty\n");
 	}
@@ -2039,17 +2017,6 @@ bail:
 	return err;
 }
 
-static int fastrpc_get_info(struct fastrpc_file *fl, uint32_t *info)
-{
-	int err = 0;
-
-	VERIFY(err, fl && fl->sctx);
-	if (err)
-		goto bail;
-	*info = (fl->sctx->smmu.enabled ? 1 : 0);
-bail:
-	return err;
-}
 
 static long fastrpc_device_ioctl(struct file *file, unsigned int ioctl_num,
 				 unsigned long ioctl_param)
@@ -2063,7 +2030,6 @@ static long fastrpc_device_ioctl(struct file *file, unsigned int ioctl_num,
 	void *param = (char *)ioctl_param;
 	struct fastrpc_file *fl = (struct fastrpc_file *)file->private_data;
 	int size = 0, err = 0;
-	uint32_t info;
 
 	switch (ioctl_num) {
 	case FASTRPC_IOCTL_INVOKE_FD:
@@ -2111,14 +2077,6 @@ static long fastrpc_device_ioctl(struct file *file, unsigned int ioctl_num,
 			err = -ENOTTY;
 			break;
 		}
-		break;
-	case FASTRPC_IOCTL_GETINFO:
-		VERIFY(err, 0 == (err = fastrpc_get_info(fl, &info)));
-		if (err)
-			goto bail;
-		VERIFY(err, 0 == copy_to_user(param, &info, sizeof(info)));
-		if (err)
-			goto bail;
 		break;
 	case FASTRPC_IOCTL_INIT:
 		VERIFY(err, 0 == copy_from_user(&p.init, param,
@@ -2203,7 +2161,6 @@ static struct of_device_id fastrpc_match_table[] = {
 	{ .compatible = "qcom,msm-fastrpc-compute-cb", },
 	{ .compatible = "qcom,msm-fastrpc-legacy-compute-cb", },
 	{ .compatible = "qcom,msm-adsprpc-mem-region", },
-	{ .compatible = "qcom,msm-mdsprpc-mem-region", },
 	{}
 };
 
@@ -2355,11 +2312,6 @@ static int fastrpc_probe(struct platform_device *pdev)
 	int err = 0;
 	struct fastrpc_apps *me = &gfa;
 	struct device *dev = &pdev->dev;
-	struct smq_phy_page range;
-	struct device_node *ion_node, *node;
-	struct platform_device *ion_pdev;
-	struct cma *cma;
-	uint32_t val;
 
 	if (of_device_is_compatible(dev->of_node,
 					"qcom,msm-fastrpc-compute-cb"))
@@ -2377,45 +2329,6 @@ static int fastrpc_probe(struct platform_device *pdev)
 		if (IS_ERR_OR_NULL(me->channel[0].remoteheap_ramdump_dev)) {
 			pr_err("ADSPRPC: Unable to create adsp-remoteheap ramdump device.\n");
 			me->channel[0].remoteheap_ramdump_dev = NULL;
-		}
-		return 0;
-	}
-
-	if (of_device_is_compatible(dev->of_node,
-					"qcom,msm-mdsprpc-mem-region")) {
-		me->modem_cma_dev = dev;
-		range.addr = 0;
-		ion_node = of_find_compatible_node(NULL, NULL, "qcom,msm-ion");
-		if (ion_node) {
-			for_each_available_child_of_node(ion_node, node) {
-				if (of_property_read_u32(node, "reg", &val))
-					continue;
-				if (val != ION_ADSP_HEAP_ID)
-					continue;
-				ion_pdev = of_find_device_by_node(node);
-				if (!ion_pdev)
-					break;
-				cma = dev_get_cma_area(&ion_pdev->dev);
-				if (cma) {
-					range.addr = cma_get_base(cma);
-					range.size = (size_t)cma_get_size(cma);
-				}
-				break;
-			}
-		}
-		if (range.addr) {
-			int srcVM[1] = {VMID_HLOS};
-			int destVM[4] = {VMID_HLOS, VMID_MSS_MSA, VMID_SSC_Q6,
-					VMID_ADSP_Q6};
-			int destVMperm[4] = {PERM_READ | PERM_WRITE | PERM_EXEC,
-					PERM_READ | PERM_WRITE | PERM_EXEC,
-					PERM_READ | PERM_WRITE | PERM_EXEC,
-					PERM_READ | PERM_WRITE | PERM_EXEC,
-					};
-			VERIFY(err, !hyp_assign_phys(range.addr, range.size,
-					srcVM, 1, destVM, destVMperm, 4));
-			if (err)
-				goto bail;
 		}
 		return 0;
 	}

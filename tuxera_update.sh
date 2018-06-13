@@ -120,7 +120,7 @@ detect_arch_dirs() {
     [ -e "$ac" ] || ac="${dir2}/include/linux/autoconf.h"
     [ -e "$ac" ] || ac="${dir1}/include/generated/autoconf.h"
     [ -e "$ac" ] || ac="${dir1}/include/linux/autoconf.h"
-    [ -e "$ac" ] || { echo "ERROR: Unable to detect kernel architecture: autoconf.h not found."; return 1; }
+    [ -e "$ac" ] || { echo "Unable to detect kernel architecture: autoconf.h not found."; exit 1; }
 
     pattern=""
     # Compute grep pattern
@@ -130,7 +130,7 @@ detect_arch_dirs() {
     done
 
     # Find architecture from autoconf.h
-    def=$(grep -e "$pattern" "$ac") || { echo "ERROR: Unable to detect kernel architecture: no macro found in autoconf.h."; return 1; }
+    def=$(grep -e "$pattern" "$ac") || { echo "Unable to detect kernel architecture: no macro found in autoconf.h."; exit 1; }
     archdirs=$(echo "$def" | head -n 1 | sed -n 's/#define CONFIG_\(.*\)[[:space:]].*/\1/p' | tr '[:upper:]' '[:lower:]')
 
     # Fix some architecture names to get the correct directory
@@ -159,100 +159,9 @@ detect_arch_dirs() {
     done
 
     # Don't continue if there is no arch directory.
-    [ -z "$existing" ] && { echo "ERROR: No arch directories found. Cannot continue."; return 1; }
+    [ -z "$existing" ] && { echo "No arch directories found. Cannot continue."; exit 1; }
     archdirs="$existing"
     echo "Kernel architecture directories: $archdirs"
-}
-
-#
-# Check KH against typical errors
-#
-check_kh() {
-    source_link="$1"
-    output_link="$2"
-
-    [ -e "${output_link}" ] || output_link="${source_link}"
-
-    if ! [ -e "${source_link}/Makefile" ]; then
-        echo "  ERROR: Kernel source code directory is invalid (no Makefile found).";
-        echo "         To fix it, set the --output-dir parameter correctly.";
-        return 1
-    fi
-
-    if grep -q "VERSION" ${source_link}/Makefile &&
-       grep -q "PATCHLEVEL" ${source_link}/Makefile &&
-       grep -q "SUBLEVEL" ${source_link}/Makefile
-    then
-        echo "Found valid Linux kernel Makefile at ${source_link}/Makefile"
-    else
-        echo "  ERROR: Kernel source code directory is invalid.";
-        echo "         Makefile doesn't have VERSION, PATCHLEVEL and SUBLEVEL."
-        echo "         To fix it, set the --output-dir parameter correctly.";
-        return 1
-    fi
-
-    if ! [ -e "${output_link}/Module.symvers" ]; then
-        echo "  ERROR: Invalid kernel configuration:";
-        echo "         Module.symvers is missing.";
-        echo "         Either the kernel was not compiled yet, or the kernel output directory is not correct.";
-        echo "         Please make sure the kernel has been compiled, then use that directory for the --output-dir";
-        echo "         argument where the Module.symvers file can be found."
-        return 1
-    fi
-
-    [ -n "${disable_kernel_headers_check}" ] && return 0
-
-    error_config_modules="  ERROR: Update kernel configuration:
-         Please enable loadable modules support in kernel: CONFIG_MODULES=y
-         (Enable loadable module support (CONFIG_MODULES)[Y/n/?] Y)
-         Then rebuild the kernel and recollect kernel headers.
-
-"
-    error_config_cma="  ERROR: Fix kernel source code:
-         CONFIG_CMA is enabled but 'is_cma_pageblock' is not exported!
-         Please add EXPORT_SYMBOL(is_cma_pageblock) after the definition of this
-         function (usually in mm/page_alloc.c).
-         Then rebuild the kernel and recollect kernel headers.
-
-"
-    error_config_lockdep="  ERROR: Update kernel configuration:
-         CONFIG_DEBUG_LOCK_ALLOC=y and/or CONFIG_LOCKDEP=y are enabled.
-         These options convert some symbols required by file systems into
-         GPL-only symbols, which legally cannot be used by our filesystem driver(s).
-         Please disable these options, rebuild the kernel and recollect kernel headers.
-
-"
-    if ! [ -s "${output_link}/Module.symvers" ] &&
-       ! grep -sxq 'CONFIG_MODULES=y' "${output_link}/.config"
-    then
-        errors+="${error_config_modules}"
-        config_modules_not_set="yes"
-    fi
-
-    if grep -sxq 'CONFIG_CMA=y' "${output_link}/.config" &&
-       grep -sq 'is_cma_pageblock' "${source_link}/include/linux/pagemap.h"
-    then
-        if [ -n "${config_modules_not_set}" ]; then
-            errors+="${error_config_cma}"
-        else
-            grep -wq 'is_cma_pageblock' "${output_link}/Module.symvers" || errors+="${error_config_cma}"
-        fi
-    fi
-
-    if grep -qx -e 'CONFIG_DEBUG_LOCK_ALLOC=y' -e 'CONFIG_LOCKDEP=y' "${output_link}/.config"
-    then
-       if [ -n "${config_modules_not_set}" ]; then
-           errors+="${error_config_lockdep}"
-       else
-           awk '$4 == "EXPORT_SYMBOL_GPL" && $2 ~ /(mutex_lock_nested|lockdep_init_map|debug_check_no_locks_held)/ { exit(1); }' \
-                   "${output_link}/Module.symvers" ||
-               errors+="${error_config_lockdep}"
-       fi
-    fi
-
-    [ -n "${errors}" ] && { printf "${errors}"; return 1; }
-
-    return 0
 }
 
 #
@@ -296,7 +205,33 @@ build_package() {
         rm "$OUTPUT_LINK"
     fi
 
-    if ! check_kh "${KERNEL_LINK}" "${OUTPUT_LINK}"; then
+    if test ! -e "${KERNEL_LINK}/Makefile"; then
+        echo "  ERROR: Kernel source code directory is invalid (no Makefile found).";
+        echo "         To fix it, set the --output-dir parameter correctly.";
+
+        rm -rf "${LINK_DIR}"
+        exit 1
+    else
+        if grep -q "VERSION" ${KERNEL_LINK}/Makefile && grep -q "PATCHLEVEL" ${KERNEL_LINK}/Makefile && grep -q "SUBLEVEL" ${KERNEL_LINK}/Makefile
+        then
+            echo "Found valid Linux kernel Makefile at ${KERNEL_LINK}/Makefile"
+        else
+            echo "  ERROR: Kernel source code directory is invalid.";
+            echo "         Makefile doesn't have VERSION, PATCHLEVEL and SUBLEVEL."
+            echo "         To fix it, set the --output-dir parameter correctly.";
+
+            rm -rf "${LINK_DIR}"
+            exit 1
+        fi
+    fi
+
+    if test ! -e "${KERNEL_LINK}/Module.symvers" -a ! -e "${OUTPUT_LINK}/Module.symvers"; then
+        echo "  ERROR: Invalid kernel configuration:";
+        echo "         Module.symvers is missing.";
+        echo "         Either the kernel was not compiled yet, or the kernel output directory is not correct.";
+        echo "         Please make sure the kernel has been compiled, then use that directory for the --output-dir";
+        echo "         argument where the Module.symvers file can be found."
+
         rm -rf "${LINK_DIR}"
         exit 1
     fi
@@ -310,15 +245,12 @@ build_package() {
         exit 1
     fi
 
-    if ! detect_arch_dirs; then
-        rm -rf "${LINK_DIR}"
-        exit 1
-    fi
+    detect_arch_dirs
 
-    SEARCHPATHS="$(for d in $archdirs; do echo "${KERNEL_LINK}/arch/$d"; done) ${KERNEL_LINK}/include ${KERNEL_LINK}/scripts ${KERNEL_LINK}/mediatek/Makefile ${KERNEL_LINK}/mediatek/platform ${MEDIATEK_LINK}/config ${MEDIATEK_LINK}/platform ${MEDIATEK_LINK}/build/libs ${MEDIATEK_LINK}/build/Makefile ${MEDIATEK_LINK}/build/kernel ${MEDIATEK_LINK}/kernel/include/linux ${MEDIATEK_LINK}/kernel/Makefile ${KERNEL_LINK}/KMC ${KERNEL_LINK}/init/secureboot ${KERNEL_LINK}/mvl-avb-version ${EXTRA_SEARCH_NEW_MEDIATEK} ${EXTRA_SEARCH_NEW_MEDIATEK_INCLUDE} ${KERNEL_LINK}/tools/gcc"
+    SEARCHPATHS="$(for d in $archdirs; do echo "${KERNEL_LINK}/arch/$d"; done) ${KERNEL_LINK}/include ${KERNEL_LINK}/scripts ${KERNEL_LINK}/mediatek/Makefile ${KERNEL_LINK}/mediatek/platform ${MEDIATEK_LINK}/config ${MEDIATEK_LINK}/platform ${MEDIATEK_LINK}/build/libs ${MEDIATEK_LINK}/build/Makefile ${MEDIATEK_LINK}/build/kernel ${MEDIATEK_LINK}/kernel/include/linux ${MEDIATEK_LINK}/kernel/Makefile ${KERNEL_LINK}/KMC ${KERNEL_LINK}/init/secureboot ${KERNEL_LINK}/mvl-avb-version ${EXTRA_SEARCH_NEW_MEDIATEK} ${EXTRA_SEARCH_NEW_MEDIATEK_INCLUDE}"
 
     if [ -L "${OUTPUT_LINK}" ] ; then
-        SEARCHPATHS="${SEARCHPATHS} $(for d in $archdirs; do echo "${OUTPUT_LINK}/arch/$d"; done) ${OUTPUT_LINK}/include ${OUTPUT_LINK}/scripts ${OUTPUT_LINK}/KMC ${OUTPUT_LINK}/init/secureboot ${OUTPUT_LINK}/mvl-avb-version ${OUTPUT_LINK}/tools/gcc"
+        SEARCHPATHS="${SEARCHPATHS} $(for d in $archdirs; do echo "${OUTPUT_LINK}/arch/$d"; done) ${OUTPUT_LINK}/include ${OUTPUT_LINK}/scripts ${OUTPUT_LINK}/KMC ${OUTPUT_LINK}/init/secureboot ${OUTPUT_LINK}/mvl-avb-version"
     fi
 
     # Not all of the directories always exist, so check for them first to avoid an error message
@@ -348,14 +280,11 @@ build_package() {
     if [ -e "${KERNEL_LINK}/scripts/recordmcount.h" ]; then echo "${KERNEL_LINK}/scripts/recordmcount.h" >> ${INCLUDEFILE}; fi
 
     # Commit 338d4f49d6f7114a017d294ccf7374df4f998edc requires arm64 some kernel headers from arm
-    case "$archdirs" in *arm64*)
-            arm64_need_arm_files="arch/arm/include/asm/opcodes.h arch/arm/include/asm/xen/hypervisor.h arch/arm/include/asm/xen/interface.h include/asm/xen/interface.h"
-            for EF in ${arm64_need_arm_files}; do
-                if [ -e "${OUTPUT_LINK}/${EF}" ]; then echo "${OUTPUT_LINK}/${EF}" >> ${INCLUDEFILE}; fi
-                if [ -e "${KERNEL_LINK}/${EF}" ]; then echo "${KERNEL_LINK}/${EF}" >> ${INCLUDEFILE}; fi
-            done
-            ;;
-    esac
+    echo "$archdirs" | grep arm64 > /dev/null && (
+        arm64_extra_file=arch/arm/include/asm/opcodes.h
+        if [ -e "${OUTPUT_LINK}/${arm64_extra_file}" ]; then echo "${OUTPUT_LINK}/${arm64_extra_file}" >> ${INCLUDEFILE}; fi
+        if [ -e "${KERNEL_LINK}/${arm64_extra_file}" ]; then echo "${KERNEL_LINK}/${arm64_extra_file}" >> ${INCLUDEFILE}; fi
+    )
 
     echo "Packing kernel headers ..."
     tar cjf "${1}" --dereference --no-recursion --files-from "${INCLUDEFILE}"
@@ -790,7 +719,7 @@ do_remote_build() {
             fi
 
             echo "Not finished yet; waiting..."
-            sleep $poll_delay
+            sleep 10
             continue
         fi
 
@@ -968,7 +897,7 @@ check_http_client() {
         wget=${wget}" -nv"
     fi
 
-    if [ -n "$ignore_certificates" ] ; then
+	if [ -n "$ignore_certificates" ] ; then
         curl_quiet=${curl_quiet}" -k"
         wget_quiet=${wget_quiet}" --no-check-certificate"
         wget=${wget}" --no-check-certificate"
@@ -1090,26 +1019,26 @@ upgrade() {
 # Decide on a value for source_dir
 #
 set_source_dir() {
-    if [ -n "$output_dir" ]; then
-        for f in Makefile Module.symvers; do
-            if ! [ -e "${output_dir}/$f" ]; then
-                echo "Can't find ${output_dir}/$f - this is not a valid kernel build directory."
-                exit 1
-            fi
-        done
+    if [ -n "$output_dir" -a -z "$source_dir" ] ; then
+        if [ ! -e "${output_dir}/Makefile" ] ; then
+            echo "Can't find ${output_dir}/Makefile - this is not a valid kernel build directory."
+            exit 1
+        fi
+
+        source_dir=$(sed -n 's/^\s*MAKEARGS\s*:=.*-C\s*\(\S\+\).*/\1/p' "${output_dir}/Makefile" 2>/dev/null)
+
         if [ -z "$source_dir" ]; then
-            source_dir=$(sed -n 's/^\s*MAKEARGS\s*:=.*-C\s*\(\S\+\).*/\1/p' "${output_dir}/Makefile" 2>/dev/null)
-            if [ -z "$source_dir" ]; then
-               source_dir="$output_dir"
-            fi
-            if ! [ -e "$source_dir" ]; then
+            source_dir="$output_dir"
+        else
+            if [ ! -e "$source_dir" ]; then
                 echo "Unable to parse kernel source directory from --output-dir Makefile."
                 echo "You must specify --source-dir."
                 exit 1
             fi
-            echo "Using ${source_dir} as kernel source directory (based on ${output_dir}/Makefile)"
-            echo "Use --source-dir to override this."
         fi
+
+        echo "Using ${source_dir} as kernel source directory (based on --output-dir Makefile)"
+        echo "Use --source-dir to override this."
     fi
 
     # This variable will be used like make -C $kernel
@@ -1124,14 +1053,12 @@ set_source_dir() {
 # Script start
 #
 
-script_version="17.7.4"
+script_version="16.3.29"
 cache_dir=".tuxera_update_cache"
 dbgdev="/dev/null"
 cache_lookup_time="none"
 max_cache_entries=10
-default_polling_time_sec=300
-poll_delay=10
-declare -i max_polls=$default_polling_time_sec/$poll_delay
+max_polls=30
 autobuild_addrs="autobuild-1.tuxera.com autobuild-2.tuxera.com"
 retry=5
 retry_delay=2
@@ -1141,7 +1068,7 @@ conn_fail_retry_delay=4
 
 echo "tuxera_update.sh version $script_version"
 
-if ! options=$(getopt -o pahuv -l target:,user:,pass:,use-package:,source-dir:,output-dir:,version:,cache-dir:,server:,extraargs:,max-cache-entries:,admin:,upgrade,help,ignore-cert,no-check-certificate,use-curl,use-wget,no-excludes,use-cache,verbose,latest,retry-on-connection-fail,disable-kh-check,max_build_time_sec: -- "$@")
+if ! options=$(getopt -o pahuv -l target:,user:,pass:,use-package:,source-dir:,output-dir:,version:,cache-dir:,server:,extraargs:,max-cache-entries:,admin:,upgrade,help,ignore-cert,no-check-certificate,use-curl,use-wget,no-excludes,use-cache,verbose,latest,retry-on-connection-fail -- "$@")
 then
     usage
 fi
@@ -1180,24 +1107,12 @@ do
     --retry-max-time) retry_max_time="$2" ; shift;;
     --admin) admin="$2" ; shift;;
     --retry-on-connection-fail) retry_on_conn_fail="yes" ;;
-    --max_build_time_sec) max_build_time_sec="$2" ; shift;;
-    --disable-kh-check) disable_kernel_headers_check="yes" ;;
     (--) shift; break;;
     (-*) echo "$0: error - unrecognized option $1" 1>&2; usage;;
     (*) break;;
     esac
     shift
 done
-
-# set max_polls in case customer provided max_build_time_sec > default_polling_time_sec
-if [ ! -z "$max_build_time_sec" ] ; then
-    if [ $max_build_time_sec -gt $default_polling_time_sec ] ; then
-        echo "Using '$max_build_time_sec' as max_build_time_sec"
-        max_polls=$max_build_time_sec/$poll_delay
-    else
-        echo "Using default max_build_time_sec: '$default_polling_time_sec'"
-    fi
-fi
 
 # Retry enabled only in case --use-cache is set
 # (assume high-load clients use --use-cache)

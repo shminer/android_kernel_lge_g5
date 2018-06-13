@@ -5,24 +5,6 @@
 KASAN_SANITIZE_slab_common.o := n
 KASAN_SANITIZE_slub.o := n
 
-# These files are disabled because they produce non-interesting and/or
-# flaky coverage that is not a function of syscall inputs. E.g. slab is out of
-# free pages, or a task is migrated between nodes.
-KCOV_INSTRUMENT_slab_common.o := n
-KCOV_INSTRUMENT_slob.o := n
-KCOV_INSTRUMENT_slab.o := n
-KCOV_INSTRUMENT_slub.o := n
-KCOV_INSTRUMENT_page_alloc.o := n
-KCOV_INSTRUMENT_debug-pagealloc.o := n
-KCOV_INSTRUMENT_kmemleak.o := n
-KCOV_INSTRUMENT_kmemcheck.o := n
-KCOV_INSTRUMENT_memcontrol.o := n
-KCOV_INSTRUMENT_mmzone.o := n
-KCOV_INSTRUMENT_vmstat.o := n
-
-# Since __builtin_frame_address does work as used, disable the warning.
-CFLAGS_usercopy.o += $(call cc-disable-warning, frame-address)
-
 mmu-y			:= nommu.o
 mmu-$(CONFIG_MMU)	:= fremap.o gup.o highmem.o memory.o mincore.o \
 			   mlock.o mmap.o mprotect.o mremap.o msync.o rmap.o \
@@ -56,7 +38,7 @@ ifdef CONFIG_MMU
 endif
 obj-$(CONFIG_HAVE_MEMBLOCK) += memblock.o
 
-obj-$(CONFIG_SWAP)	+= page_io.o swap_state.o swapfile.o
+obj-$(CONFIG_SWAP)	+= page_io.o swap_state.o swapfile.o swap_ratio.o
 obj-$(CONFIG_FRONTSWAP)	+= frontswap.o
 obj-$(CONFIG_ZSWAP)	+= zswap.o
 obj-$(CONFIG_ZCACHE)	+= zcache.o
@@ -92,10 +74,8 @@ obj-$(CONFIG_PAGE_OWNER) += pageowner.o
 obj-$(CONFIG_ZPOOL)	+= zpool.o
 obj-$(CONFIG_ZBUD)	+= zbud.o
 obj-$(CONFIG_ZSMALLOC)	+= zsmalloc.o
-obj-$(CONFIG_Z3FOLD)	+= z3fold.o
 obj-$(CONFIG_GENERIC_EARLY_IOREMAP) += early_ioremap.o
 obj-$(CONFIG_CMA)	+= cma.o
 obj-$(CONFIG_MEMORY_BALLOON) += balloon_compaction.o
 obj-$(CONFIG_PROCESS_RECLAIM)	+= process_reclaim.o
 obj-$(CONFIG_CMA_DEBUGFS) += cma_debug.o
-obj-$(CONFIG_HARDENED_USERCOPY) += usercopy.o

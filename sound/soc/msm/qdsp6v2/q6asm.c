@@ -1997,40 +1997,6 @@ void *q6asm_is_cpu_buf_avail(int dir, struct audio_client *ac, uint32_t *size,
 	return NULL;
 }
 
-int q6asm_cpu_buf_release(int dir, struct audio_client *ac)
-{
-	struct audio_port_data *port;
-	int ret = 0;
-	int idx;
-
-	if (!ac || ((dir != IN) && (dir != OUT))) {
-		pr_err("%s: ac %pK dir %d\n", __func__, ac, dir);
-		ret = -EINVAL;
-		goto exit;
-	}
-
-	if (ac->io_mode & SYNC_IO_MODE) {
-		port = &ac->port[dir];
-		mutex_lock(&port->lock);
-		idx = port->cpu_buf;
-		if (port->cpu_buf == 0) {
-			port->cpu_buf = port->max_buf_cnt - 1;
-		} else if (port->cpu_buf < port->max_buf_cnt) {
-			port->cpu_buf = port->cpu_buf - 1;
-		} else {
-			pr_err("%s: buffer index(%d) out of range\n",
-			       __func__, port->cpu_buf);
-			ret = -EINVAL;
-			mutex_unlock(&port->lock);
-			goto exit;
-		}
-		port->buf[port->cpu_buf].used = dir ^ 1;
-		mutex_unlock(&port->lock);
-	}
-exit:
-	return ret;
-}
-
 void *q6asm_is_cpu_buf_avail_nolock(int dir, struct audio_client *ac,
 					uint32_t *size, uint32_t *index)
 {
@@ -2779,12 +2745,6 @@ static int __q6asm_open_read_write(struct audio_client *ac, uint32_t rd_format,
 	case FORMAT_APE:
 		open.dec_fmt_id = ASM_MEDIA_FMT_APE;
 		break;
-	case FORMAT_G711_ALAW_FS:
-		open.dec_fmt_id = ASM_MEDIA_FMT_G711_ALAW_FS;
-		break;
-	case FORMAT_G711_MLAW_FS:
-		open.dec_fmt_id = ASM_MEDIA_FMT_G711_MLAW_FS;
-		break;
 	default:
 		pr_err("%s: Invalid format 0x%x\n",
 				__func__, wr_format);
@@ -2985,7 +2945,8 @@ int q6asm_set_shared_circ_buff(struct audio_client *ac,
 			       int dir)
 {
 	struct audio_buffer *buf_circ;
-	int bytes_to_alloc, rc, len;
+	int bytes_to_alloc, rc;
+	size_t len;
 
 	buf_circ = kzalloc(sizeof(struct audio_buffer), GFP_KERNEL);
 
@@ -3004,7 +2965,7 @@ int q6asm_set_shared_circ_buff(struct audio_client *ac,
 	rc = msm_audio_ion_alloc("audio_client", &buf_circ->client,
 			&buf_circ->handle, bytes_to_alloc,
 			(ion_phys_addr_t *)&buf_circ->phys,
-			(size_t *)&len, &buf_circ->data);
+			&len, &buf_circ->data);
 
 	if (rc) {
 		pr_err("%s: Audio ION alloc is failed, rc = %d\n", __func__,
@@ -3046,7 +3007,8 @@ int q6asm_set_shared_pos_buff(struct audio_client *ac,
 			       int dir)
 {
 	struct audio_buffer *buf_pos = &ac->shared_pos_buf;
-	int len, rc;
+	int rc;
+	size_t len;
 	int bytes_to_alloc = sizeof(struct asm_shared_position_buffer);
 
 	mutex_lock(&ac->cmd_lock);
@@ -3055,7 +3017,7 @@ int q6asm_set_shared_pos_buff(struct audio_client *ac,
 
 	rc = msm_audio_ion_alloc("audio_client", &buf_pos->client,
 			&buf_pos->handle, bytes_to_alloc,
-			(ion_phys_addr_t *)&buf_pos->phys, (size_t *)&len,
+			(ion_phys_addr_t *)&buf_pos->phys, &len,
 			&buf_pos->data);
 
 	if (rc) {
@@ -5070,59 +5032,6 @@ fail_cmd:
 	return rc;
 }
 
-/*
- * q6asm_media_format_block_g711 - sends g711 decoder configuration
- *                                            parameters
- * @ac: Client session handle
- * @cfg: Audio stream manager configuration parameters
- * @stream_id: Stream id
- */
-int q6asm_media_format_block_g711(struct audio_client *ac,
-				struct asm_g711_dec_cfg *cfg, int stream_id)
-{
-	struct asm_g711_dec_fmt_blk_v2 fmt;
-	int rc = 0;
-
-	pr_debug("%s :session[%d]rate[%d]\n", __func__,
-		ac->session, cfg->sample_rate);
-
-	q6asm_stream_add_hdr(ac, &fmt.hdr, sizeof(fmt), TRUE, stream_id);
-	atomic_set(&ac->cmd_state, -1);
-
-	fmt.hdr.opcode = ASM_DATA_CMD_MEDIA_FMT_UPDATE_V2;
-	fmt.fmtblk.fmt_blk_size = sizeof(fmt) - sizeof(fmt.hdr) -
-						sizeof(fmt.fmtblk);
-
-	fmt.sample_rate = cfg->sample_rate;
-
-	rc = apr_send_pkt(ac->apr, (uint32_t *) &fmt);
-	if (rc < 0) {
-		pr_err("%s :Command media format update failed %d\n",
-				__func__, rc);
-		goto fail_cmd;
-	}
-	rc = wait_event_timeout(ac->cmd_wait,
-				(atomic_read(&ac->cmd_state) >= 0), 5*HZ);
-	if (!rc) {
-		pr_err("%s :timeout. waited for FORMAT_UPDATE\n", __func__);
-		rc = -ETIMEDOUT;
-		goto fail_cmd;
-	}
-
-	if (atomic_read(&ac->cmd_state) > 0) {
-		pr_err("%s: DSP returned error[%s]\n",
-				__func__, adsp_err_get_err_str(
-				atomic_read(&ac->cmd_state)));
-		rc = adsp_err_get_lnx_err_code(
-				atomic_read(&ac->cmd_state));
-		goto fail_cmd;
-	}
-	return 0;
-fail_cmd:
-	return rc;
-}
-EXPORT_SYMBOL(q6asm_media_format_block_g711);
-
 int q6asm_stream_media_format_block_vorbis(struct audio_client *ac,
 				struct asm_vorbis_cfg *cfg, int stream_id)
 {
@@ -5486,7 +5395,7 @@ static int q6asm_memory_map_regions(struct audio_client *ac, int dir,
 	struct asm_buffer_node *buffer_node = NULL;
 	int	rc = 0;
 	int    i = 0;
-	int	cmd_size = 0;
+	uint32_t cmd_size = 0;
 	uint32_t bufcnt_t;
 	uint32_t bufsz_t;
 
@@ -5508,9 +5417,24 @@ static int q6asm_memory_map_regions(struct audio_client *ac, int dir,
 		bufsz_t = PAGE_ALIGN(bufsz_t);
 	}
 
+	if (bufcnt_t > (UINT_MAX
+			- sizeof(struct avs_cmd_shared_mem_map_regions))
+			/ sizeof(struct avs_shared_map_region_payload)) {
+		pr_err("%s: Unsigned Integer Overflow. bufcnt_t = %u\n",
+				__func__, bufcnt_t);
+		return -EINVAL;
+	}
+
 	cmd_size = sizeof(struct avs_cmd_shared_mem_map_regions)
 			+ (sizeof(struct avs_shared_map_region_payload)
 							* bufcnt_t);
+
+
+	if (bufcnt > (UINT_MAX / sizeof(struct asm_buffer_node))) {
+		pr_err("%s: Unsigned Integer Overflow. bufcnt = %u\n",
+				__func__, bufcnt);
+		return -EINVAL;
+	}
 
 	buffer_node = kzalloc(sizeof(struct asm_buffer_node) * bufcnt,
 				GFP_KERNEL);

@@ -612,7 +612,6 @@ static int __ipa3_del_hdr_proc_ctx(u32 proc_ctx_hdl,
 	return 0;
 }
 
-
 int __ipa3_del_hdr(u32 hdr_hdl, bool by_user)
 {
 	struct ipa3_hdr_entry *entry;
@@ -719,7 +718,7 @@ bail:
  * ipa3_del_hdr_by_user() - Remove the specified headers
  * from SW and optionally commit them to IPA HW
  * @hdls:	[inout] set of headers to delete
- * @by_user:	Operation requested by user?
+ * @by_user:   Operation requested by user?
  *
  * Returns:	0 on success, negative on failure
  *
@@ -760,11 +759,11 @@ bail:
 /**
  * ipa3_del_hdr() - Remove the specified headers from SW and optionally commit them
  * to IPA HW
- * @hdls:	[inout] set of headers to delete
+ * @hdls:  [inout] set of headers to delete
  *
- * Returns:	0 on success, negative on failure
+ * Returns:    0 on success, negative on failure
  *
- * Note:	Should not be called from atomic context
+ * Note:   Should not be called from atomic context
  */
 int ipa3_del_hdr(struct ipa_ioc_del_hdr *hdls)
 {
@@ -820,7 +819,7 @@ bail:
  * Remove the specified processing context headers from SW and
  * optionally commit them to IPA HW.
  * @hdls:	[inout] set of processing context headers to delete
- * @by_user:	Operation requested by user?
+ * @by_user:   Operation requested by user?
  *
  * Returns:	0 on success, negative on failure
  *
@@ -863,11 +862,11 @@ bail:
  * ipa3_del_hdr_proc_ctx() -
  * Remove the specified processing context headers from SW and
  * optionally commit them to IPA HW.
- * @hdls:	[inout] set of processing context headers to delete
+ * @hdls:  [inout] set of processing context headers to delete
  *
- * Returns:	0 on success, negative on failure
+ * Returns:    0 on success, negative on failure
  *
- * Note:	Should not be called from atomic context
+ * Note:   Should not be called from atomic context
  */
 int ipa3_del_hdr_proc_ctx(struct ipa_ioc_del_hdr_proc_ctx *hdls)
 {
@@ -1089,10 +1088,6 @@ int ipa3_get_hdr(struct ipa_ioc_get_hdr *lookup)
 	mutex_unlock(&ipa3_ctx->lock);
 
 	return result;
-}
-
-/**
- * __ipa3_release_hdr() - drop reference to header and cause
 }
 
 /**

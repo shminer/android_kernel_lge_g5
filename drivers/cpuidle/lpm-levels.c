@@ -26,7 +26,6 @@
 #include <linux/tick.h>
 #include <linux/suspend.h>
 #include <linux/pm_qos.h>
-#include <linux/quickwakeup.h>
 #include <linux/of_platform.h>
 #include <linux/smp.h>
 #include <linux/remote_spinlock.h>
@@ -608,7 +607,7 @@ static int cluster_select(struct lpm_cluster *cluster, bool from_idle)
 
 		best_level = i;
 
-		if (from_idle && sleep_us <= pwr_params->max_residency)
+		if (sleep_us <= pwr_params->max_residency)
 			break;
 	}
 
@@ -674,6 +673,8 @@ static int cluster_configure(struct lpm_cluster *cluster, int idx,
 
 	/* Notify cluster enter event after successfully config completion */
 	cluster_notify(cluster, level, true);
+
+	sched_set_cluster_dstate(&cluster->child_cpus, idx, 0, 0);
 
 	cluster->last_level = idx;
 	return 0;
@@ -814,6 +815,8 @@ static void cluster_unprepare(struct lpm_cluster *cluster,
 		BUG_ON(ret);
 
 	}
+	sched_set_cluster_dstate(&cluster->child_cpus, 0, 0, 0);
+
 	cluster_notify(cluster, &cluster->levels[last_level], false);
 	cluster_unprepare(cluster->parent, &cluster->child_cpus,
 			last_level, from_idle, end_time);
@@ -1017,6 +1020,8 @@ static int lpm_cpuidle_enter(struct cpuidle_device *dev,
 		return -EINVAL;
 
 	pwr_params = &cluster->cpu->levels[idx].pwr;
+	sched_set_cpu_cstate(smp_processor_id(), idx + 1,
+		pwr_params->energy_overhead, pwr_params->latency_us);
 
 	cpu_prepare(cluster, idx, true);
 	cluster_prepare(cluster, cpumask, idx, true, ktime_to_ns(ktime_get()));
@@ -1057,7 +1062,6 @@ exit:
 	cpu_unprepare(cluster, idx, true);
 
 	sched_set_cpu_cstate(smp_processor_id(), 0, 0, 0);
-
 	trace_cpu_idle_exit(idx, success);
 	end_time = ktime_to_ns(ktime_get()) - start_time;
 	dev->last_residency = do_div(end_time, 1000);
@@ -1308,7 +1312,6 @@ static const struct platform_suspend_ops lpm_suspend_ops = {
 	.valid = suspend_valid_only_mem,
 	.prepare_late = lpm_suspend_prepare,
 	.wake = lpm_suspend_wake,
-	.suspend_again = quickwakeup_suspend_again,
 };
 
 static void lpm_clk_init(struct platform_device *pdev)

@@ -195,41 +195,12 @@ extern struct kset *bus_get_kset(struct bus_type *bus);
 extern struct klist *bus_get_device_klist(struct bus_type *bus);
 
 /**
- * enum probe_type - device driver probe type to try
- *	Device drivers may opt in for special handling of their
- *	respective probe routines. This tells the core what to
- *	expect and prefer.
- *
- * @PROBE_DEFAULT_STRATEGY: Used by drivers that work equally well
- *	whether probed synchronously or asynchronously.
- * @PROBE_PREFER_ASYNCHRONOUS: Drivers for "slow" devices which
- *	probing order is not essential for booting the system may
- *	opt into executing their probes asynchronously.
- * @PROBE_FORCE_SYNCHRONOUS: Use this to annotate drivers that need
- *	their probe routines to run synchronously with driver and
- *	device registration (with the exception of -EPROBE_DEFER
- *	handling - re-probing always ends up being done asynchronously).
- *
- * Note that the end goal is to switch the kernel to use asynchronous
- * probing by default, so annotating drivers with
- * %PROBE_PREFER_ASYNCHRONOUS is a temporary measure that allows us
- * to speed up boot process while we are validating the rest of the
- * drivers.
- */
-enum probe_type {
-	PROBE_DEFAULT_STRATEGY,
-	PROBE_PREFER_ASYNCHRONOUS,
-	PROBE_FORCE_SYNCHRONOUS,
-};
-
-/**
  * struct device_driver - The basic device driver structure
  * @name:	Name of the device driver.
  * @bus:	The bus which the device of this driver belongs to.
  * @owner:	The module owner.
  * @mod_name:	Used for built-in modules.
  * @suppress_bind_attrs: Disables bind/unbind via sysfs.
- * @probe_type:	Type of the probe (synchronous or asynchronous) to use.
  * @of_match_table: The open firmware table.
  * @acpi_match_table: The ACPI match table.
  * @probe:	Called to query the existence of a specific device,
@@ -263,7 +234,6 @@ struct device_driver {
 	const char		*mod_name;	/* used for built-in modules */
 
 	bool suppress_bind_attrs;	/* disables bind/unbind via sysfs */
-	enum probe_type probe_type;
 
 	const struct of_device_id	*of_match_table;
 	const struct acpi_device_id	*acpi_match_table;
@@ -993,6 +963,10 @@ extern void unlock_device_hotplug(void);
 extern int lock_device_hotplug_sysfs(void);
 extern int device_offline(struct device *dev);
 extern int device_online(struct device *dev);
+#ifdef CONFIG_LGE_PM_LGE_POWER_CORE
+extern int lge_device_add_class_symlinks(struct device *dev);
+#endif
+
 /*
  * Root device objects for grouping under /sys/devices
  */
@@ -1018,7 +992,6 @@ extern int __must_check device_bind_driver(struct device *dev);
 extern void device_release_driver(struct device *dev);
 extern int  __must_check device_attach(struct device *dev);
 extern int __must_check driver_attach(struct device_driver *drv);
-extern void device_initial_probe(struct device *dev);
 extern int __must_check device_reprobe(struct device *dev);
 
 /*

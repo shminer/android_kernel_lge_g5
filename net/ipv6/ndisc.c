@@ -1173,15 +1173,15 @@ static void ndisc_router_discovery(struct sk_buff *skb)
 	}
 /* 2016-05-29 hyoseab.song@lge.com LGP_DATA_KERNEL_BUGFIX_ROUTE_IPV6 [START] */
 /* kernel original
-	if (!ndisc_parse_options(opt, optlen, &ndopts)) {
-		ND_PRINTK(2, warn, "RA: invalid ND options\n");
-		return;
-	}
+    if (!ndisc_parse_options(opt, optlen, &ndopts)) {
+        ND_PRINTK(2, warn, "RA: invalid ND options\n");
+        return;
+    }
 */
-	if (!ndisc_parse_options_ra(opt, optlen, &ndopts, in6_dev)) {
-		ND_PRINTK(2, warn, "RA: invalid ND options\n");
-	return;
-	}
+    if (!ndisc_parse_options_ra(opt, optlen, &ndopts, in6_dev)) {
+        ND_PRINTK(2, warn, "RA: invalid ND options\n");
+    return;
+    }
 /* 2016-05-29 hyoseab.song@lge.com LGP_DATA_KERNEL_BUGFIX_ROUTE_IPV6 [END] */
 	if (!ipv6_accept_ra(in6_dev)) {
 		ND_PRINTK(2, info,

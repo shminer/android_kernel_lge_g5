@@ -31,7 +31,6 @@
 #include "uvc_v4l2.h"
 #include "uvc_video.h"
 #include "u_uvc.h"
-#include "f_uvc.h"
 
 unsigned int uvc_gadget_trace_param;
 
@@ -413,8 +412,7 @@ uvc_function_connect(struct uvc_device *uvc)
 	struct usb_composite_dev *cdev = uvc->func.config->cdev;
 	int ret;
 
-	ret = video_ready_callback(&uvc->func);
-	if (ret < 0)
+	if ((ret = usb_function_activate(&uvc->func)) < 0)
 		INFO(cdev, "UVC connect failed with %d\n", ret);
 }
 
@@ -424,8 +422,7 @@ uvc_function_disconnect(struct uvc_device *uvc)
 	struct usb_composite_dev *cdev = uvc->func.config->cdev;
 	int ret;
 
-	ret = video_closed_callback(&uvc->func);
-	if (ret < 0)
+	if ((ret = usb_function_deactivate(&uvc->func)) < 0)
 		INFO(cdev, "UVC disconnect failed with %d\n", ret);
 }
 
@@ -615,14 +612,6 @@ uvc_function_bind(struct usb_configuration *c, struct usb_function *f)
 	opts->streaming_maxpacket = clamp(opts->streaming_maxpacket, 1U, 3072U);
 	opts->streaming_maxburst = min(opts->streaming_maxburst, 15U);
 
-	/* For SS, wMaxPacketSize has to be 1024 if bMaxBurst is not 0 */
-	if (opts->streaming_maxburst &&
-	    (opts->streaming_maxpacket % 1024) != 0) {
-		opts->streaming_maxpacket = roundup(opts->streaming_maxpacket, 1024);
-		INFO(cdev, "overriding streaming_maxpacket to %d\n",
-		     opts->streaming_maxpacket);
-	}
-
 	/* Fill in the FS/HS/SS Video Streaming specific descriptors from the
 	 * module parameters.
 	 *
@@ -654,7 +643,7 @@ uvc_function_bind(struct usb_configuration *c, struct usb_function *f)
 	uvc_ss_streaming_comp.bMaxBurst = opts->streaming_maxburst;
 	uvc_ss_streaming_comp.wBytesPerInterval =
 		cpu_to_le16(max_packet_size * max_packet_mult *
-			    (opts->streaming_maxburst + 1));
+			    opts->streaming_maxburst);
 
 	/* Allocate endpoints. */
 	ep = usb_ep_autoconfig(cdev->gadget, &uvc_control_ep);
@@ -728,9 +717,11 @@ uvc_function_bind(struct usb_configuration *c, struct usb_function *f)
 	uvc->control_req->complete = uvc_function_ep0_complete;
 	uvc->control_req->context = uvc;
 
-	/* Gadget drivers avoids enumerattion until the userspace server is
-	 * active - when it opens uvc video device node.
+	/* Avoid letting this gadget enumerate until the userspace server is
+	 * active.
 	 */
+	if ((ret = usb_function_deactivate(f)) < 0)
+		goto error;
 
 	if (v4l2_device_register(&cdev->gadget->dev, &uvc->v4l2_dev)) {
 		printk(KERN_INFO "v4l2_device_register failed\n");

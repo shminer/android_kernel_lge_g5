@@ -58,10 +58,6 @@ static DEFINE_SPINLOCK(suspend_lock);
 
 #define TAG "msm_adreno_tz: "
 
-#if 1
-static unsigned int adrenoboost = 1;
-#endif
-
 static u64 suspend_time;
 static u64 suspend_start;
 static unsigned long acc_total, acc_relative_busy;
@@ -92,44 +88,18 @@ u64 suspend_time_ms(void)
 	return time_diff;
 }
 
-#if 1
-static ssize_t adrenoboost_show(struct device *dev,
-		struct device_attribute *attr, char *buf)
-{
-	size_t count = 0;
-	count += sprintf(buf, "%d\n", adrenoboost);
-
-	return count;
-}
-
-static ssize_t adrenoboost_save(struct device *dev,
-		struct device_attribute *attr, const char *buf, size_t count)
-{
-	int input;
-	sscanf(buf, "%d ", &input);
-	if (input < 0 || input > 3) {
-		adrenoboost = 0;
-	} else {
-		adrenoboost = input;
-	}
-
-	return count;
-}
-#endif
-
 static ssize_t gpu_load_show(struct device *dev,
 		struct device_attribute *attr,
 		char *buf)
 {
-	unsigned long sysfs_busy_perc = 0;
+	unsigned long sysfs_busy_perc;
 	/*
 	 * Average out the samples taken since last read
 	 * This will keep the average value in sync with
 	 * with the client sampling duration.
 	 */
 	spin_lock(&sample_lock);
-	if (acc_total)
-		sysfs_busy_perc = (acc_relative_busy * 100) / acc_total;
+	sysfs_busy_perc = (acc_relative_busy * 100) / acc_total;
 
 	/* Reset the parameters */
 	acc_total = 0;
@@ -163,11 +133,6 @@ static ssize_t suspend_time_show(struct device *dev,
 	return snprintf(buf, PAGE_SIZE, "%llu\n", time_diff);
 }
 
-#if 1
-static DEVICE_ATTR(adrenoboost, 0644,
-		adrenoboost_show, adrenoboost_save);
-#endif
-
 static DEVICE_ATTR(gpu_load, 0444, gpu_load_show, NULL);
 
 static DEVICE_ATTR(suspend_time, 0444,
@@ -177,9 +142,6 @@ static DEVICE_ATTR(suspend_time, 0444,
 static const struct device_attribute *adreno_tz_attr_list[] = {
 		&dev_attr_gpu_load,
 		&dev_attr_suspend_time,
-#if 1
-		&dev_attr_adrenoboost,
-#endif
 		NULL
 };
 
@@ -375,13 +337,6 @@ static int tz_init(struct devfreq_msm_adreno_tz_data *priv,
 	return ret;
 }
 
-#if 1
-
-// mapping gpu level calculated linear conservation half curve values into a
-// half bell curve of conservation
-static int conservation_map[] = {0,1,2,5,6,9,14     ,17,20,25};
-#endif
-
 static int tz_get_target_freq(struct devfreq *devfreq, unsigned long *freq,
 				u32 *flag)
 {
@@ -391,9 +346,6 @@ static int tz_get_target_freq(struct devfreq *devfreq, unsigned long *freq,
 	int val, level = 0;
 	unsigned int scm_data[4];
 	int context_count = 0;
-#if 1
-	int max_state_val = devfreq->profile->max_state - 1;
-#endif
 
 	/* keeps stats.private_data == NULL   */
 	result = devfreq->profile->get_dev_status(devfreq->dev.parent, &stats);
@@ -404,23 +356,7 @@ static int tz_get_target_freq(struct devfreq *devfreq, unsigned long *freq,
 
 	*freq = stats.current_frequency;
 	priv->bin.total_time += stats.total_time;
-#if 1
-	// scale busy time up based on adrenoboost parameter, only if MIN_BUSY exceeded...
-	if ((unsigned int)(priv->bin.busy_time + stats.busy_time) >= MIN_BUSY) {
-		if (adrenoboost <= 1) {
-			priv->bin.busy_time += stats.busy_time * ( 1 + adrenoboost );
-		} else
-		if (adrenoboost == 2) {
-			priv->bin.busy_time += (unsigned int)((stats.busy_time * ( 1 + adrenoboost ) * 7)/10);
-		} else {
-			priv->bin.busy_time += (unsigned int)((stats.busy_time * ( 1 + adrenoboost ) * 7)/10);
-		}
-	} else {
-		priv->bin.busy_time += stats.busy_time;
-	}
-#else
 	priv->bin.busy_time += stats.busy_time;
-#endif
 
 	if (stats.private_data)
 		context_count =  *((int *)stats.private_data);
@@ -444,12 +380,6 @@ static int tz_get_target_freq(struct devfreq *devfreq, unsigned long *freq,
 		pr_err(TAG "bad freq %ld\n", stats.current_frequency);
 		return level;
 	}
-	// idle freq or any non governor drop should move last_level as well, so adrenoboost works on proper leveling
-	if (level != priv->bin.last_level) {
-		priv->bin.last_level = level;
-	}
-
-//	printk("%s level = %d total=%d busy=%d\n", __func__, level, (int)priv->bin.total_time, (int)priv->bin.busy_time, (int) priv->bin.busy_time, (int)stats.busy_time);
 
 	/*
 	 * If there is an extended block of busy processing,
@@ -474,32 +404,11 @@ static int tz_get_target_freq(struct devfreq *devfreq, unsigned long *freq,
 	 * If the decision is to move to a different level, make sure the GPU
 	 * frequency changes.
 	 */
-#if 1
-	if (!adrenoboost && val) {
+	if (val) {
 		level += val;
 		level = max(level, 0);
 		level = min_t(int, level, devfreq->profile->max_state - 1);
-	} else {
-		if (val) {
-			priv->bin.cycles_keeping_level += 1 + abs(val/2); // higher value change quantity means more addition to cycles_keeping_level for easier switching
-			// going upwards in frequency -- make it harder on the low and high freqs, middle ground - let it move
-			if (val<0 && priv->bin.cycles_keeping_level < conservation_map[ abs((priv->bin.last_level * 2) - max_state_val) ]) {
-			} else
-			// going downwards in frequency let it happen hard in the middle freqs
-			if (val>0 && priv->bin.cycles_keeping_level < conservation_map[ (max_state_val - abs((priv->bin.last_level * 2) - max_state_val )) ])  {
-			} else
-			{
-				// reset keep cylcles timer
-				priv->bin.cycles_keeping_level = 0;
-				// set new last level
-				priv->bin.last_level = level;
-				level += val;
-				level = max(level, 0);
-				level = min_t(int, level, devfreq->profile->max_state - 1);
-			}
-		}
 	}
-#endif
 
 	*freq = devfreq->profile->freq_table[level];
 	return 0;

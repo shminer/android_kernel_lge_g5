@@ -1,4 +1,4 @@
-/* Copyright (c) 2014-2017, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2014-2016, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -364,7 +364,6 @@ struct qpnp_hap {
 	u8 lra_res_cal_period;
 	u8 sc_duration;
 	u8 ext_pwm_dtest_line;
-	bool vcc_pon_enabled;
 	bool state;
 	bool use_play_irq;
 	bool use_sc_irq;
@@ -521,11 +520,9 @@ static int qpnp_hap_play(struct qpnp_hap *hap, int on)
 			QPNP_HAP_PLAY_REG(hap->base));
 	if (rc < 0)
 		return rc;
-/*
 #ifdef CONFIG_LGE_QPNP_HAPTIC_OV_RB
 	dev_info(&hap->spmi->dev, "qpnp_hap_play: on = %d, voltage = %d \n", on, hap->vmax_mv);
 #endif
-*/
 	hap->reg_play = val;
 
 	return 0;
@@ -772,14 +769,16 @@ static int qpnp_hap_vmax_config(struct qpnp_hap *hap)
 
 	if (hap->vmax_mv < QPNP_HAP_VMAX_MIN_MV)
 		hap->vmax_mv = QPNP_HAP_VMAX_MIN_MV;
-	else if (hap->vmax_mv > QPNP_HAP_VMAX_MAX_MV)
+	else if (hap->vmax_mv > QPNP_HAP_VMAX_MAX_MV) {
 #ifdef CONFIG_LGE_QPNP_HAPTIC_OV_RB
-		/* LGE add QPNP_HAP_OV_RB_MV */
-		/* When Over drive or Reverse braking occurs, odrb = 1 */
-		hap->vmax_mv = odrb ? QPNP_HAP_OV_RB_MV : QPNP_HAP_VMAX_MAX_MV;
-#else
-		hap->vmax_mv = QPNP_HAP_VMAX_MAX_MV;
+	/* LGE add QPNP_HAP_OV_RB_MV */
+	/* When Over drive or Reverse braking occurs, odrb = 1 */
+	if(odrb)
+		hap->vmax_mv = QPNP_HAP_OV_RB_MV;
+	else
 #endif
+		hap->vmax_mv = QPNP_HAP_VMAX_MAX_MV;
+	}
 
 	rc = qpnp_hap_read_reg(hap, &reg, QPNP_HAP_VMAX_REG(hap->base));
 	if (rc < 0)
@@ -1439,7 +1438,6 @@ static ssize_t qpnp_hap_ramp_test_data_show(struct device *dev,
 	return count;
 
 }
-
 /* sysfs attributes */
 static struct device_attribute qpnp_hap_attrs[] = {
 	__ATTR(wf_s0, (S_IRUGO | S_IWUSR | S_IWGRP),
@@ -1902,15 +1900,13 @@ static void qpnp_hap_worker(struct work_struct *work)
 	qpnp_hap_set(hap, hap->state);
 #else
 	u8 val = 0x00;
-	int rc;
+	int rc, reg_en;
 
-	if (hap->vcc_pon && hap->state && !hap->vcc_pon_enabled) {
-		rc = regulator_enable(hap->vcc_pon);
-		if (rc < 0)
-			pr_err("%s: could not enable vcc_pon regulator rc=%d\n",
-				 __func__, rc);
-		else
-			hap->vcc_pon_enabled = true;
+	if (hap->vcc_pon) {
+		reg_en = regulator_enable(hap->vcc_pon);
+		if (reg_en)
+			pr_err("%s: could not enable vcc_pon regulator\n",
+				 __func__);
 	}
 
 	/* Disable haptics module if the duration of short circuit
@@ -1925,13 +1921,11 @@ static void qpnp_hap_worker(struct work_struct *work)
 		qpnp_hap_set(hap, hap->state);
 	}
 
-	if (hap->vcc_pon && !hap->state && hap->vcc_pon_enabled) {
+	if (hap->vcc_pon && !reg_en) {
 		rc = regulator_disable(hap->vcc_pon);
 		if (rc)
-			pr_err("%s: could not disable vcc_pon regulator rc=%d\n",
-				 __func__, rc);
-		else
-			hap->vcc_pon_enabled = false;
+			pr_err("%s: could not disable vcc_pon regulator\n",
+				 __func__);
 	}
 #endif
 }

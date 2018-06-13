@@ -22,14 +22,6 @@ typedef struct cpumask { DECLARE_BITMAP(bits, NR_CPUS); } cpumask_t;
  */
 #define cpumask_bits(maskp) ((maskp)->bits)
 
-/**
- * cpumask_pr_args - printf args to output a cpumask
- * @maskp: cpumask to be printed
- *
- * Can be used to provide arguments for '%*pb[l]' when printing a cpumask.
- */
-#define cpumask_pr_args(maskp)		nr_cpu_ids, cpumask_bits(maskp)
-
 #if NR_CPUS == 1
 #define nr_cpu_ids		1
 #else
@@ -150,8 +142,10 @@ static inline unsigned int cpumask_any_but(const struct cpumask *mask,
 	return 1;
 }
 
-static inline unsigned int cpumask_local_spread(unsigned int i, int node)
+static inline int cpumask_set_cpu_local_first(int i, int numa_node, cpumask_t *dstp)
 {
+	set_bit(0, cpumask_bits(dstp));
+
 	return 0;
 }
 
@@ -205,7 +199,7 @@ static inline unsigned int cpumask_next_zero(int n, const struct cpumask *srcp)
 
 int cpumask_next_and(int n, const struct cpumask *, const struct cpumask *);
 int cpumask_any_but(const struct cpumask *mask, unsigned int cpu);
-unsigned int cpumask_local_spread(unsigned int i, int node);
+int cpumask_set_cpu_local_first(int i, int numa_node, cpumask_t *dstp);
 
 /**
  * for_each_cpu - iterate over every cpu in a mask

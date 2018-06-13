@@ -387,7 +387,7 @@ int udpv6_recvmsg(struct kiocb *iocb, struct sock *sk,
 	unsigned int ulen, copied;
 	int peeked, off = 0;
 	int err;
-	int is_udplite = IS_UDPLITE(sk);
+	int is_udplite = IS_UDPLITE(sk);	
 	bool checksum_valid = false;
 	int is_udp4;
 	bool slow;
@@ -420,17 +420,16 @@ try_again:
 	 */
 
 	if (copied < ulen || UDP_SKB_CB(skb)->partial_cov) {
-		checksum_valid = !udp_lib_checksum_complete(skb);
-		if (!checksum_valid)
+  checksum_valid = !udp_lib_checksum_complete(skb);
+  if (!checksum_valid)
 			goto csum_copy_err;
 	}
 
-	if (checksum_valid || skb_csum_unnecessary(skb))
+ if (checksum_valid || skb_csum_unnecessary(skb))
 		err = skb_copy_datagram_iovec(skb, sizeof(struct udphdr),
 					      msg->msg_iov, copied);
 	else {
-		err = skb_copy_and_csum_datagram_iovec(skb, sizeof(struct udphdr),
-						       msg->msg_iov, copied);
+		err = skb_copy_and_csum_datagram_iovec(skb, sizeof(struct udphdr), msg->msg_iov);
 		if (err == -EINVAL)
 			goto csum_copy_err;
 	}
@@ -901,9 +900,11 @@ int __udp6_lib_rcv(struct sk_buff *skb, struct udp_table *udptable,
 		ret = udpv6_queue_rcv_skb(sk, skb);
 		sock_put(sk);
 
-		/* a return value > 0 means to resubmit the input */
+		/* a return value > 0 means to resubmit the input, but
+		 * it wants the return to be -protocol, or 0
+		 */
 		if (ret > 0)
-			return ret;
+			return -ret;
 
 		return 0;
 	}
@@ -1108,10 +1109,6 @@ int udpv6_sendmsg(struct kiocb *iocb, struct sock *sk,
 			if (addr_len < SIN6_LEN_RFC2133)
 				return -EINVAL;
 			daddr = &sin6->sin6_addr;
-			if (ipv6_addr_any(daddr) &&
-			    ipv6_addr_v4mapped(&np->saddr))
-				ipv6_addr_set_v4mapped(htonl(INADDR_LOOPBACK),
-						       daddr);
 			break;
 		case AF_INET:
 			goto do_udp_sendmsg;
@@ -1512,7 +1509,6 @@ struct proto udpv6_prot = {
 	.compat_getsockopt = compat_udpv6_getsockopt,
 #endif
 	.clear_sk	   = udp_v6_clear_sk,
-	.diag_destroy      = udp_abort,
 };
 
 static struct inet_protosw udpv6_protosw = {

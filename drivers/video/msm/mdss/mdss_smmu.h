@@ -119,26 +119,18 @@ static inline int mdss_smmu_attach(struct mdss_data_type *mdata)
 {
 	int rc;
 
-	mdata->mdss_util->iommu_lock();
 	MDSS_XLOG(mdata->iommu_attached);
-
 	if (mdata->iommu_attached) {
 		pr_debug("mdp iommu already attached\n");
-		rc = 0;
-		goto end;
+		return 0;
 	}
 
-	if (!mdata->smmu_ops.smmu_attach) {
-		rc = -ENOSYS;
-		goto end;
-	}
+	if (!mdata->smmu_ops.smmu_attach)
+		return -ENOSYS;
 
 	rc =  mdata->smmu_ops.smmu_attach(mdata);
 	if (!rc)
 		mdata->iommu_attached = true;
-
-end:
-	mdata->mdss_util->iommu_unlock();
 	return rc;
 }
 
@@ -146,26 +138,19 @@ static inline int mdss_smmu_detach(struct mdss_data_type *mdata)
 {
 	int rc;
 
-	mdata->mdss_util->iommu_lock();
 	MDSS_XLOG(mdata->iommu_attached);
 
 	if (!mdata->iommu_attached) {
 		pr_debug("mdp iommu already dettached\n");
-		rc = 0;
-		goto end;
+		return 0;
 	}
 
-	if (!mdata->smmu_ops.smmu_detach) {
-		rc = -ENOSYS;
-		goto end;
-	}
+	if (!mdata->smmu_ops.smmu_detach)
+		return -ENOSYS;
 
 	rc = mdata->smmu_ops.smmu_detach(mdata);
 	if (!rc)
 		mdata->iommu_attached = false;
-
-end:
-	mdata->mdss_util->iommu_unlock();
 	return rc;
 }
 
@@ -216,7 +201,7 @@ static inline void mdss_smmu_unmap_dma_buf(struct sg_table *table, int domain,
 }
 
 static inline int mdss_smmu_dma_alloc_coherent(struct device *dev, size_t size,
-		dma_addr_t *phys, dma_addr_t *iova, void **cpu_addr,
+		dma_addr_t *phys, dma_addr_t *iova, void *cpu_addr,
 		gfp_t gfp, int domain)
 {
 	struct mdss_data_type *mdata = mdss_mdp_get_mdata();
@@ -231,7 +216,7 @@ static inline void mdss_smmu_dma_free_coherent(struct device *dev, size_t size,
 		void *cpu_addr, dma_addr_t phys, dma_addr_t iova, int domain)
 {
 	struct mdss_data_type *mdata = mdss_mdp_get_mdata();
-	if (mdata && mdata->smmu_ops.smmu_dma_free_coherent)
+	if (mdata->smmu_ops.smmu_dma_free_coherent)
 		mdata->smmu_ops.smmu_dma_free_coherent(dev, size, cpu_addr,
 			phys, iova, domain);
 }

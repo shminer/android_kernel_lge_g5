@@ -520,7 +520,7 @@ struct ipa_gsi_ep_mem_info {
 
 struct ipa3_status_stats {
 	struct ipahal_pkt_status status[IPA_MAX_STATUS_STAT_NUM];
-	unsigned int curr;
+	int curr;
 };
 
 /**
@@ -2005,7 +2005,7 @@ int ipa3_uc_panic_notifier(struct notifier_block *this,
 	unsigned long event, void *ptr);
 void ipa3_inc_acquire_wakelock(void);
 void ipa3_dec_release_wakelock(void);
-int ipa3_load_fws(const struct firmware *firmware);
+int ipa3_load_fws(const struct firmware *firmware, phys_addr_t gsi_mem_base);
 int ipa3_register_ipa_ready_cb(void (*ipa_ready_cb)(void *), void *user_data);
 const char *ipa_hw_error_str(enum ipa3_hw_errors err_type);
 int ipa_gsi_ch20_wa(void);

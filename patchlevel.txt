@@ -1,2 +1,0 @@
-Source: https://www.codeaurora.org/cgit/quic/la/kernel/msm-3.18/
-Tag/Commit: LA.HB.1.1.2-43000-8x96.0

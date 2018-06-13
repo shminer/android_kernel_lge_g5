@@ -1,4 +1,4 @@
-/* Copyright (c) 2014-2017, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2014-2016, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -357,14 +357,13 @@
 		clock-names = "core_clk";
 		clocks = <&clock_gcc clk_ipa_clk>;
 		qcom,msm-bus,name = "ipa";
-		qcom,msm-bus,num-cases = <4>;
+		qcom,msm-bus,num-cases = <3>;
 		qcom,msm-bus,num-paths = <2>;
 		qcom,msm-bus,vectors-KBps =
 		<90 512 0 0>, <90 585 0 0>,         /* No vote */
 		<90 512 80000 640000>, <90 585 80000 640000>,    /* SVS */
-		<90 512 206000 960000>, <90 585 206000 960000>,    /* NOMINAL */
-		<90 512 206000 3600000>, <90 585 206000 3600000>;    /* TURBO */
-		qcom,bus-vector-names = "MIN", "SVS", "NOMINAL", "TURBO";
+		<90 512 206000 960000>, <90 585 206000 960000>;    /* PERF */
+		qcom,bus-vector-names = "MIN", "SVS", "PERF";
 	};
 
 	qcom,rmnet-ipa {
@@ -1059,11 +1058,10 @@
 		qcom,usb-dbm = <&dbm_1p5>;
 
 		qcom,msm-bus,name = "usb3";
-		qcom,msm-bus,num-cases = <3>;
+		qcom,msm-bus,num-cases = <2>;
 		qcom,msm-bus,num-paths = <1>;
 		qcom,msm-bus,vectors-KBps =
 					<61 512 0 0>,
-					<61 512 0 640000>,
 					<61 512 0 640000>;
 		qcom,lpm-to-suspend-delay-ms = <2000>;
 
@@ -1247,7 +1245,7 @@
 		reg-names = "qmp_phy_base",
 			    "vls_clamp_reg";
 		vdd-supply = <&pmd9635_l4>;
-		core-supply = <&pmd9635_l8>;
+		vdda18-supply = <&pmd9635_l8>;
 		qcom,vdd-voltage-level = <0 1000000 1000000>;
 		qcom,vbus-valid-override;
 		qcom,override-pll-calibration;

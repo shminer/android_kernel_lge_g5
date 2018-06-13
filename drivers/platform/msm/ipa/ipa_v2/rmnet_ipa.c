@@ -73,6 +73,7 @@ static void *subsys_notify_handle;
 
 u32 apps_to_ipa_hdl, ipa_to_apps_hdl; /* get handler from ipa */
 static struct mutex ipa_to_apps_pipe_handle_guard;
+static struct mutex add_mux_channel_lock;
 static int wwan_add_ul_flt_rule_to_ipa(void);
 static int wwan_del_ul_flt_rule_to_ipa(void);
 static void ipa_wwan_msg_free_cb(void*, u32, u32);
@@ -1405,13 +1406,13 @@ static int ipa_wwan_ioctl(struct net_device *dev, struct ifreq *ifr, int cmd)
 					rmnet_mux_val.mux_id);
 				return rc;
 			}
+			mutex_lock(&add_mux_channel_lock);
 			if (rmnet_index >= MAX_NUM_OF_MUX_CHANNEL) {
 				IPAWANERR("Exceed mux_channel limit(%d)\n",
 				rmnet_index);
+				mutex_unlock(&add_mux_channel_lock);
 				return -EFAULT;
 			}
-			extend_ioctl_data.u.rmnet_mux_val.vchannel_name
-				[IFNAMSIZ-1] = '\0';
 			IPAWANDBG("ADD_MUX_CHANNEL(%d, name: %s)\n",
 			extend_ioctl_data.u.rmnet_mux_val.mux_id,
 			extend_ioctl_data.u.rmnet_mux_val.vchannel_name);
@@ -1421,6 +1422,9 @@ static int ipa_wwan_ioctl(struct net_device *dev, struct ifreq *ifr, int cmd)
 			memcpy(mux_channel[rmnet_index].vchannel_name,
 				extend_ioctl_data.u.rmnet_mux_val.vchannel_name,
 				sizeof(mux_channel[rmnet_index].vchannel_name));
+			mux_channel[rmnet_index].vchannel_name[
+				IFNAMSIZ - 1] = '\0';
+
 			IPAWANDBG("cashe device[%s:%d] in IPA_wan[%d]\n",
 				mux_channel[rmnet_index].vchannel_name,
 				mux_channel[rmnet_index].mux_id,
@@ -1435,6 +1439,7 @@ static int ipa_wwan_ioctl(struct net_device *dev, struct ifreq *ifr, int cmd)
 					IPAWANERR("device %s reg IPA failed\n",
 						extend_ioctl_data.u.
 						rmnet_mux_val.vchannel_name);
+					mutex_unlock(&add_mux_channel_lock);
 					return -ENODEV;
 				}
 				mux_channel[rmnet_index].mux_channel_set = true;
@@ -1447,6 +1452,7 @@ static int ipa_wwan_ioctl(struct net_device *dev, struct ifreq *ifr, int cmd)
 				mux_channel[rmnet_index].ul_flt_reg = false;
 			}
 			rmnet_index++;
+			mutex_unlock(&add_mux_channel_lock);
 			break;
 		case RMNET_IOCTL_SET_EGRESS_DATA_FORMAT:
 			IPAWANDBG("get RMNET_IOCTL_SET_EGRESS_DATA_FORMAT\n");
@@ -2346,20 +2352,18 @@ static void rmnet_ipa_get_stats_and_update(bool reset)
 	}
 
 	rc = ipa_qmi_get_data_stats(&req, resp);
-	if (rc) {
-		IPAWANERR("ipa_qmi_get_data_stats failed: %d\n", rc);
-		kfree(resp);
-		return;
-	}
 
-	memset(&msg_meta, 0, sizeof(struct ipa_msg_meta));
-	msg_meta.msg_type = IPA_TETHERING_STATS_UPDATE_STATS;
-	msg_meta.msg_len = sizeof(struct ipa_get_data_stats_resp_msg_v01);
-	rc = ipa2_send_msg(&msg_meta, resp, rmnet_ipa_free_msg);
-	if (rc) {
-		IPAWANERR("ipa2_send_msg failed: %d\n", rc);
-		kfree(resp);
-		return;
+	if (!rc) {
+		memset(&msg_meta, 0, sizeof(struct ipa_msg_meta));
+		msg_meta.msg_type = IPA_TETHERING_STATS_UPDATE_STATS;
+		msg_meta.msg_len =
+			sizeof(struct ipa_get_data_stats_resp_msg_v01);
+		rc = ipa2_send_msg(&msg_meta, resp, rmnet_ipa_free_msg);
+		if (rc) {
+			IPAWANERR("ipa2_send_msg failed: %d\n", rc);
+			kfree(resp);
+			return;
+		}
 	}
 }
 
@@ -2408,20 +2412,18 @@ static void rmnet_ipa_get_network_stats_and_update(void)
 	req.mux_id_list[0] = ipa_rmnet_ctx.metered_mux_id;
 
 	rc = ipa_qmi_get_network_stats(&req, resp);
-	if (rc) {
-		IPAWANERR("ipa_qmi_get_network_stats failed %d\n", rc);
-		kfree(resp);
-		return;
-	}
 
-	memset(&msg_meta, 0, sizeof(struct ipa_msg_meta));
-	msg_meta.msg_type = IPA_TETHERING_STATS_UPDATE_NETWORK_STATS;
-	msg_meta.msg_len = sizeof(struct ipa_get_apn_data_stats_resp_msg_v01);
-	rc = ipa2_send_msg(&msg_meta, resp, rmnet_ipa_free_msg);
-	if (rc) {
-		IPAWANERR("ipa2_send_msg failed: %d\n", rc);
-		kfree(resp);
-		return;
+	if (!rc) {
+		memset(&msg_meta, 0, sizeof(struct ipa_msg_meta));
+		msg_meta.msg_type = IPA_TETHERING_STATS_UPDATE_NETWORK_STATS;
+		msg_meta.msg_len =
+			sizeof(struct ipa_get_apn_data_stats_resp_msg_v01);
+		rc = ipa2_send_msg(&msg_meta, resp, rmnet_ipa_free_msg);
+		if (rc) {
+			IPAWANERR("ipa2_send_msg failed: %d\n", rc);
+			kfree(resp);
+			return;
+		}
 	}
 }
 
@@ -2567,11 +2569,6 @@ int rmnet_ipa_query_tethering_stats(struct wan_ioctl_query_tether_stats *data,
 	struct ipa_get_data_stats_req_msg_v01 *req;
 	struct ipa_get_data_stats_resp_msg_v01 *resp;
 	int pipe_len, rc;
-
-	if (data != NULL) {
-		data->upstreamIface[IFNAMSIZ-1] = '\0';
-		data->tetherIface[IFNAMSIZ-1] = '\0';
-	}
 
 	req = kzalloc(sizeof(struct ipa_get_data_stats_req_msg_v01),
 			GFP_KERNEL);
@@ -2803,6 +2800,7 @@ static int __init ipa_wwan_init(void)
 	atomic_set(&is_ssr, 0);
 
 	mutex_init(&ipa_to_apps_pipe_handle_guard);
+	mutex_init(&add_mux_channel_lock);
 	ipa_to_apps_hdl = -1;
 
 	ipa_qmi_init();
@@ -2821,6 +2819,7 @@ static void __exit ipa_wwan_cleanup(void)
 	int ret;
 	ipa_qmi_cleanup();
 	mutex_destroy(&ipa_to_apps_pipe_handle_guard);
+	mutex_destroy(&add_mux_channel_lock);
 	ret = subsys_notif_unregister_notifier(subsys_notify_handle,
 					&ssr_notifier);
 	if (ret)

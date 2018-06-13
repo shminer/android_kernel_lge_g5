@@ -26,7 +26,6 @@ struct cpu {
 	struct device dev;
 };
 
-#ifdef CONFIG_APSS_CORE_EA
 struct cpu_pstate_pwr {
 	unsigned int freq;
 	uint32_t power;
@@ -39,7 +38,6 @@ struct cpu_pwr_stats {
 	bool throttling;
 	int len;
 };
-#endif
 
 extern int register_cpu(struct cpu *cpu, int num);
 extern struct device *get_cpu_device(unsigned cpu);
@@ -107,10 +105,6 @@ enum {
 					* Called on the new cpu, just before
 					* enabling interrupts. Must not sleep,
 					* must not fail */
-#define CPU_DYING_IDLE		0x000B /* CPU (unsigned)v dying, reached
-					* idle loop. */
-#define CPU_BROKEN		0x000C /* CPU (unsigned)v did not die properly,
-					* perhaps due to preemption. */
 
 /* Used for CPU hotplug events occurring while tasks are frozen due to a suspend
  * operation in progress
@@ -277,11 +271,9 @@ static inline int disable_nonboot_cpus(void) { return 0; }
 static inline void enable_nonboot_cpus(void) {}
 #endif /* !CONFIG_PM_SLEEP_SMP */
 
-#ifdef CONFIG_APSS_CORE_EA
 struct cpu_pwr_stats *get_cpu_pwr_stats(void);
 void trigger_cpu_pwr_stats_calc(void);
 int register_cpu_pwr_stats_ready_notifier(struct notifier_block *nb);
-#endif
 
 enum cpuhp_state {
 	CPUHP_OFFLINE,
@@ -304,15 +296,5 @@ void arch_cpu_idle_dead(void);
 void idle_notifier_register(struct notifier_block *n);
 void idle_notifier_unregister(struct notifier_block *n);
 void idle_notifier_call_chain(unsigned long val);
-
-DECLARE_PER_CPU(bool, cpu_dead_idle);
-
-int cpu_report_state(int cpu);
-int cpu_check_up_prepare(int cpu);
-void cpu_set_state_online(int cpu);
-#ifdef CONFIG_HOTPLUG_CPU
-bool cpu_wait_death(unsigned int cpu, int seconds);
-bool cpu_report_death(void);
-#endif /* #ifdef CONFIG_HOTPLUG_CPU */
 
 #endif /* _LINUX_CPU_H_ */

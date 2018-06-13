@@ -32,7 +32,7 @@
 
 
 #define MODULE_NAME "lge_charging_controller"
-#define MONITOR_BATTEMP_POLLING_PERIOD  (60 * 100)
+#define MONITOR_BATTEMP_POLLING_PERIOD  (60 * HZ)
 #ifdef CONFIG_LGE_PM_LGE_POWER_CLASS_CHARGER_SLEEP
 #define BTM_ALARM_TIME(DELAY) (DELAY##LL * NSEC_PER_SEC)
 #define BTM_ALARM_PERIOD BTM_ALARM_TIME(60) /* 60sec */
@@ -277,7 +277,7 @@ static int lgcc_set_thermal_chg_current(const char *val,
 			the_cc->chg_current_te);
 
 	cancel_delayed_work_sync(&the_cc->battemp_work);
-	schedule_delayed_work(&the_cc->battemp_work, 100*1);
+	schedule_delayed_work(&the_cc->battemp_work, HZ*1);
 
 	return 0;
 }
@@ -316,7 +316,7 @@ static int lgcc_set_hvdcp_thermal_chg_current(const char *val,
 			the_cc->chg_current_te);
 
 	cancel_delayed_work_sync(&the_cc->battemp_work);
-	schedule_delayed_work(&the_cc->battemp_work, 100*1);
+	schedule_delayed_work(&the_cc->battemp_work, HZ*1);
 
 	return 0;
 }
@@ -778,7 +778,7 @@ static void lg_cc_stop_battemp_alarm(struct lge_charging_controller *cc) {
 static void lg_cc_start_battemp_work(struct lge_charging_controller *cc,
 		int delay) {
 	pr_debug("start_battemp_work~!!\n");
-	schedule_delayed_work(&cc->battemp_work, (delay * 100));
+	schedule_delayed_work(&cc->battemp_work, (delay * HZ));
 }
 
 

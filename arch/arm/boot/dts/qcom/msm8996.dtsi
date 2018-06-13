@@ -20,6 +20,10 @@
 	qcom,pmic-id = <0x20009 0x2000A 0x0 0x0>;
 	interrupt-parent = <&intc>;
 
+	chosen {
+		bootargs = "sched_enable_hmp=1 sched_enable_power_aware=1";
+	};
+
 	aliases {
 		sdhc1 = &sdhc_1; /* SDC1 eMMC slot */
 		sdhc2 = &sdhc_2; /* SDC2 SD card slot */
@@ -54,7 +58,6 @@
 			qcom,limits-info = <&mitigation_profile0>;
 			enable-method = "psci";
 			qcom,ea = <&ea0>;
-			sched-energy-costs = <&CPU_COST_0 &CLUSTER_COST_0>;
 			next-level-cache = <&L2_0>;
 			L2_0: l2-cache {
 			      compatible = "arm,arch-cache";
@@ -77,7 +80,6 @@
 			qcom,limits-info = <&mitigation_profile1>;
 			enable-method = "psci";
 			qcom,ea = <&ea1>;
-			sched-energy-costs = <&CPU_COST_0 &CLUSTER_COST_0>;
 			next-level-cache = <&L2_0>;
 			L1_D_1: l1-dcache {
 				compatible = "arm,arch-cache";
@@ -95,7 +97,6 @@
 			qcom,limits-info = <&mitigation_profile2>;
 			enable-method = "psci";
 			qcom,ea = <&ea2>;
-			sched-energy-costs = <&CPU_COST_1 &CLUSTER_COST_1>;
 			next-level-cache = <&L2_1>;
 			L2_1: l2-cache {
 			      compatible = "arm,arch-cache";
@@ -118,7 +119,6 @@
 			enable-method = "psci";
 			qcom,limits-info = <&mitigation_profile3>;
 			qcom,ea = <&ea3>;
-			sched-energy-costs = <&CPU_COST_1 &CLUSTER_COST_1>;
 			next-level-cache = <&L2_1>;
 			L1_D_101: l1-dcache {
 				compatible = "arm,arch-cache";
@@ -150,123 +150,6 @@
 				};
 			};
 		};
-		energy-costs {
-			CPU_COST_0: core-cost0 {
-				busy-cost-data = <
-					149 90
-					205 121
-					229 142
-					253 164
-					296 198
-					350 239
-					406 306
-					469 371
-					491 430
-					527 486
-					572 541
-					584 586
-					630 651
-					666 732
-					711 827
-					763 925
-					793 954
-				>;
-				idle-cost-data = <
-			  		2 2 0
-				>;
-			};
-			CPU_COST_1: core-cost1 {
-				busy-cost-data = <
-					149 93
-					197 116
-					229 142
-					253 164
-					296 198
-					350 239
-					372 270
-					400 310
-					445 345
-					495 400
-					527 486
-					572 541
-					598 567
-					630 651
-					666 732
-					711 827
-					743 865
-					780 946
-					812 1040
-					850 1097
-					868 1209
-					914 1311
-					961 1441
-					988 1535
-					1024 1715
-				>;
-				idle-cost-data = <
-				      2 2 0
-				>;
-			};
-			CLUSTER_COST_0: cluster-cost0 {
-				busy-cost-data = <
-					149 4
-					205 4
-					229 4
-					253 4
-					296 4
-					350 8
-					406 9
-					460 16
-					491 21
-					527 22
-					572 29
-					584 32
-					630 42
-					666 49
-					711 41
-					763 52
-					793 59
-				>;
-				idle-cost-data = <
-					0
-					0
-				>;
-			};
-			CLUSTER_COST_1: cluster-cost1 {
-				busy-cost-data = <
-					149 4
-					197 4
-					229 4
-					253 4
-					296 4
-					350 4
-					372 7
-					400 10
-					445 15
-					495 16
-					527 21
-					572 22
-					598 29
-					630 32
-					666 42
-					711 49
-					743 41
-					780 52
-					812 62
-					850 69
-					868 75
-					914 81
-					961 90
-					988 93
-					1024 96
-				>;
-				idle-cost-data = <
-					0
-					0
-				>;
-			};
-		};
-
 	};
 
 	soc: soc { };
@@ -965,20 +848,22 @@
 		pinctrl-1 = <&spkr_i2s_clk_active>;
 	};
 
+	/* LGE_BROADCAST_ISDBT_JAPAN Start */
+	/*
 	tspp: msm_tspp@075e7000 {
 		compatible = "qcom,msm_tspp";
-		reg = <0x075e7000 0x1000>, /* MSM_TSIF0_PHYS */
-		      <0x075e8000 0x1000>, /* MSM_TSIF1_PHYS */
-		      <0x075e9000 0x1000>, /* MSM_TSPP_PHYS  */
-		      <0x075c4000 0x23000>; /* MSM_TSPP_BAM_PHYS */
+		reg = <0x075e7000 0x1000>, // MSM_TSIF0_PHYS
+		      <0x075e8000 0x1000>, // MSM_TSIF1_PHYS
+		      <0x075e9000 0x1000>, // MSM_TSPP_PHYS
+		      <0x075c4000 0x23000>; // MSM_TSPP_BAM_PHYS
 		reg-names = "MSM_TSIF0_PHYS",
 			"MSM_TSIF1_PHYS",
 			"MSM_TSPP_PHYS",
 			"MSM_TSPP_BAM_PHYS";
-		interrupts = <0 121 0>, /* TSIF_TSPP_IRQ */
-			<0 119 0>, /* TSIF0_IRQ */
-			<0 120 0>, /* TSIF1_IRQ */
-			<0 122 0>; /* TSIF_BAM_IRQ */
+		interrupts = <0 121 0>, // TSIF_TSPP_IRQ
+			<0 119 0>, // TSIF0_IRQ
+			<0 120 0>, // TSIF1_IRQ
+			<0 122 0>; // TSIF_BAM_IRQ
 		interrupt-names = "TSIF_TSPP_IRQ",
 			"TSIF0_IRQ",
 			"TSIF1_IRQ",
@@ -992,28 +877,30 @@
 		qcom,msm-bus,num-cases = <2>;
 		qcom,msm-bus,num-paths = <1>;
 		qcom,msm-bus,vectors-KBps =
-				<82 512 0 0>, /* No vote */
-				<82 512 12288 24576>; /* Max. bandwidth, 2xTSIF, each max of 96Mbps */
+				<82 512 0 0>, // No vote
+				<82 512 12288 24576>; // Max. bandwidth, 2xTSIF, each max of 96Mbps
 
 		pinctrl-names = "disabled",
 			"tsif0-mode1", "tsif0-mode2",
 			"tsif1-mode1", "tsif1-mode2",
 			"dual-tsif-mode1", "dual-tsif-mode2";
 
-		pinctrl-0 = <>;				/* disabled */
-		pinctrl-1 = <&tsif0_signals_active>;	/* tsif0-mode1 */
+		pinctrl-0 = <>;				// disabled
+		pinctrl-1 = <&tsif0_signals_active>;	// tsif0-mode1
 		pinctrl-2 = <&tsif0_signals_active
-			&tsif0_sync_active>;		/* tsif0-mode2 */
-		pinctrl-3 = <&tsif1_signals_active>;	/* tsif1-mode1 */
+			&tsif0_sync_active>;		// tsif0-mode2
+		pinctrl-3 = <&tsif1_signals_active>;	// tsif1-mode1
 		pinctrl-4 = <&tsif1_signals_active
-			&tsif1_sync_active>;		/* tsif1-mode2 */
+			&tsif1_sync_active>;		// tsif1-mode2
 		pinctrl-5 = <&tsif0_signals_active
-			&tsif1_signals_active>;		/* dual-tsif-mode1 */
+			&tsif1_signals_active>;		// dual-tsif-mode1
 		pinctrl-6 = <&tsif0_signals_active
 			&tsif0_sync_active
 			&tsif1_signals_active
-			&tsif1_sync_active>;		/* dual-tsif-mode2 */
+			&tsif1_sync_active>;		// dual-tsif-mode2
 	};
+	*/
+	/* LGE_BROADCAST_ISDBT_JAPAN End */
 
 	wcd_rst_gpio: wcd_gpio_ctrl {
 		compatible = "qcom,wcd-gpio-ctrl";
@@ -1088,7 +975,7 @@
 			qcom,cdc-mclk-clk-rate = <9600000>;
 			qcom,cdc-slim-ifd = "tasha-slim-ifd";
 			qcom,cdc-slim-ifd-elemental-addr = [00 00 A0 01 17 02];
-			qcom,cdc-dmic-sample-rate = <4800000>;
+			qcom,cdc-dmic-sample-rate = <2400000>;
 			qcom,cdc-mad-dmic-rate = <600000>;
 			qcom,cdc-ecpp-dmic-rate = <1200000>;
 			qcom,cdc-dmic-clk-drv-strength = <2>;
@@ -2013,11 +1900,10 @@
 		vbus_dwc3-supply = <&smbcharger_charger_otg>;
 		qcom,usb-dbm = <&dbm_1p5>;
 		qcom,msm-bus,name = "usb3";
-		qcom,msm-bus,num-cases = <3>;
+		qcom,msm-bus,num-cases = <2>;
 		qcom,msm-bus,num-paths = <1>;
 		qcom,msm-bus,vectors-KBps =
 					<61 512 0 0>,
-					<61 512 240000 800000>,
 					<61 512 240000 800000>;
 
 		qcom,dwc-usb3-msm-tx-fifo-size = <21288>;
@@ -2125,11 +2011,10 @@
 		interrupt-names = "hs_phy_irq", "pwr_event_irq";
 
 		qcom,msm-bus,name = "usb-hs";
-		qcom,msm-bus,num-cases = <3>;
+		qcom,msm-bus,num-cases = <2>;
 		qcom,msm-bus,num-paths = <1>;
 		qcom,msm-bus,vectors-KBps =
 					<87 512 0 0>,
-					<87 512 60000 960000>,
 					<87 512 60000 960000>;
 
 		clocks = <&clock_gcc clk_gcc_usb20_master_clk>,
@@ -2240,7 +2125,7 @@
 		reg-names = "qmp_phy_base",
 			    "vls_clamp_reg";
 		vdd-supply = <&pm8994_l28>;
-		core-supply = <&pm8994_l12>;
+		vdda18-supply = <&pm8994_l12>;
 		qcom,vdd-voltage-level = <0 925000 925000>;
 		qcom,vbus-valid-override;
 
@@ -2629,7 +2514,7 @@
 			 <&clock_gcc clk_gcc_ce1_ahb_m_clk>,
 			 <&clock_gcc clk_gcc_ce1_axi_m_clk>;
 		qcom,ce-opp-freq = <171430000>;
-		qcom,qsee-reentrancy-support = <2>;
+        qcom,qsee-reentrancy-support = <2>;
 	};
 
 	qcom,qbt1000 {
@@ -2864,18 +2749,19 @@
 		compatible = "qcom,msm-thermal";
 		reg = <0x70000 0x1000>;
 		qcom,sensor-id = <11>;
-		qcom,poll-ms = <250>;
+		qcom,poll-ms = <100>;
 		qcom,limit-temp = <60>;
 		qcom,temp-hysteresis = <10>;
 		qcom,therm-reset-temp = <115>;
 		qcom,freq-step = <4>;
-		qcom,core-limit-temp = <80>;
+		qcom,core-limit-temp = <70>;
 		qcom,core-temp-hysteresis = <10>;
 		qcom,hotplug-temp = <105>;
 		qcom,hotplug-temp-hysteresis = <40>;
-		qcom,freq-mitigation-temp = <95>;
-		qcom,freq-mitigation-temp-hysteresis = <10>;
-		qcom,freq-mitigation-value = <122880>;
+		qcom,freq-mitigation-temp = <90>;
+		qcom,freq-mitigation-temp-hysteresis = <40>;
+		qcom,freq-mitigation-value = <576000>;
+		qcom,online-hotplug-core;
 		qcom,synchronous-cluster-id = <0 1>;
 		qcom,synchronous-cluster-map = <0 2 &CPU0 &CPU1>,
 			<1 2 &CPU2 &CPU3>;
@@ -2910,13 +2796,15 @@
 		qcom,bcl-enable;
 		qcom,bcl-framework-interface;
 		qcom,bcl-freq-control-list = <&CPU2 &CPU3>;
+		qcom,bcl-hotplug-list = <&CPU2 &CPU3>;
+		qcom,bcl-soc-hotplug-list = <&CPU2 &CPU3>;
 		qcom,ibat-monitor {
 			qcom,low-threshold-uamp = <3400000>;
 			qcom,high-threshold-uamp = <4200000>;
-			qcom,mitigation-freq-khz = <729600>;
+			qcom,mitigation-freq-khz = <576000>;
 			qcom,vph-high-threshold-uv = <3500000>;
 			qcom,vph-low-threshold-uv = <3300000>;
-			qcom,soc-low-threshold = <7>;
+			qcom,soc-low-threshold = <10>;
 			qcom,thermal-handle = <&msm_thermal_freq>;
 		};
 	};
@@ -2949,9 +2837,9 @@
 	qcom,msm-core@70000 {
 		compatible = "qcom,apss-core-ea";
 		reg = <0x70000 0x1000>;
-		qcom,low-hyst-temp = <100>;
-		qcom,high-hyst-temp = <100>;
-		qcom,polling-interval = <100>;
+		qcom,low-hyst-temp = <10>;
+		qcom,high-hyst-temp = <5>;
+		qcom,polling-interval = <50>;
 
 		ea0: ea0 {
 			sensor = <&sensor_information4>;

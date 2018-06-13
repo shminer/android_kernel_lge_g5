@@ -1675,10 +1675,6 @@ static unsigned long set_max_huge_pages(struct hstate *h, unsigned long count,
 		 * and reducing the surplus.
 		 */
 		spin_unlock(&hugetlb_lock);
-
-		/* yield cpu to avoid soft lockup */
-		cond_resched();
-
 		if (hstate_is_gigantic(h))
 			ret = alloc_fresh_gigantic_page(h, nodes_allowed);
 		else
@@ -3753,7 +3749,6 @@ follow_huge_pmd(struct mm_struct *mm, unsigned long address,
 {
 	struct page *page = NULL;
 	spinlock_t *ptl;
-	pte_t pte;
 retry:
 	ptl = pmd_lockptr(mm, pmd);
 	spin_lock(ptl);
@@ -3763,14 +3758,13 @@ retry:
 	 */
 	if (!pmd_huge(*pmd))
 		goto out;
-	pte = huge_ptep_get((pte_t *)pmd);
-	if (pte_present(pte)) {
+	if (pmd_present(*pmd)) {
 		page = pte_page(*(pte_t *)pmd) +
 			((address & ~PMD_MASK) >> PAGE_SHIFT);
 		if (flags & FOLL_GET)
 			get_page(page);
 	} else {
-		if (is_hugetlb_entry_migration(pte)) {
+		if (is_hugetlb_entry_migration(huge_ptep_get((pte_t *)pmd))) {
 			spin_unlock(ptl);
 			__migration_entry_wait(mm, (pte_t *)pmd, ptl);
 			goto retry;

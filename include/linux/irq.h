@@ -71,7 +71,6 @@ struct msi_msg;
  * IRQ_IS_POLLED		- Always polled by another interrupt. Exclude
  *				  it from the spurious interrupt detection
  *				  mechanism and from core side polling.
- * IRQ_DISABLE_UNLAZY		- Disable lazy irq disable
  */
 enum {
 	IRQ_TYPE_NONE		= 0x00000000,
@@ -97,14 +96,13 @@ enum {
 	IRQ_NOTHREAD		= (1 << 16),
 	IRQ_PER_CPU_DEVID	= (1 << 17),
 	IRQ_IS_POLLED		= (1 << 18),
-	IRQ_DISABLE_UNLAZY	= (1 << 19),
 };
 
 #define IRQF_MODIFY_MASK	\
 	(IRQ_TYPE_SENSE_MASK | IRQ_NOPROBE | IRQ_NOREQUEST | \
 	 IRQ_NOAUTOEN | IRQ_MOVE_PCNTXT | IRQ_LEVEL | IRQ_NO_BALANCING | \
 	 IRQ_PER_CPU | IRQ_NESTED_THREAD | IRQ_NOTHREAD | IRQ_PER_CPU_DEVID | \
-	 IRQ_IS_POLLED | IRQ_DISABLE_UNLAZY)
+	 IRQ_IS_POLLED)
 
 #define IRQ_NO_BALANCING_MASK	(IRQ_PER_CPU | IRQ_NO_BALANCING)
 
@@ -444,15 +442,15 @@ static inline int irq_set_parent(int irq, int parent_irq)
  * Built-in IRQ handlers for various IRQ types,
  * callable via desc->handle_irq()
  */
-extern bool handle_level_irq(unsigned int irq, struct irq_desc *desc);
-extern bool handle_fasteoi_irq(unsigned int irq, struct irq_desc *desc);
-extern bool handle_edge_irq(unsigned int irq, struct irq_desc *desc);
-extern bool handle_edge_eoi_irq(unsigned int irq, struct irq_desc *desc);
-extern bool handle_simple_irq(unsigned int irq, struct irq_desc *desc);
-extern bool handle_percpu_irq(unsigned int irq, struct irq_desc *desc);
-extern bool handle_percpu_devid_irq(unsigned int irq, struct irq_desc *desc);
-extern bool handle_bad_irq(unsigned int irq, struct irq_desc *desc);
-extern bool handle_nested_irq(unsigned int irq);
+extern void handle_level_irq(unsigned int irq, struct irq_desc *desc);
+extern void handle_fasteoi_irq(unsigned int irq, struct irq_desc *desc);
+extern void handle_edge_irq(unsigned int irq, struct irq_desc *desc);
+extern void handle_edge_eoi_irq(unsigned int irq, struct irq_desc *desc);
+extern void handle_simple_irq(unsigned int irq, struct irq_desc *desc);
+extern void handle_percpu_irq(unsigned int irq, struct irq_desc *desc);
+extern void handle_percpu_devid_irq(unsigned int irq, struct irq_desc *desc);
+extern void handle_bad_irq(unsigned int irq, struct irq_desc *desc);
+extern void handle_nested_irq(unsigned int irq);
 
 extern int irq_chip_compose_msi_msg(struct irq_data *data, struct msi_msg *msg);
 #ifdef	CONFIG_IRQ_DOMAIN_HIERARCHY
@@ -849,16 +847,6 @@ static inline void irq_gc_unlock(struct irq_chip_generic *gc)
 static inline void irq_gc_lock(struct irq_chip_generic *gc) { }
 static inline void irq_gc_unlock(struct irq_chip_generic *gc) { }
 #endif
-
-/*
- * The irqsave variants are for usage in non interrupt code. Do not use
- * them in irq_chip callbacks. Use irq_gc_lock() instead.
- */
-#define irq_gc_lock_irqsave(gc, flags)	\
-	raw_spin_lock_irqsave(&(gc)->lock, flags)
-
-#define irq_gc_unlock_irqrestore(gc, flags)	\
-	raw_spin_unlock_irqrestore(&(gc)->lock, flags)
 
 static inline void irq_reg_writel(struct irq_chip_generic *gc,
 				  u32 val, int reg_offset)

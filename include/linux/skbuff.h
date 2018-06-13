@@ -188,7 +188,6 @@ struct sk_buff;
 #else
 #define MAX_SKB_FRAGS (65536/PAGE_SIZE + 1)
 #endif
-extern int sysctl_max_skb_frags;
 
 typedef struct skb_frag_struct skb_frag_t;
 
@@ -2638,7 +2637,7 @@ unsigned int datagram_poll(struct file *file, struct socket *sock,
 int skb_copy_datagram_iovec(const struct sk_buff *from, int offset,
 			    struct iovec *to, int size);
 int skb_copy_and_csum_datagram_iovec(struct sk_buff *skb, int hlen,
-				     struct iovec *iov, int len);
+				     struct iovec *iov);
 int skb_copy_datagram_from_iovec(struct sk_buff *skb, int offset,
 				 const struct iovec *from, int from_offset,
 				 int len);
@@ -3115,13 +3114,6 @@ static inline void nf_reset_trace(struct sk_buff *skb)
 {
 #if IS_ENABLED(CONFIG_NETFILTER_XT_TARGET_TRACE) || defined(CONFIG_NF_TABLES)
 	skb->nf_trace = 0;
-#endif
-}
-
-static inline void ipvs_reset(struct sk_buff *skb)
-{
-#if IS_ENABLED(CONFIG_IP_VS)
-	skb->ipvs_property = 0;
 #endif
 }
 

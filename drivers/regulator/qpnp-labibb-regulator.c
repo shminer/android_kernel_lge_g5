@@ -449,7 +449,6 @@ struct lab_regulator {
 	int				step_size;
 	int				slew_rate;
 	int				soft_start;
-
 	int				vreg_enabled;
 #if defined(CONFIG_LGE_DISPLAY_COMMON)
 	int				mode;
@@ -521,6 +520,7 @@ struct settings {
 	u8	value;
 	bool	sec_access;
 };
+
 
 #define SETTING(_id, _sec_access)		\
 	[_id] = {				\
@@ -907,6 +907,7 @@ static int qpnp_lab_dt_init(struct qpnp_labibb *labibb,
 		return rc;
 	}
 
+	pr_err("[Display] labibb->lab_vreg.curr_volt %d\n", labibb->lab_vreg.curr_volt);
 	if (!of_property_read_bool(of_node,
 			"qcom,qpnp-lab-use-default-voltage")) {
 		if (labibb->lab_vreg.curr_volt < labibb->lab_vreg.min_volt) {
@@ -1464,6 +1465,7 @@ err_out:
 	}
 	return -EINVAL;
 }
+
 
 static int qpnp_labibb_regulator_disable(struct qpnp_labibb *labibb)
 {
@@ -2104,6 +2106,7 @@ static int register_qpnp_lab_regulator(struct qpnp_labibb *labibb,
 					rc);
 				return rc;
 			}
+			pr_err("[Display] lcd labibb->lab_vreg.curr_volt %d\n", labibb->lab_vreg.curr_volt);
 		} else {
 			rc = of_property_read_u32(of_node,
 				"qcom,qpnp-lab-init-amoled-voltage",
@@ -2395,7 +2398,7 @@ static int qpnp_ibb_dt_init(struct qpnp_labibb *labibb,
 		pr_err("get qcom,qpnp-ibb-init-voltage failed, rc = %d\n", rc);
 		return rc;
 	}
-
+	pr_err("[Display] labibb->ibb_vreg.curr_volt %d\n", labibb->ibb_vreg.curr_volt);
 	if (!of_property_read_bool(of_node,
 			"qcom,qpnp-ibb-use-default-voltage")) {
 		if (labibb->ibb_vreg.curr_volt < labibb->ibb_vreg.min_volt) {
@@ -2719,7 +2722,6 @@ static int register_qpnp_ibb_regulator(struct qpnp_labibb *labibb,
 		pr_err("Invalid property in qcom,qpnp-ibb-discharge-resistor\n");
 		return -EINVAL;
 	}
-
 	rc = qpnp_labibb_write(labibb, labibb->ibb_base +
 			REG_IBB_SOFT_START_CTL, &val, 1);
 	if (rc) {
@@ -2809,6 +2811,7 @@ static int register_qpnp_ibb_regulator(struct qpnp_labibb *labibb,
 					rc);
 				return rc;
 			}
+			pr_err("[Display] lcd labibb->ibb_vreg.curr_volt %d\n", labibb->ibb_vreg.curr_volt);
 		} else {
 			rc = of_property_read_u32(of_node,
 				"qcom,qpnp-ibb-init-amoled-voltage",
@@ -3166,6 +3169,7 @@ static int qpnp_labibb_regulator_probe(struct spmi_device *spmi)
 	}
 
 	dev_set_drvdata(&spmi->dev, labibb);
+
 	return 0;
 
 fail_registration:

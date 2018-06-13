@@ -1,4 +1,4 @@
-/* Copyright (c) 2009-2017, Linux Foundation. All rights reserved.
+/* Copyright (c) 2009-2016, Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -805,9 +805,15 @@ static int msm_otg_reset(struct usb_phy *phy)
 							USB_HS_APF_CTRL);
 
 	/*
-	 * Disable USB BAM as block reset resets USB BAM registers.
+	 * Enable USB BAM if USB BAM is enabled already before block reset as
+	 * block reset also resets USB BAM registers.
 	 */
-	msm_usb_bam_enable(CI_CTRL, false);
+	if (test_bit(ID, &motg->inputs)) {
+		msm_usb_bam_enable(CI_CTRL,
+				   phy->otg->gadget->bam2bam_func_enabled);
+	} else {
+		dev_dbg(phy->dev, "host mode BAM not enabled\n");
+	}
 
 	return 0;
 }
@@ -817,9 +823,7 @@ static void msm_otg_kick_sm_work(struct msm_otg *motg)
 	if (atomic_read(&motg->in_lpm))
 		motg->resume_pending = true;
 
-	/* For device mode, resume now. Let pm_resume handle other cases */
-	if (atomic_read(&motg->pm_suspended) &&
-			motg->phy.state != OTG_STATE_B_SUSPEND) {
+	if (atomic_read(&motg->pm_suspended)) {
 		motg->sm_work_pending = true;
 	} else if (!motg->sm_work_pending) {
 		/* process event only if previous one is not pending */
@@ -1808,11 +1812,9 @@ static void msm_otg_notify_charger(struct msm_otg *motg, unsigned mA)
 
 	/*
 	 * This condition will be true when usb cable is disconnected
-	 * during bootup before enumeration. Check charger type also
-	 * to avoid clearing online flag in case of valid charger.
+	 * during bootup before charger detection mechanism starts.
 	 */
-	if (motg->online && motg->cur_power == 0 && mA == 0 &&
-			(motg->chg_type == USB_INVALID_CHARGER))
+	if (motg->online && motg->cur_power == 0 && mA == 0)
 		msm_otg_set_online_status(motg);
 
 	if (motg->cur_power == mA)
@@ -1952,8 +1954,6 @@ static void msm_otg_start_host(struct usb_otg *otg, int on)
 		msm_otg_perf_vote_update(motg, false);
 		pm_qos_remove_request(&motg->pm_qos_req_dma);
 
-		pm_runtime_disable(&hcd->self.root_hub->dev);
-		pm_runtime_barrier(&hcd->self.root_hub->dev);
 		usb_remove_hcd(hcd);
 		msm_otg_reset(&motg->phy);
 
@@ -3043,7 +3043,6 @@ static void msm_otg_set_vbus_state(int online)
 		pr_debug("PMIC: BSV clear\n");
 		msm_otg_dbg_log_event(&motg->phy, "PMIC: BSV CLEAR",
 				init, motg->inputs);
-		motg->is_ext_chg_dcp = false;
 		if (!test_and_clear_bit(B_SESS_VLD, &motg->inputs) && init)
 			return;
 	}
@@ -3091,16 +3090,6 @@ out:
 	msm_otg_dbg_log_event(&motg->phy, "CHECK VBUS EVENT DURING SUSPEND",
 			atomic_read(&motg->pm_suspended),
 			motg->sm_work_pending);
-
-	/* Move to host mode on vbus low if required */
-	if (motg->pdata->vbus_low_as_hostmode) {
-		if (!test_bit(B_SESS_VLD, &motg->inputs)) {
-			clear_bit(ID, &motg->inputs);
-			init = false;
-		} else {
-			set_bit(ID, &motg->inputs);
-		}
-	}
 	msm_otg_kick_sm_work(motg);
 }
 
@@ -3765,11 +3754,10 @@ set_msm_otg_perf_mode(struct device *dev, struct device_attribute *attr,
 		ret = clk_set_rate(motg->core_clk, clk_rate);
 		if (ret)
 			pr_err("sys_clk set_rate fail:%d %ld\n", ret, clk_rate);
-		msm_otg_dbg_log_event(&motg->phy, "OTG PERF SET",
-							clk_rate, ret);
 	} else {
 		pr_err("usb sys_clk rate is undefined\n");
 	}
+	msm_otg_dbg_log_event(&motg->phy, "OTG PERF SET", clk_rate, ret);
 
 	return count;
 }
@@ -4236,11 +4224,6 @@ struct msm_otg_platform_data *msm_otg_dt_to_pdata(struct platform_device *pdev)
 	if (pdata->hub_reset_gpio < 0)
 		pr_debug("hub_reset_gpio is not available\n");
 
-	pdata->usbeth_reset_gpio = of_get_named_gpio(
-			node, "qcom,usbeth-reset-gpio", 0);
-	if (pdata->usbeth_reset_gpio < 0)
-		pr_debug("usbeth_reset_gpio is not available\n");
-
 	pdata->switch_sel_gpio =
 			of_get_named_gpio(node, "qcom,sw-sel-gpio", 0);
 	if (pdata->switch_sel_gpio < 0)
@@ -4278,8 +4261,6 @@ struct msm_otg_platform_data *msm_otg_dt_to_pdata(struct platform_device *pdev)
 
 	pdata->enable_sdp_typec_current_limit = of_property_read_bool(node,
 					"qcom,enable-sdp-typec-current-limit");
-	pdata->vbus_low_as_hostmode = of_property_read_bool(node,
-					"qcom,vbus-low-as-hostmode");
 	return pdata;
 }
 
@@ -4538,7 +4519,7 @@ static int msm_otg_probe(struct platform_device *pdev)
 		ret = -ENOMEM;
 		goto devote_bus_bw;
 	}
-	dev_info(&pdev->dev, "OTG regs = %pK\n", motg->regs);
+	dev_info(&pdev->dev, "OTG regs = %p\n", motg->regs);
 
 	if (pdata->enable_sec_phy) {
 		res = platform_get_resource_byname(pdev,
@@ -4932,38 +4913,6 @@ static int msm_otg_probe(struct platform_device *pdev)
 		}
 	}
 
-	if (gpio_is_valid(motg->pdata->hub_reset_gpio)) {
-		ret = devm_gpio_request(&pdev->dev,
-				motg->pdata->hub_reset_gpio,
-				"HUB_RESET");
-		if (ret < 0) {
-			dev_err(&pdev->dev, "gpio req failed for hub_reset\n");
-		} else {
-			gpio_direction_output(
-				motg->pdata->hub_reset_gpio, 0);
-			/* 5 microsecs reset signaling to usb hub */
-			usleep_range(5, 10);
-			gpio_direction_output(
-				motg->pdata->hub_reset_gpio, 1);
-		}
-	}
-
-	if (gpio_is_valid(motg->pdata->usbeth_reset_gpio)) {
-		ret = devm_gpio_request(&pdev->dev,
-				motg->pdata->usbeth_reset_gpio,
-				"ETH_RESET");
-		if (ret < 0) {
-			dev_err(&pdev->dev, "gpio req failed for usbeth_reset\n");
-		} else {
-			gpio_direction_output(
-				motg->pdata->usbeth_reset_gpio, 0);
-			/* 100 microsecs reset signaling to usb-to-eth */
-			usleep_range(100, 110);
-			gpio_direction_output(
-				motg->pdata->usbeth_reset_gpio, 1);
-		}
-	}
-
 	motg->pm_notify.notifier_call = msm_otg_pm_notify;
 	register_pm_notifier(&motg->pm_notify);
 	msm_otg_dbg_log_event(phy, "OTG PROBE", motg->caps, motg->lpm_flags);
@@ -5241,8 +5190,13 @@ static int msm_otg_pm_resume(struct device *dev)
 	if (motg->resume_pending || motg->phy_irq_pending) {
 		msm_otg_dbg_log_event(&motg->phy, "PM RESUME BY USB",
 				motg->async_int, motg->resume_pending);
-		/* sm work if pending will start in pm notify to exit LPM */
+		/* Bring hardware out of LPM asap, sm_work can handle the rest*/
+		msm_otg_resume(motg);
+
+		/* sm work will start in pm notify */
 	}
+	msm_otg_dbg_log_event(&motg->phy, "PM RESUME DONE",
+			get_pm_runtime_counter(dev), motg->async_int);
 
 	return ret;
 }

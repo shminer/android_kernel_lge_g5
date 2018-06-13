@@ -1,12 +1,8 @@
 KASAN_SANITIZE_scm.o := n
 
 CFLAGS_scm.o :=$(call as-instr,.arch_extension sec,-DREQUIRES_SEC=1)
-ccflags-$(CONFIG_MSM_REMOTEQDSS) += -Wno-frame-address
-CFLAGS_ipc_router_hsic_xprt.o := -fno-strict-aliasing
-CFLAGS_ipc_router_smd_xprt.o := -fno-strict-aliasing
 
 ccflags-$(CONFIG_MSM_QBT1000) += -Idrivers/misc/
-
 
 obj-$(CONFIG_MSM_INRUSH_CURRENT_MITIGATION) += inrush-current-mitigation.o
 obj-$(CONFIG_MSM_GLADIATOR_ERP) += gladiator_erp.o
@@ -103,7 +99,3 @@ obj-$(CONFIG_MSM_KERNEL_PROTECT) += kernel_protect.o
 obj-$(CONFIG_MSM_RTB) += msm_rtb-hotplug.o
 obj-$(CONFIG_MSM_REMOTEQDSS) += remoteqdss.o
 obj-$(CONFIG_QCOM_SMCINVOKE) += smcinvoke.o
-
-obj-$(CONFIG_STATE_NOTIFIER)		+= state_notifier.o
-
-obj-$(CONFIG_MSM_LIMITER_MSM8996)		+= msm_limiter_msm8996.o

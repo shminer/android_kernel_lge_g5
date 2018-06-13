@@ -1997,8 +1997,7 @@ static long mbim_ioctl(struct file *fp, unsigned cmd, unsigned long arg)
 	case MBIM_EP_LOOKUP:
 		if (!atomic_read(&mbim->online)) {
 			pr_warn("usb cable is not connected\n");
-			ret = -ENOTCONN;
-			break;
+			return -ENOTCONN;
 		}
 
 		switch (mbim->xport) {

@@ -2,7 +2,6 @@ config ARM64
 	def_bool y
 	select ARCH_HAS_ATOMIC64_DEC_IF_POSITIVE
 	select ARCH_HAS_ELF_RANDOMIZE
-	select ARCH_HAS_KCOV
 	select ARCH_HAS_SG_CHAIN
 	select ARCH_HAS_TICK_BROADCAST if GENERIC_CLOCKEVENTS_BROADCAST
 	select ARCH_USE_CMPXCHG_LOCKREF
@@ -18,7 +17,6 @@ config ARM64
 	select AUDIT_ARCH_COMPAT_GENERIC
 	select ARM_GIC_V2M if PCI_MSI
 	select ARM_GIC_V3
-	select ARM_GIC_V3_ITS if PCI_MSI
 	select BUILDTIME_EXTABLE_SORT
 	select CLONE_BACKWARDS
 	select COMMON_CLK if !ARCH_MSM
@@ -42,7 +40,6 @@ config ARM64
 	select HARDIRQS_SW_RESEND
 	select HAVE_ALIGNED_STRUCT_PAGE if SLUB
 	select HAVE_ARCH_AUDITSYSCALL
-	select HAVE_ARCH_HARDENED_USERCOPY
 	select HAVE_ARCH_JUMP_LABEL
 	select HAVE_ARCH_KASAN if SPARSEMEM_VMEMMAP && !(ARM64_16K_PAGES && ARM64_VA_BITS_48)
 	select HAVE_ARCH_KGDB
@@ -61,7 +58,6 @@ config ARM64
 	select HAVE_DMA_CONTIGUOUS
 	select HAVE_DYNAMIC_FTRACE
 	select HAVE_EFFICIENT_UNALIGNED_ACCESS
-	select DCACHE_WORD_ACCESS
 	select HAVE_FTRACE_MCOUNT_RECORD
 	select HAVE_FUNCTION_TRACER
 	select HAVE_FUNCTION_GRAPH_TRACER
@@ -129,6 +125,23 @@ config ARCH_MMAP_RND_COMPAT_BITS_MAX
 
 config NO_IOPORT_MAP
 	def_bool y if !PCI
+
+config ARCH_MMAP_RND_BITS_MIN
+       default 14 if ARM64_64K_PAGES
+       default 18
+
+# max bits determined by the following formula:
+#  VA_BITS - PAGE_SHIFT - 3
+#  VA_BITS is always 39
+config ARCH_MMAP_RND_BITS_MAX
+       default 20 if ARM64_64K_PAGES
+       default 24
+
+config ARCH_MMAP_RND_COMPAT_BITS_MIN
+       default 11
+
+config ARCH_MMAP_RND_COMPAT_BITS_MAX
+       default 16
 
 config ILLEGAL_POINTER_VALUE
 	hex
@@ -215,13 +228,6 @@ config KERNEL_MODE_NEON
 
 config FIX_EARLYCON_MEM
 	def_bool y
-
-config PGTABLE_LEVELS
-	int
-	default 2 if ARM64_64K_PAGES && ARM64_VA_BITS_42
-	default 3 if ARM64_64K_PAGES && ARM64_VA_BITS_48
-	default 3 if ARM64_4K_PAGES && ARM64_VA_BITS_39
-	default 4 if ARM64_4K_PAGES && ARM64_VA_BITS_48
 
 source "init/Kconfig"
 
@@ -312,11 +318,11 @@ config ARCH_MSM8953
 	  This enables support for the MSM8953 chipset. If you don't
 	  know what to do here, say N
 
-config ARCH_MSM8937
-	bool "Enable Support for Qualcomm Technologies Inc MSM8937"
+config ARCH_MSMTHORIUM
+	bool "Enable Support for Qualcomm Technologies Inc MSMTHORIUM"
 	depends on ARCH_MSM
 	help
-	  This enables support for the MSM8937 chipset. If you don't
+	  This enables support for the MSMTHORIUM chipset. If you don't
 	  know what to do here, say N
 
 config ARCH_MSM8996
@@ -628,6 +634,13 @@ config ARM64_PGTABLE_LEVELS
 	default 3 if ARM64_4K_PAGES && ARM64_VA_BITS_39
 	default 4 if ARM64_4K_PAGES && ARM64_VA_BITS_48
 
+config PGTABLE_LEVELS
+	int
+	default 2 if ARM64_64K_PAGES && ARM64_VA_BITS_42
+	default 3 if ARM64_64K_PAGES && ARM64_VA_BITS_48
+	default 3 if ARM64_4K_PAGES && ARM64_VA_BITS_39
+	default 4 if ARM64_4K_PAGES && ARM64_VA_BITS_48
+
 config CPU_BIG_ENDIAN
        bool "Build big-endian kernel"
        help
@@ -717,7 +730,9 @@ config ARCH_NR_GPIO
 
 source kernel/Kconfig.preempt
 
-source kernel/Kconfig.hz
+config HZ
+	int
+	default 100
 
 config ARCH_HAS_HOLES_MEMORYMODEL
 	def_bool y if SPARSEMEM
@@ -956,46 +971,20 @@ config EFI
 	  allow the kernel to be booted as an EFI application. This
 	  is only useful on systems that have UEFI firmware.
 
-choice
-	prompt "Kernel compression mode"
-	default BUILD_ARM64_KERNEL_GZIP
-	help
-	  Some bootloaders are capable of booting not only uncompressed or
-	  gzip compressed kernels, but also LZ4. This option will allow you
-	  to select which format the kernel binary will be compressed to.
-
-	  If in doubt, select 'gzip'
-
-config BUILD_ARM64_KERNEL_GZIP
-	bool "Gzip"
-	help
-	  The old and tried gzip compression. It provides a good balance
-	  between compression ratio and decompression speed.
-
-config BUILD_ARM64_KERNEL_LZ4
-	bool "LZ4"
-	help
-	  LZ4 is an LZ77-type compressor with a fixed, byte-oriented encoding.
-	  A preliminary version of LZ4 de/compression tool is available at
-	  <https://code.google.com/p/lz4/>.
-
-endchoice
-
 config BUILD_ARM64_APPENDED_DTB_IMAGE
-	bool "Build a concatenated Image.(gz/lz4)-dtb by default"
+	bool "Build a concatenated Image.gz/dtb by default"
 	depends on OF
 	help
-	  Enabling this option will cause a concatenated Image.gz or Image.lz4
-	  and list of DTBs to be built by default (instead of a standalone
-	  Image.gz or Image.lz4.)
-	  The image will built in arch/arm64/boot/Image.(gz/lz4)-dtb
+	  Enabling this option will cause a concatenated Image.gz and list of
+	  DTBs to be built by default (instead of a standalone Image.gz.)
+	  The image will built in arch/arm64/boot/Image.gz-dtb
 
 config BUILD_ARM64_APPENDED_DTB_IMAGE_NAMES
 	string "Default dtb names"
 	depends on BUILD_ARM64_APPENDED_DTB_IMAGE
 	help
 	  Space separated list of names of dtbs to append when
-	  building a concatenated Image.(gz/lz4)-dtb.
+	  building a concatenated Image.gz-dtb.
 
 config DMI
 	bool "Enable support for SMBIOS (DMI) tables"
@@ -1091,3 +1080,5 @@ source "arch/arm64/crypto/Kconfig"
 endif
 
 source "lib/Kconfig"
+
+source "arch/arm64/mm/Kconfig"

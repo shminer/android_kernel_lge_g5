@@ -233,7 +233,7 @@ static ssize_t stable_pages_required_show(struct device *dev,
 			bdi_cap_stable_pages_required(bdi) ? 1 : 0);
 }
 static DEVICE_ATTR_RO(stable_pages_required);
-#ifdef CONFIG_PM_SUSPEND_BG_SYNC
+#ifdef CONFIG_MACH_LGE
 /*
  * "check_and_sync" is changed to "bg_sync" during suspend syncing filesystems.
  * Although below codes related with "check_and_sync" have to be deleted together,
@@ -267,7 +267,7 @@ static struct attribute *bdi_dev_attrs[] = {
 	&dev_attr_min_ratio.attr,
 	&dev_attr_max_ratio.attr,
 	&dev_attr_stable_pages_required.attr,
-#ifdef CONFIG_PM_SUSPEND_BG_SYNC
+#ifdef CONFIG_MACH_LGE
 	/*
 	 * "check_and_sync" is changed to "bg_sync" during suspend syncing filesystems.
 	 * Although below codes related with "check_and_sync" have to be deleted together,

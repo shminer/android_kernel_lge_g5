@@ -33,8 +33,6 @@
 #include <net/flow.h>
 #include <net/flow_keys.h>
 
-#define IPV4_MIN_MTU		68			/* RFC 791 */
-
 struct sock;
 
 struct inet_skb_parm {
@@ -237,7 +235,6 @@ static inline int inet_is_local_reserved_port(struct net *net, int port)
 #endif
 
 extern int sysctl_reserved_port_bind;
-__be32 inet_current_timestamp(void);
 
 /* From inetpeer.c */
 extern int inet_peer_threshold;

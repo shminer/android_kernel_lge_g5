@@ -1,4 +1,4 @@
-/* Copyright (c) 2013-2016, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2013-2015, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -272,6 +272,14 @@ int ipa_query_intf_tx_props(struct ipa_ioc_query_intf_tx_props *tx)
 	mutex_lock(&ipa_ctx->lock);
 	list_for_each_entry(entry, &ipa_ctx->intf_list, link) {
 		if (!strncmp(entry->name, tx->name, IPA_RESOURCE_NAME_MAX)) {
+			/* add the entry check */
+			if (entry->num_tx_props != tx->num_tx_props) {
+				IPAERR("invalid entry number(%u %u)\n",
+					entry->num_tx_props,
+						tx->num_tx_props);
+				mutex_unlock(&ipa_ctx->lock);
+				return result;
+			}
 			memcpy(tx->tx, entry->tx, entry->num_tx_props *
 			       sizeof(struct ipa_ioc_tx_intf_prop));
 			result = 0;
@@ -305,6 +313,14 @@ int ipa_query_intf_rx_props(struct ipa_ioc_query_intf_rx_props *rx)
 	mutex_lock(&ipa_ctx->lock);
 	list_for_each_entry(entry, &ipa_ctx->intf_list, link) {
 		if (!strncmp(entry->name, rx->name, IPA_RESOURCE_NAME_MAX)) {
+			/* add the entry check */
+			if (entry->num_rx_props != rx->num_rx_props) {
+				IPAERR("invalid entry number(%u %u)\n",
+					entry->num_rx_props,
+						rx->num_rx_props);
+				mutex_unlock(&ipa_ctx->lock);
+				return result;
+			}
 			memcpy(rx->rx, entry->rx, entry->num_rx_props *
 					sizeof(struct ipa_ioc_rx_intf_prop));
 			result = 0;
@@ -338,6 +354,14 @@ int ipa_query_intf_ext_props(struct ipa_ioc_query_intf_ext_props *ext)
 	mutex_lock(&ipa_ctx->lock);
 	list_for_each_entry(entry, &ipa_ctx->intf_list, link) {
 		if (!strcmp(entry->name, ext->name)) {
+			/* add the entry check */
+			if (entry->num_ext_props != ext->num_ext_props) {
+				IPAERR("invalid entry number(%u %u)\n",
+					entry->num_ext_props,
+						ext->num_ext_props);
+				mutex_unlock(&ipa_ctx->lock);
+				return result;
+			}
 			memcpy(ext->ext, entry->ext, entry->num_ext_props *
 					sizeof(struct ipa_ioc_ext_intf_prop));
 			result = 0;
@@ -346,11 +370,6 @@ int ipa_query_intf_ext_props(struct ipa_ioc_query_intf_ext_props *ext)
 	}
 	mutex_unlock(&ipa_ctx->lock);
 	return result;
-}
-
-static void ipa2_send_msg_free(void *buff, u32 len, u32 type)
-{
-	kfree(buff);
 }
 
 /**
@@ -372,7 +391,6 @@ int ipa2_send_msg(struct ipa_msg_meta *meta, void *buff,
 		  ipa_msg_free_fn callback)
 {
 	struct ipa_push_msg *msg;
-	void *data = NULL;
 
 	if (unlikely(!ipa_ctx)) {
 		IPAERR("IPA driver was not initialized\n");
@@ -398,17 +416,8 @@ int ipa2_send_msg(struct ipa_msg_meta *meta, void *buff,
 	}
 
 	msg->meta = *meta;
-	if (meta->msg_len > 0 && buff) {
-		data = kmalloc(meta->msg_len, GFP_KERNEL);
-		if (data == NULL) {
-			IPAERR("fail to alloc data container\n");
-			kfree(msg);
-			return -ENOMEM;
-		}
-		memcpy(data, buff, meta->msg_len);
-		msg->buff = data;
-		msg->callback = ipa2_send_msg_free;
-	}
+	msg->buff = buff;
+	msg->callback = callback;
 
 	mutex_lock(&ipa_ctx->msg_lock);
 	list_add_tail(&msg->link, &ipa_ctx->msg_list);
@@ -416,8 +425,6 @@ int ipa2_send_msg(struct ipa_msg_meta *meta, void *buff,
 	IPA_STATS_INC_CNT(ipa_ctx->stats.msg_w[meta->msg_type]);
 
 	wake_up(&ipa_ctx->msg_waitq);
-	if (buff)
-		callback(buff, meta->msg_len, meta->msg_type);
 
 	return 0;
 }

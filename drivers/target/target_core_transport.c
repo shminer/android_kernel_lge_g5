@@ -604,10 +604,9 @@ static void transport_lun_remove_cmd(struct se_cmd *cmd)
 		percpu_ref_put(&lun->lun_ref);
 }
 
-int transport_cmd_finish_abort(struct se_cmd *cmd, int remove)
+void transport_cmd_finish_abort(struct se_cmd *cmd, int remove)
 {
 	bool ack_kref = (cmd->se_cmd_flags & SCF_ACK_KREF);
-	int ret = 0;
 
 	if (cmd->se_cmd_flags & SCF_SE_LUN_CMD)
 		transport_lun_remove_cmd(cmd);
@@ -619,11 +618,9 @@ int transport_cmd_finish_abort(struct se_cmd *cmd, int remove)
 		cmd->se_tfo->aborted_task(cmd);
 
 	if (transport_cmd_check_stop_to_fabric(cmd))
-		return 1;
+		return;
 	if (remove && ack_kref)
-		ret = transport_put_cmd(cmd);
-
-	return ret;
+		transport_put_cmd(cmd);
 }
 
 static void target_complete_failure_work(struct work_struct *work)
@@ -693,15 +690,6 @@ void target_complete_cmd(struct se_cmd *cmd, u8 scsi_status)
 	if (cmd->transport_state & CMD_T_ABORTED ||
 	    cmd->transport_state & CMD_T_STOP) {
 		spin_unlock_irqrestore(&cmd->t_state_lock, flags);
-		/*
-		 * If COMPARE_AND_WRITE was stopped by __transport_wait_for_tasks(),
-		 * release se_device->caw_sem obtained by sbc_compare_and_write()
-		 * since target_complete_ok_work() or target_complete_failure_work()
-		 * won't be called to invoke the normal CAW completion callbacks.
-		 */
-		if (cmd->se_cmd_flags & SCF_COMPARE_AND_WRITE) {
-			up(&dev->caw_sem);
-		}
 		complete_all(&cmd->t_transport_stop_comp);
 		return;
 	} else if (!success) {

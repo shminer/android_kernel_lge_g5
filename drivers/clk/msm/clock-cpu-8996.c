@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2014-2017, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2014-2016, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -27,8 +27,6 @@
 #include <linux/of_platform.h>
 #include <linux/pm_opp.h>
 #include <linux/pm_qos.h>
-#include <linux/cpufreq.h>
-#include <linux/regulator/driver.h>
 
 #include <asm/cputype.h>
 
@@ -503,7 +501,6 @@ static struct mux_clk perfcl_hf_mux = {
 	.base = &vbases[APC1_BASE],
 	.c = {
 		.dbg_name = "perfcl_hf_mux",
-		.flags = CLKFLAG_NO_RATE_CACHE,
 		.ops = &clk_ops_gen_mux,
 		CLK_INIT(perfcl_hf_mux.c),
 	},
@@ -1289,181 +1286,6 @@ static void populate_opp_table(struct platform_device *pdev)
 	    "Failed to add OPP levels for CBF\n");
 }
 
-#ifdef CONFIG_REGULATOR_CPR3_VOLTAGE_CONTROL
-extern int cpr_regulator_get_ceiling_voltage(struct regulator *regulator,int cori);
-extern int cpr_regulator_get_floor_voltage(struct regulator *regulator,int cori);
-extern int cpr_regulator_get_last_voltage(struct regulator *regulator,int cori);
-extern int cpr_regulator_set_ceiling_voltage(struct regulator *regulator,int cori, int volt);
-extern int cpr_regulator_set_floor_voltage(struct regulator *regulator,int cori, int volt);
-extern int cpr_regulator_set_last_voltage(struct regulator *regulator,int cori, int volt);
-		
-ssize_t get_Voltages(char *buf)
-{
-	ssize_t count = 0;
-	int i, uv;
-
-	if (!buf)
-		return 0;
-
-	//Ceiling
-	for (i = 1; i < pwrcl_clk.c.num_fmax; i++) {
-		uv = cpr_regulator_get_ceiling_voltage(
-					pwrcl_clk.c.vdd_class->regulator[0],
-					pwrcl_clk.c.vdd_class->vdd_uv[i]);
-		if (uv < 0) return 0;
-		count += sprintf(buf + count, "Lc_Vmax:%lumhz: %d mV\n",
-					pwrcl_clk.c.fmax[i] / 1000000,
-					uv / 1000);
-	//Floor
-		uv = cpr_regulator_get_floor_voltage(
-					pwrcl_clk.c.vdd_class->regulator[0],
-					pwrcl_clk.c.vdd_class->vdd_uv[i]);
-		if (uv < 0) return 0;
-		count += sprintf(buf + count, "Lc_Vmin:%lumhz: %d mV\n",
-					pwrcl_clk.c.fmax[i] / 1000000,
-					uv / 1000);
-	//current
-		uv = cpr_regulator_get_last_voltage(
-					pwrcl_clk.c.vdd_class->regulator[0],
-					pwrcl_clk.c.vdd_class->vdd_uv[i]);
-		if (uv < 0) return 0;
-		count += sprintf(buf + count, "Lc_Vcur:%lumhz: %d mV\n",
-					pwrcl_clk.c.fmax[i] / 1000000,
-					uv / 1000);
-	}
-	//Big ceiling
-	for (i = 1; i < perfcl_clk.c.num_fmax; i++) {
-		uv = cpr_regulator_get_ceiling_voltage(
-					perfcl_clk.c.vdd_class->regulator[0],
-					perfcl_clk.c.vdd_class->vdd_uv[i]);
-		if (uv < 0)
-			return 0;
-		count += sprintf(buf + count, "Bc_Vmax:%lumhz: %d mV\n",
-					perfcl_clk.c.fmax[i] / 1000000,
-					uv / 1000);
-	//floor
-		uv = cpr_regulator_get_floor_voltage(
-					perfcl_clk.c.vdd_class->regulator[0],
-					perfcl_clk.c.vdd_class->vdd_uv[i]);
-		if (uv < 0)
-			return 0;
-		count += sprintf(buf + count, "Bc_Vmin:%lumhz: %d mV\n",
-					perfcl_clk.c.fmax[i] / 1000000,
-					uv / 1000);
-	//current
-		uv = cpr_regulator_get_last_voltage(
-					perfcl_clk.c.vdd_class->regulator[0],
-					perfcl_clk.c.vdd_class->vdd_uv[i]);
-		if (uv < 0)
-			return 0;
-		count += sprintf(buf + count, "Bc_Vcur:%lumhz: %d mV\n",
-					perfcl_clk.c.fmax[i] / 1000000,
-					uv / 1000);
-	}
-
-	return count;
-}
-ssize_t set_Voltages(const char *buf, size_t count)
-{
-	int i, mv, ret;
-	char line[32];
-
-	if (!buf)
-		return -EINVAL;
-
-	for (i = 1; i < pwrcl_clk.c.num_fmax; i++) 
-	{
-		ret = sscanf(buf, "%d", &mv);
-		if (ret != 1)
-			return -EINVAL;
-
-		ret = cpr_regulator_set_ceiling_voltage(
-					pwrcl_clk.c.vdd_class->regulator[0],
-					pwrcl_clk.c.vdd_class->vdd_uv[i],
-					mv * 1000);
-        if (ret < 0)
-			return ret;
-
-        ret = sscanf(buf, "%s", line);
-		buf += strlen(line) + 1;
-	//floor
-		ret = sscanf(buf, "%d", &mv);
-		if (ret != 1)
-			return -EINVAL;
-
-		ret = cpr_regulator_set_floor_voltage(
-					pwrcl_clk.c.vdd_class->regulator[0],
-					pwrcl_clk.c.vdd_class->vdd_uv[i],
-					mv * 1000);
-        if (ret < 0)
-			return ret;
-
-        ret = sscanf(buf, "%s", line);
-		buf += strlen(line) + 1;
-	//current
-		ret = sscanf(buf, "%d", &mv);
-		if (ret != 1)
-			return -EINVAL;
-
-		ret = cpr_regulator_set_last_voltage(
-					pwrcl_clk.c.vdd_class->regulator[0],
-					pwrcl_clk.c.vdd_class->vdd_uv[i],
-					mv * 1000);
-        if (ret < 0)
-			return ret;
-
-        ret = sscanf(buf, "%s", line);
-		buf += strlen(line) + 1;
-	}
-	for (i = 1; i < perfcl_clk.c.num_fmax; i++) 
-	{
-		ret = sscanf(buf, "%d", &mv);
-		if (ret != 1)
-			return -EINVAL;
-
-		ret = cpr_regulator_set_ceiling_voltage(
-					perfcl_clk.c.vdd_class->regulator[0],
-					perfcl_clk.c.vdd_class->vdd_uv[i],
-					mv * 1000);
-        if (ret < 0)
-			return ret;
-
-        ret = sscanf(buf, "%s", line);
-		buf += strlen(line) + 1;
-		
-		ret = sscanf(buf, "%d", &mv);
-		if (ret != 1)
-			return -EINVAL;
-
-		ret = cpr_regulator_set_floor_voltage(
-					perfcl_clk.c.vdd_class->regulator[0],
-					perfcl_clk.c.vdd_class->vdd_uv[i],
-					mv * 1000);
-        if (ret < 0)
-			return ret;
-
-        ret = sscanf(buf, "%s", line);
-		buf += strlen(line) + 1;
-
-		ret = sscanf(buf, "%d", &mv);
-		if (ret != 1)
-			return -EINVAL;
-
-		ret = cpr_regulator_set_last_voltage(
-					perfcl_clk.c.vdd_class->regulator[0],
-					perfcl_clk.c.vdd_class->vdd_uv[i],
-					mv * 1000);
-        if (ret < 0)
-			return ret;
-
-        ret = sscanf(buf, "%s", line);
-		buf += strlen(line) + 1;
-	}
-
-	return count;
-}
-#endif
-
 static void cpu_clock_8996_pro_fixup(void)
 {
 	cbf_pll.vals.post_div_masked = 0x300;
@@ -1486,7 +1308,6 @@ static int cpu_clock_8996_driver_probe(struct platform_device *pdev)
 	unsigned long pwrclrate, perfclrate, cbfrate;
 	int pvs_ver = 0;
 	u32 pte_efuse;
-	u32 clk_rate;
 	char perfclspeedbinstr[] = "qcom,perfcl-speedbinXX-vXX";
 	char pwrclspeedbinstr[] = "qcom,pwrcl-speedbinXX-vXX";
 	char cbfspeedbinstr[] = "qcom,cbf-speedbinXX-vXX";
@@ -1614,18 +1435,6 @@ static int cpu_clock_8996_driver_probe(struct platform_device *pdev)
 	clk_prepare_enable(&pwrcl_alt_pll.c);
 	clk_prepare_enable(&cbf_pll.c);
 
-	/* Override the existing ealry boot frequency for power cluster */
-	ret = of_property_read_u32(pdev->dev.of_node,
-				"qcom,pwrcl-early-boot-freq", &clk_rate);
-	if (!ret)
-		pwrcl_early_boot_rate = clk_rate;
-
-	/* Override the existing ealry boot frequency for perf cluster */
-	ret = of_property_read_u32(pdev->dev.of_node,
-				"qcom,perfcl-early-boot-freq", &clk_rate);
-	if (!ret)
-		perfcl_early_boot_rate = clk_rate;
-
 	/* Set the early boot rate. This may also switch us to the ACD leg */
 	clk_set_rate(&pwrcl_clk.c, pwrcl_early_boot_rate);
 	clk_set_rate(&perfcl_clk.c, perfcl_early_boot_rate);
@@ -1690,9 +1499,6 @@ module_exit(cpu_clock_8996_exit);
 #define HF_MUX_SEL_LF_MUX 0x1
 #define LF_MUX_SEL_ALT_PLL 0x1
 
-#define PWRCL_EARLY_BOOT_RATE 1324800000
-#define PERFCL_EARLY_BOOT_RATE 1632000000
-
 static int use_alt_pll;
 module_param(use_alt_pll, int, 0444);
 
@@ -1733,8 +1539,6 @@ int __init cpu_clock_8996_early_init(void)
 	} else if (of_find_compatible_node(NULL, NULL,
 					 "qcom,cpu-clock-8996-v3")) {
 		cpu_clocks_v3 = true;
-		pwrcl_early_boot_rate = PWRCL_EARLY_BOOT_RATE;
-		perfcl_early_boot_rate = PERFCL_EARLY_BOOT_RATE;
 	} else if (!of_find_compatible_node(NULL, NULL,
 					 "qcom,cpu-clock-8996")) {
 		return 0;

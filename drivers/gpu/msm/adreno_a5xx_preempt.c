@@ -22,7 +22,7 @@
 #define PREEMPT_SMMU_RECORD(_field) \
 		offsetof(struct a5xx_cp_smmu_info, _field)
 
-static void _update_wptr(struct adreno_device *adreno_dev, bool reset_timer)
+static void _update_wptr(struct adreno_device *adreno_dev)
 {
 	struct adreno_ringbuffer *rb = adreno_dev->cur_rb;
 	unsigned int wptr;
@@ -35,16 +35,10 @@ static void _update_wptr(struct adreno_device *adreno_dev, bool reset_timer)
 	if (wptr != rb->wptr) {
 		adreno_writereg(adreno_dev, ADRENO_REG_CP_RB_WPTR,
 			rb->wptr);
-		/*
-		 * In case something got submitted while preemption was on
-		 * going, reset the timer.
-		 */
-		reset_timer = 1;
-	}
 
-	if (reset_timer)
 		rb->dispatch_q.expires = jiffies +
 			msecs_to_jiffies(adreno_cmdbatch_timeout);
+	}
 
 	spin_unlock_irqrestore(&rb->preempt_lock, flags);
 }
@@ -96,7 +90,7 @@ static void _a5xx_preemption_done(struct adreno_device *adreno_dev)
 	adreno_dev->next_rb = NULL;
 
 	/* Update the wptr for the new command queue */
-	_update_wptr(adreno_dev, true);
+	_update_wptr(adreno_dev);
 
 	/* Update the dispatcher timer for the new command queue */
 	mod_timer(&adreno_dev->dispatcher.timer,
@@ -219,7 +213,7 @@ void a5xx_preemption_trigger(struct adreno_device *adreno_dev)
 		 */
 
 		if (next != NULL) {
-			_update_wptr(adreno_dev, false);
+			_update_wptr(adreno_dev);
 
 			mod_timer(&adreno_dev->dispatcher.timer,
 				adreno_dev->cur_rb->dispatch_q.expires);
@@ -310,15 +304,13 @@ void a5xx_preempt_callback(struct adreno_device *adreno_dev, int bit)
 	adreno_dev->next_rb = NULL;
 
 	/* Update the wptr if it changed while preemption was ongoing */
-	_update_wptr(adreno_dev, true);
+	_update_wptr(adreno_dev);
 
 	/* Update the dispatcher timer for the new command queue */
 	mod_timer(&adreno_dev->dispatcher.timer,
 		adreno_dev->cur_rb->dispatch_q.expires);
 
 	adreno_set_preempt_state(adreno_dev, ADRENO_PREEMPT_NONE);
-
-	a5xx_preemption_trigger(adreno_dev);
 }
 
 void a5xx_preemption_schedule(struct adreno_device *adreno_dev)
@@ -498,8 +490,7 @@ static int a5xx_preemption_ringbuffer_init(struct adreno_device *adreno_dev,
 	int ret;
 
 	ret = kgsl_allocate_global(device, &rb->preemption_desc,
-		A5XX_CP_CTXRECORD_SIZE_IN_BYTES, 0, KGSL_MEMDESC_PRIVILEGED,
-		"preemption_desc");
+		A5XX_CP_CTXRECORD_SIZE_IN_BYTES, 0, KGSL_MEMDESC_PRIVILEGED);
 	if (ret)
 		return ret;
 
@@ -534,8 +525,7 @@ static int a5xx_preemption_iommu_init(struct adreno_device *adreno_dev)
 
 	/* Allocate mem for storing preemption smmu record */
 	return kgsl_allocate_global(device, &iommu->smmu_info, PAGE_SIZE,
-		KGSL_MEMFLAGS_GPUREADONLY, KGSL_MEMDESC_PRIVILEGED,
-		"smmu_info");
+		KGSL_MEMFLAGS_GPUREADONLY, KGSL_MEMDESC_PRIVILEGED);
 }
 #else
 static int a5xx_preemption_iommu_init(struct adreno_device *adreno_dev)
@@ -565,8 +555,7 @@ int a5xx_preemption_init(struct adreno_device *adreno_dev)
 	/* Allocate mem for storing preemption counters */
 	ret = kgsl_allocate_global(device, &preempt->counters,
 		adreno_dev->num_ringbuffers *
-		A5XX_CP_CTXRECORD_PREEMPTION_COUNTER_SIZE, 0, 0,
-		"preemption_counters");
+		A5XX_CP_CTXRECORD_PREEMPTION_COUNTER_SIZE, 0, 0);
 	if (ret)
 		return ret;
 
