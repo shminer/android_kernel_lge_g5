@@ -2925,9 +2925,6 @@ static int __ref update_offline_cores(int val)
 		return 0;
 
 	cpus_offlined = msm_thermal_info.core_control_mask & val;
-	pr_info("Offlined CPU mask changed %u to %u\n",
-				previous_cpus_offlined,
-				cpus_offlined);
 
 	for_each_possible_cpu(cpu) {
 		if (cpus_offlined & BIT(cpu)) {
