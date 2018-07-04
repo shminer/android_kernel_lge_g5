@@ -1,16 +1,4 @@
 BCM43XX DHD 1.78 for N OS Release Note.
-
-DHD 1.78.14 - 2017.09.15
-Security Patch
- - CS3457008: CVE-2017-0791. adding event length check in wl_notify_rx_mgmt_frame
-              CVE-2017-0792. adding event length check in dhd_rtt_event_handler
-			  CVE-2017-0788. adding boundary check in dhd_handle_hotlist_scan_evt
-			  CVE-2017-0790. adding gscan_result bound check in dhd_process_full_gscan_result
-			  CVE-2017-0787. adding boundary check in dhd_pno_process_epno_result function
-			  CVE-2017-0786. adding escan_result boundary check in wl_escan_handler
-			  CVE-2017-0789. remove significant wifi change feature
-			  CVE-2017-0789. Removing obsolete SWC feature to prevent heap overflows
-
 DHD 1.78.13 - 2017.06.22
 Security Patch
  - CS3040954 Adding boundary check in wl_cfg80211_mgmt_tx(CVE-2017-0706 )

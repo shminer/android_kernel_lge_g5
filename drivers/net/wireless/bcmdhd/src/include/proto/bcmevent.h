@@ -284,10 +284,9 @@ typedef union bcm_event_msg_u {
 #define WLC_E_PFN_BSSID_SCAN_BACKOFF	168	/* PFN BSSID SCAN BAckoff event */
 #define WLC_E_AGGR_EVENT		169	/* Aggregated event */
 #define WLC_E_AP_CHAN_CHANGE		170	/* AP channel change event propage to User */
-#define WLC_E_PSTA_CREATE_IND		171	/* Indication for PSTA creation */
-#define WLC_E_LAST			172	/* highest val + 1 for range checking */
-#if (WLC_E_LAST > 172)
-#error "WLC_E_LAST: Invalid value for last event; must be <= 172."
+#define WLC_E_LAST			171	/* highest val + 1 for range checking */
+#if (WLC_E_LAST > 171)
+#error "WLC_E_LAST: Invalid value for last event; must be <= 171."
 #endif /* WLC_E_LAST */
 
 /* define an API for getting the string name of an event */
@@ -453,21 +452,6 @@ typedef struct wl_event_sdb_trans {
  * WLC_E_P2P_PROBREQ_MSG
  * WLC_E_ACTION_FRAME_RX
  */
-
-#define MAX_PHY_CORE_NUM 4
-#define BCM_RX_FRAME_DATA_VERSION_2	2
-
-typedef BWL_PRE_PACKED_STRUCT struct wl_event_rx_frame_data_v2 {
-	uint16	version;
-	uint16	len;
-	uint16	channel;	/* Matches chanspec_t format from bcmwifi_channels.h */
-	uint16  pad;
-	int32	rssi;
-	uint32	mactime;
-	uint32	rate;
-	int8    per_core_rssi[MAX_PHY_CORE_NUM];
-} BWL_POST_PACKED_STRUCT wl_event_rx_frame_data_v2_t;
-
 typedef BWL_PRE_PACKED_STRUCT struct wl_event_rx_frame_data {
 	uint16	version;
 	uint16	channel;	/* Matches chanspec_t format from bcmwifi_channels.h */
