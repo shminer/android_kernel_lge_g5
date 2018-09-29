@@ -13127,6 +13127,22 @@ static struct regulator *tasha_codec_find_ondemand_regulator(
 	return NULL;
 }
 
+#ifdef CONFIG_SOUND_CONTROL
+unsigned int sound_control_write(unsigned int reg, int val)
+{
+	int ori_val;
+	unsigned int boost_val;
+
+	ori_val = snd_soc_read(snd_control_codec, reg);
+
+	boost_val = ori_val + val;
+
+	snd_soc_write(snd_control_codec, reg, boost_val);
+
+	return boost_val;
+}
+#endif
+
 static int tasha_codec_probe(struct snd_soc_codec *codec)
 {
 	struct wcd9xxx *control;
@@ -13136,6 +13152,11 @@ static int tasha_codec_probe(struct snd_soc_codec *codec)
 	int i, ret;
 	void *ptr = NULL;
 	struct regulator *supply;
+
+#ifdef CONFIG_SOUND_CONTROL
+	pr_info("soundcontrol codec probe...\n");
+	snd_control_codec = codec;
+#endif
 
 	control = dev_get_drvdata(codec->dev->parent);
 
