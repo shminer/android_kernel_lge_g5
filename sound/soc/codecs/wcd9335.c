@@ -45,6 +45,11 @@
 #include "wcd_cpe_core.h"
 #include "wcdcal-hwdep.h"
 
+#ifdef CONFIG_SOUND_CONTROL
+#include <linux/sound_control.h>
+static struct snd_soc_codec *snd_control_codec;
+#endif
+
 #define TASHA_RX_PORT_START_NUMBER  16
 
 #define WCD9335_RATES_MASK (SNDRV_PCM_RATE_8000 | SNDRV_PCM_RATE_16000 |\
