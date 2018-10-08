@@ -262,3 +262,25 @@
  * code
  */
 #define uninitialized_var(x) x = x
+
+#define __always_inline		inline __attribute__((always_inline))
+
+#if GCC_VERSION >= 60000
+#define __used				__attribute__((__used__))
+#define __must_check			__attribute__((warn_unused_result))
+#define __compiler_offsetof(a, b)	__builtin_offsetof(a, b)
+#define __cold			__attribute__((__cold__))
+#define __UNIQUE_ID(prefix) __PASTE(__PASTE(__UNIQUE_ID_, prefix), __COUNTER__)
+#ifndef __CHECKER__
+# define __compiletime_warning(message) __attribute__((warning(message)))
+# define __compiletime_error(message) __attribute__((error(message)))
+#endif /* __CHECKER__ */
+#define unreachable() __builtin_unreachable()
+#define __visible __attribute__((externally_visible))
+#define asm_volatile_goto(x...)	do { asm goto(x); asm (""); } while (0)
+#ifdef CONFIG_ARCH_USE_BUILTIN_BSWAP
+#define __HAVE_BUILTIN_BSWAP32__
+#define __HAVE_BUILTIN_BSWAP64__
+#define __HAVE_BUILTIN_BSWAP16__
+#endif /* CONFIG_ARCH_USE_BUILTIN_BSWAP */
+#endif /* GCC_VERSION >= 60000 */
