@@ -33,6 +33,11 @@
 #include <linux/kthread.h>
 #include <linux/slab.h>
 
+#if defined(CONFIG_LGE_PM)
+bool minfreq_enabled = false;
+EXPORT_SYMBOL(minfreq_enabled);
+#endif
+
 struct cpufreq_blu_active_cpuinfo {
 	struct timer_list cpu_timer;
 	struct timer_list cpu_slack_timer;
