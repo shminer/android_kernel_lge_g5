@@ -515,6 +515,16 @@ config QPNP_SMBCHARGER
 	  The driver also offers relevant information to userspace via the
 	  power supply framework.
 
+config QPNP_SMB2
+	tristate "QPNP SMB Charger driver"
+	depends on SPMI || MSM_SPMI
+	depends on OF_SPMI
+	help
+	  Enables support for the SMB2 charging peripheral.
+	  This charger module supports Type-C and uUSB interface with
+	  autonomous charging and APSD for different charging sources.
+	  This module also interfaces USB PD for power-delivery support.
+
 config FUELGAUGE_STC3117
 	tristate "STC3117 fuel gauge driver"
 	default n
@@ -533,6 +543,16 @@ config QPNP_FG
 	  Say Y here to enable the Fuel Gauge driver. This adds support for
 	  battery fuel gauging and state of charge of battery connected to the
 	  fuel gauge. The state of charge is reported through a BMS power
+	  supply property and also sends uevents when the capacity is updated.
+
+config QPNP_FG_GEN3
+	tristate "QPNP GEN3 fuel gauge driver"
+	depends on SPMI || MSM_SPMI
+	depends on OF_SPMI
+	help
+	  Say Y here to enable the GEN3 Fuel Gauge driver. This adds support
+	  for battery fuel gauging and state of charge of battery connected to
+	  the fuel gauge. The state of charge is reported through a BMS power
 	  supply property and also sends uevents when the capacity is updated.
 
 config BATTERY_BCL
@@ -594,6 +614,13 @@ config QPNP_LINEAR_CHARGER
 	  Say Y here to enable the Linear battery charger which supports USB
 	  detection and charging. The driver also offers relevant information
 	  to userspace via the power supply framework.
+
+config IDTP9223_CHARGER
+	tristate "IDT P9223 charger diver"
+	default n
+	depends on I2C && GPIOLIB
+	help
+	  Say Y to enable support for the IDT P9223 wireless charger.
 
 config QPNP_TYPEC
 	tristate "QPNP Type-C driver"
@@ -777,6 +804,13 @@ config LGE_PM_BATTERY_SWAP
 	help
 	  lge battery swap feature
 
+config LGE_PM_CYCLE_BASED_CHG_VOLTAGE
+	bool "LGE battery cycle based chg voltage change feature"
+	default n
+	depends on LGE_PM
+	help
+	  lge battery extending feature
+
 config LGE_PM_SUPPORT_LG_POWER_CLASS
 	bool "LG power class driver feature"
 	default n
@@ -805,9 +839,38 @@ config LGE_PM_OTP_SCENARIO_FOR_SPRINT
 	help
 	  Support otp scenario for sprint on LGE
 
+config LGE_PM_EMBEDDED_BATT_ID_ADC
+	bool "LGE EMBEDDED BATT ID ADC"
+	default n
+	depends on LGE_PM
+	help
+	  For distinguish battery id by adc value
+
+config LGE_PM_WATERPROOF_PROTECTION
+	bool "LGE_PM_WATERPROOF_PROTECTION"
+	default n
+	depends on LGE_PM
+	help
+	  Support charging suspending when water is detected
+
+config LGE_PM_INCOMPATIBLE_HVDCP_SUPPORT
+	bool "LGE_PM_INCOMPATIBLE_HVDCP_SUPPORT"
+	default n
+	depends on LGE_PM
+	help
+	  To make normal charging when the incompatible hvdcp connected
+
+config LGE_PM_MIRACAST_MITIGATION
+	bool "LGE_PM_MIRACAST_MITIGATION"
+	default n
+	depends on LGE_PM
+	help
+	  Support charging mitigation for miracast
+
 source "drivers/power/reset/Kconfig"
 
 endif # POWER_SUPPLY
 
 source "drivers/power/avs/Kconfig"
 source "drivers/power/qcom/Kconfig"
+source "drivers/power/lge/Kconfig"

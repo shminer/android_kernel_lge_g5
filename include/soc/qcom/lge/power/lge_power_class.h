@@ -42,7 +42,7 @@ enum lge_power_property {
 	LGE_POWER_PROP_INPUT_CURRENT_MAX,
 	LGE_POWER_PROP_TEMP,
 	LGE_POWER_PROP_TYPE,
-#ifdef CONFIG_LGE_PM_PSEUDO_BATTERY
+#if defined (CONFIG_LGE_PM_PSEUDO_BATTERY) || defined (CONFIG_LGE_PM_LGE_POWER_CLASS_PSEUDO_BATTERY)
 	LGE_POWER_PROP_PSEUDO_BATT,
 	LGE_POWER_PROPS_PSEUDO_BATT_MODE,
 	LGE_POWER_PROPS_PSEUDO_BATT_ID,
@@ -143,12 +143,11 @@ enum lge_power_property {
 #ifdef CONFIG_LGE_PM_USB_CURRENT_MAX_MODE
 	LGE_POWER_PROP_USB_CURRENT_MAX_MODE,
 #endif
+	LGE_POWER_PROP_CHECK_ONLY_USB_ID,
 	LGE_POWER_PROP_QC_IBAT_CURRENT,
-#ifdef CONFIG_LGE_PM_LGE_POWER_CLASS_TDMB_MODE
-	LGE_POWER_PROP_TDMB_MODE_ON,
-#endif
 	LGE_POWER_PROP_CHARGE_DONE,
 	LGE_POWER_PROP_VOLTAGE_NOW,
+	LGE_POWER_PROP_USB_CHARGING_ENABLED,
 };
 enum lge_power_type {
 	LGE_POWER_TYPE_UNKNOWN = 0,
@@ -249,6 +248,7 @@ extern struct lge_power *lge_power_get_by_name(const char *name);
 extern void lge_power_changed(struct lge_power *lpc);
 
 #ifdef CONFIG_LGE_PM_LGE_POWER_CLASS_TYPE_HVDCP
+extern const char * lgcc_get_effective_icl(void);
 extern int lgcc_get_effective_fcc_result(void);
 #endif
 

@@ -1,4 +1,4 @@
-/* Copyright (c) 2008-2016, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2008-2017, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -23,6 +23,9 @@
 
 #include "mdss_panel.h"
 #include "mdss_mdp_splash_logo.h"
+#if defined(CONFIG_LGE_DISPLAY_AOD_WITH_MIPI)
+#include "lge/lge_mdss_watch.h"
+#endif
 
 #define MDSS_LPAE_CHECK(phys)	\
 	((sizeof(phys) > sizeof(unsigned long)) ? ((phys >> 32) & 0xFF) : (0))
@@ -266,6 +269,12 @@ struct msm_fb_backup_type {
 	bool   atomic_commit;
 };
 
+struct msm_fb_fps_info {
+	u32 frame_count;
+	ktime_t last_sampled_time_us;
+	u32 measured_fps;
+};
+
 #if defined(CONFIG_LGE_PP_AD_SUPPORTED)
 struct msm_fb_ad_info {
     int is_ad_on;
@@ -293,6 +302,7 @@ struct msm_fb_data_type {
 
 	int idle_time;
 	u32 idle_state;
+	struct msm_fb_fps_info fps_info;
 	struct delayed_work idle_notify_work;
 
 	bool atomic_commit_pending;
@@ -325,6 +335,7 @@ struct msm_fb_data_type {
 	u32 unset_bl_level;
 	bool allow_bl_update;
 	u32 bl_level_scaled;
+	u32 br_level_val;
 #if IS_ENABLED(CONFIG_LGE_DISPLAY_BL_EXTENDED)
 	u32 br_lvl_ex;
 	u32 bl_level_ex;
@@ -334,6 +345,7 @@ struct msm_fb_data_type {
 	bool keep_aod_pending;
 #endif
 	struct mutex bl_lock;
+	struct mutex mdss_sysfs_lock;
 	bool ipc_resume;
 
 #if defined(CONFIG_LGE_DISPLAY_AOD_SUPPORTED)
@@ -342,6 +354,12 @@ struct msm_fb_data_type {
 #endif
 #if defined(CONFIG_LGE_DISPLAY_COMMON)
 	bool recovery;
+#if defined(CONFIG_LGE_PANEL_RECOVERY)
+	u32 recovery_bl_level;
+#if IS_ENABLED(CONFIG_LGE_DISPLAY_BL_EXTENDED)
+	u32 recovery_bl_level_ex;
+#endif
+#endif
 #endif
 	struct platform_device *pdev;
 
@@ -398,9 +416,22 @@ struct msm_fb_data_type {
 	#if defined(CONFIG_LGE_PP_AD_SUPPORTED)
 	struct msm_fb_ad_info ad_info;
 	#endif
+#if defined(CONFIG_LGE_DISPLAY_DYN_DSI_MODE_SWITCH)
+	struct mutex mode_switch_lock;
+#endif
 #if defined(CONFIG_LGE_PM_THERMAL_VTS)
-	struct value_sensor *vs;
-	struct value_sensor *vs_clone;
+	struct value_sensor *vs_led;
+	struct value_sensor *vs_led_s;
+	struct value_sensor *vs_led_cs;
+#endif
+#if defined(CONFIG_LGE_DISPLAY_AOD_WITH_MIPI)
+	bool need_to_init_watch;
+	bool block_aod_bl;
+	u32 unset_aod_bl;
+	bool ready_to_u2;
+	bool display_off;
+	struct mutex watch_lock;
+	struct watch_data watch;
 #endif
 };
 
@@ -465,12 +496,21 @@ static inline bool mdss_fb_is_power_on_lp(struct msm_fb_data_type *mfd)
 	return mdss_panel_is_power_on_lp(mfd->panel_power_state);
 }
 
+static inline bool mdss_fb_is_power_on_ulp(struct msm_fb_data_type *mfd)
+{
+	return mdss_panel_is_power_on_ulp(mfd->panel_power_state);
+}
+
 static inline bool mdss_fb_is_hdmi_primary(struct msm_fb_data_type *mfd)
 {
 	return (mfd && (mfd->index == 0) &&
 		(mfd->panel_info->type == DTV_PANEL));
 }
 
+static inline void mdss_fb_init_fps_info(struct msm_fb_data_type *mfd)
+{
+	memset(&mfd->fps_info, 0, sizeof(mfd->fps_info));
+}
 int mdss_fb_get_phys_info(dma_addr_t *start, unsigned long *len, int fb_num);
 void mdss_fb_set_backlight(struct msm_fb_data_type *mfd, u32 bkl_lvl);
 void mdss_fb_update_backlight(struct msm_fb_data_type *mfd);
@@ -494,4 +534,5 @@ u32 mdss_fb_get_mode_switch(struct msm_fb_data_type *mfd);
 void mdss_fb_report_panel_dead(struct msm_fb_data_type *mfd);
 void mdss_panelinfo_to_fb_var(struct mdss_panel_info *pinfo,
 						struct fb_var_screeninfo *var);
+void mdss_fb_calc_fps(struct msm_fb_data_type *mfd);
 #endif /* MDSS_FB_H */

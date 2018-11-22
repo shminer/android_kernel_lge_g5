@@ -1,5 +1,5 @@
 #
-# Makefile for the <t-base trusted UI driver
+# Makefile for the Kinibi trusted UI driver
 #
 
 GUD_ROOT_FOLDER := drivers/gud/

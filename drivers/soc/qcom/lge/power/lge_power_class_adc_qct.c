@@ -26,6 +26,13 @@
 #include <linux/of_device.h>
 #include <linux/of_gpio.h>
 #include <linux/workqueue.h>
+#ifdef CONFIG_MACH_MSM8996_LUCYE
+#include <linux/delay.h>
+#include <linux/spmi.h>
+#include <linux/mutex.h>
+#include <linux/gpio.h>
+#include <soc/qcom/lge/power/lge_board_revision.h>
+#endif
 
 #define DEFAULT_TEMP		250
 
@@ -49,6 +56,10 @@ struct lge_adc {
 	uint32_t 		batt_therm_channel;
 	uint32_t 		usb_id_channel;
 	int 			status;
+#ifdef CONFIG_MACH_MSM8996_LUCYE
+	struct mutex lock_for_usb_id;
+	signed sbu_en;
+#endif
 };
 
 static enum lge_power_property lge_power_adc_properties[] = {
@@ -81,6 +92,12 @@ static int lge_power_adc_get_property(struct lge_power *lpc,
 	struct lge_adc *lge_adc_chip
 			= container_of(lpc, struct lge_adc, lge_adc_lpc);
 	union power_supply_propval prop = {0, };
+
+#ifdef CONFIG_MACH_MSM8996_LUCYE
+	struct power_supply *usb_pd_psy;
+	u8 data;
+	int waterproof = 0, typec_accessory = 0;
+#endif
 
 	switch (lpp) {
 	case LGE_POWER_PROP_STATUS:
@@ -211,8 +228,67 @@ static int lge_power_adc_get_property(struct lge_power *lpc,
 			if (lge_adc_chip->usb_id_channel != 0xFF) {
 				pr_debug("USB ID channel : %d!!\n",
 					lge_adc_chip->usb_id_channel);
+#ifdef CONFIG_MACH_MSM8996_LUCYE
+				mutex_lock(&lge_adc_chip->lock_for_usb_id);
+
+				usb_pd_psy = power_supply_get_by_name("usb_pd");
+				if(usb_pd_psy && usb_pd_psy->get_property) {
+					usb_pd_psy->get_property(usb_pd_psy, POWER_SUPPLY_PROP_TYPEC_MODE, &prop);
+					typec_accessory = prop.intval;
+					pr_info("usb_pd : %d\n", typec_accessory);
+				}else{
+					pr_info("usb_pd is not ready\n");
+				}
+
+				if(usb_pd_psy && usb_pd_psy->get_property) {
+					usb_pd_psy->get_property(usb_pd_psy, POWER_SUPPLY_PROP_INPUT_SUSPEND, &prop);
+					waterproof = prop.intval;
+					pr_info("waterproof : %d\n", waterproof);
+				}else{
+					pr_info("battery_psy is not ready\n");
+				}
+
+				if ((!waterproof && POWER_SUPPLY_TYPE_CTYPE_DEBUG_ACCESSORY == typec_accessory) ||
+				    lge_get_board_rev_no() >= HW_REV_1_3) {
+					/* SBU_EN low, SBU_SEL high */
+					data = 0x11;
+					set_pm_gpio_value(lge_adc_chip->pm_vadc, 0xc240, &data, 1);
+					data = 0x03;
+					set_pm_gpio_value(lge_adc_chip->pm_vadc, 0xc245, &data, 1);
+					usleep_range(400, 410);
+
+					gpiod_direction_output(gpio_to_desc(lge_adc_chip->sbu_en), 0);
+					usleep_range(400, 410);
+
+					/* wait 100ms for usb_id settling*/
+					usleep_range(100000, 101000);
+
+					rc = qpnp_vadc_read(lge_adc_chip->pm_vadc,
+						lge_adc_chip->usb_id_channel, &results);
+
+					/* SBU_EN high */
+					if (typec_accessory != POWER_SUPPLY_TYPE_CTYPE_DEBUG_ACCESSORY) {
+						pr_info("[BSP-USB] SBU EN high: waterproof(%d), physical(%d)\n",
+							waterproof, (int)results.physical);
+						gpiod_direction_output(gpio_to_desc(lge_adc_chip->sbu_en), 1);
+					}
+
+					data = 0x10;
+					set_pm_gpio_value(lge_adc_chip->pm_vadc, 0xc240, &data, 1);
+					data = 0x01;
+					set_pm_gpio_value(lge_adc_chip->pm_vadc, 0xc245, &data, 1);
+				} else {
+					/* SBU_EN high */
+					gpiod_direction_output(gpio_to_desc(lge_adc_chip->sbu_en), 1);
+
+					rc = qpnp_vadc_read(lge_adc_chip->pm_vadc,
+						lge_adc_chip->usb_id_channel, &results);
+				}
+				mutex_unlock(&lge_adc_chip->lock_for_usb_id);
+#else
 				rc = qpnp_vadc_read(lge_adc_chip->pm_vadc,
 					lge_adc_chip->usb_id_channel, &results);
+#endif
 			} else {
 				pr_err("VADC is not used for \
 						USB_ID!!!\n");
@@ -225,6 +301,7 @@ static int lge_power_adc_get_property(struct lge_power *lpc,
 				val->int64val = results.physical;
 			}
 		} else {
+			pr_err("VADC is not ready\n");
 			val->intval = 0;
 		}
 		break;
@@ -423,7 +500,7 @@ static int lge_adc_qct_probe(struct platform_device *pdev)
 	struct lge_adc *lge_adc_chip;
 	struct lge_power *lge_power_adc;
 	union power_supply_propval prop = {0, };
-	int ret;
+	int ret = 0;
 
 	pr_err("lge_battery_probe starts!!!\n");
 	lge_adc_chip = kzalloc(sizeof(struct lge_adc),
@@ -457,12 +534,33 @@ static int lge_adc_qct_probe(struct platform_device *pdev)
 	lge_adc_chip->bms_psy = power_supply_get_by_name("bms");
 	if (lge_adc_chip->bms_psy == NULL) {
 		pr_err("Failed to get bms property\n");
+		ret = -EPROBE_DEFER;
 		goto err_free;
 	}
 
 	lge_adc_chip->lge_cc_lpc = lge_power_get_by_name("lge_cc");
 	if (!lge_adc_chip->lge_cc_lpc)
 		pr_err("No yet charging_cotroller\n");
+
+#ifdef CONFIG_MACH_MSM8996_LUCYE
+	mutex_init(&lge_adc_chip->lock_for_usb_id);
+
+	lge_adc_chip->sbu_en = of_get_named_gpio(pdev->dev.of_node, "lge,gpio-sbu-en", 0);
+
+	if(!gpio_is_valid(lge_adc_chip->sbu_en)) {
+		pr_err("can't find gpio-sbu-en\n");
+		ret = -EPROBE_DEFER;
+		goto err_free;
+	} else {
+		pr_info("find gpio-sbu-en %d!!!\n", lge_adc_chip->sbu_en);
+		ret = gpio_request_one(lge_adc_chip->sbu_en, GPIOF_OUT_INIT_HIGH, "gpio-sbu-en");
+		if(ret){
+			pr_err("fail to request GPIO !!! %d\n", ret);
+			ret = -EPROBE_DEFER;
+			goto err_free;
+		}
+	}
+#endif
 
 	ret = of_property_read_u32(pdev->dev.of_node, "lge,xo_therm_chan",
 				&lge_adc_chip->xo_therm_channel);
@@ -523,7 +621,9 @@ static int lge_adc_qct_probe(struct platform_device *pdev)
 	return 0;
 
 err_free:
-
+#ifdef CONFIG_MACH_MSM8996_LUCYE
+	gpio_free(lge_adc_chip->sbu_en);
+#endif
 	kfree(lge_adc_chip);
 	return ret;
 }

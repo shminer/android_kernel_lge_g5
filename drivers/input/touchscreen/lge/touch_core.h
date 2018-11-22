@@ -180,6 +180,7 @@ enum {
 enum {
 	TCI_1 = 0,
 	TCI_2,
+	SWIPE,
 };
 
 enum {
@@ -350,6 +351,7 @@ struct touch_device_caps {
 struct touch_operation_role {
 	bool use_lpwg;
 	u32 use_lpwg_test;
+	bool use_upgrade;
 	bool hide_coordinate;
 	u32 mfts_lpwg;
 };
@@ -576,6 +578,10 @@ enum touch_device_type {
 	TYPE_LG4945,
 	TYPE_S3320,
 	TYPE_TD4302,
+	TYPE_SW49407_COMMAND,
+	TYPE_SW49407_VIDEO,
+	TYPE_SW49407_LUCY_VIDEO,
+	TYPE_SW49408,
 	TYPE_MAX,
 };
 

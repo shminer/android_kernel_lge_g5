@@ -353,6 +353,10 @@ static int verity_verify_level(struct dm_verity *v, struct dm_verity_io *io,
 					   hash_block, data, NULL) == 0)
 			aux->hash_verified = 1;
 		else{
+#ifdef CONFIG_LGE_DM_VERITY_RECOVERY
+			u8 *ddata; /* direct read data */
+#endif
+
 #ifdef DM_VERITY_MEMORY_DUMP
 			DMERR("metadata block %lu is corrupted", hash_block);
 			DMERR("io : %p, v : %p", io, v);
@@ -368,6 +372,74 @@ static int verity_verify_level(struct dm_verity *v, struct dm_verity_io *io,
 							data, 1 << v->hash_dev_block_bits);
 			}
 #endif // DM_VERITY_MEMORY_DUMP
+
+#ifdef CONFIG_LGE_DM_VERITY_RECOVERY
+			dm_verity_recovery_lock(v->bufio);
+
+			// pre-check wheather already recovered
+			r = verity_hash(v, verity_io_hash_desc(v, io),
+					data, 1 << v->hash_dev_block_bits,
+					verity_io_real_digest(v, io));
+
+			if (likely(r >= 0)) {
+				if (memcmp(verity_io_real_digest(v, io), want_digest,
+						  v->digest_size) == 0) {
+					DMERR("metadata block %lu is already recovered", hash_block);
+					dm_verity_recovery_unlock(v->bufio);
+					goto success_proc;
+				}
+			}
+
+			// try to recover
+			ddata = dm_direct_read(hash_block, v->bufio);
+			if(ddata){
+				u8* real_digest = kmalloc(v->digest_size, GFP_KERNEL);
+
+				if(real_digest) {
+					r = verity_hash(v, verity_io_hash_desc(v, io),
+							ddata, 1 << v->hash_dev_block_bits,
+							real_digest);
+					if (unlikely(r < 0)) {
+						kfree(real_digest);
+						goto direct_read_error;
+					}
+				}
+				else
+					goto direct_read_error;
+
+				if (likely(memcmp(real_digest, want_digest,
+					  v->digest_size) == 0)) {
+					DMERR("metadata block %lu is recovered successfully", hash_block);
+
+					memcpy(verity_io_real_digest(v, io), real_digest, v->digest_size);
+					memcpy(data, ddata, 1 << v->hash_dev_block_bits);
+					aux->hash_verified = 1;
+
+					kfree(real_digest);
+					dm_direct_free(ddata);
+					dm_verity_recovery_unlock(v->bufio);
+					goto success_proc;
+				}
+				else {
+					verity_print_dump("recovery failed! real_digest", DUMP_PREFIX_OFFSET,
+								real_digest, v->digest_size);
+				}
+				kfree(real_digest);
+			}
+
+direct_read_error:
+			DMERR("metadata block %lu is recovered fail (ddata:%p)", hash_block, ddata);
+
+			if(ddata) {
+				verity_print_dump("block", DUMP_PREFIX_ADDRESS,
+						ddata, 1 << v->hash_dev_block_bits);
+			}
+
+			if(ddata)
+				dm_direct_free(ddata);
+
+			dm_verity_recovery_unlock(v->bufio);
+#endif
 			if (verity_handle_err(v,
 						   DM_VERITY_BLOCK_TYPE_METADATA,
 						   hash_block)) {
@@ -377,6 +449,9 @@ static int verity_verify_level(struct dm_verity *v, struct dm_verity_io *io,
 		}
 	}
 
+#ifdef CONFIG_LGE_DM_VERITY_RECOVERY
+success_proc:
+#endif
 	data += offset;
 	memcpy(want_digest, data, v->digest_size);
 	r = 0;
@@ -628,6 +703,7 @@ static void verity_prefetch_io(struct work_struct *work)
 		container_of(work, struct dm_verity_prefetch_work, work);
 	struct dm_verity *v = pw->v;
 	int i;
+	sector_t prefetch_size;
 
 	for (i = v->levels - 2; i >= 0; i--) {
 		sector_t hash_block_start;
@@ -650,8 +726,14 @@ static void verity_prefetch_io(struct work_struct *work)
 				hash_block_end = v->hash_blocks - 1;
 		}
 no_prefetch_cluster:
+		// for emmc, it is more efficient to send bigger read
+		prefetch_size = max((sector_t)CONFIG_DM_VERITY_HASH_PREFETCH_MIN_SIZE,
+			hash_block_end - hash_block_start + 1);
+		if ((hash_block_start + prefetch_size) >= (v->hash_start + v->hash_blocks)) {
+			prefetch_size = hash_block_end - hash_block_start + 1;
+		}
 		dm_bufio_prefetch(v->bufio, hash_block_start,
-				  hash_block_end - hash_block_start + 1);
+				  prefetch_size);
 	}
 
 	kfree(pw);
@@ -678,7 +760,7 @@ static void verity_submit_prefetch(struct dm_verity *v, struct dm_verity_io *io)
  * Bio map function. It allocates dm_verity_io structure and bio vector and
  * fills them. Then it issues prefetches and the I/O.
  */
-static int verity_map(struct dm_target *ti, struct bio *bio)
+int verity_map(struct dm_target *ti, struct bio *bio)
 {
 	struct dm_verity *v = ti->private;
 	struct dm_verity_io *io;
@@ -720,11 +802,12 @@ static int verity_map(struct dm_target *ti, struct bio *bio)
 
 	return DM_MAPIO_SUBMITTED;
 }
+EXPORT_SYMBOL_GPL(verity_map);
 
 /*
  * Status: V (valid) or C (corruption found)
  */
-static void verity_status(struct dm_target *ti, status_type_t type,
+void verity_status(struct dm_target *ti, status_type_t type,
 			  unsigned status_flags, char *result, unsigned maxlen)
 {
 	struct dm_verity *v = ti->private;
@@ -783,8 +866,9 @@ static void verity_status(struct dm_target *ti, status_type_t type,
 		break;
 	}
 }
+EXPORT_SYMBOL_GPL(verity_status);
 
-static int verity_ioctl(struct dm_target *ti, unsigned cmd,
+int verity_ioctl(struct dm_target *ti, unsigned cmd,
 			unsigned long arg)
 {
 	struct dm_verity *v = ti->private;
@@ -797,8 +881,9 @@ static int verity_ioctl(struct dm_target *ti, unsigned cmd,
 	return r ? : __blkdev_driver_ioctl(v->data_dev->bdev, v->data_dev->mode,
 				     cmd, arg);
 }
+EXPORT_SYMBOL_GPL(verity_ioctl);
 
-static int verity_merge(struct dm_target *ti, struct bvec_merge_data *bvm,
+int verity_merge(struct dm_target *ti, struct bvec_merge_data *bvm,
 			struct bio_vec *biovec, int max_size)
 {
 	struct dm_verity *v = ti->private;
@@ -812,16 +897,18 @@ static int verity_merge(struct dm_target *ti, struct bvec_merge_data *bvm,
 
 	return min(max_size, q->merge_bvec_fn(q, bvm, biovec));
 }
+EXPORT_SYMBOL_GPL(verity_merge);
 
-static int verity_iterate_devices(struct dm_target *ti,
+int verity_iterate_devices(struct dm_target *ti,
 				  iterate_devices_callout_fn fn, void *data)
 {
 	struct dm_verity *v = ti->private;
 
 	return fn(ti, v->data_dev, v->data_start, ti->len, data);
 }
+EXPORT_SYMBOL_GPL(verity_iterate_devices);
 
-static void verity_io_hints(struct dm_target *ti, struct queue_limits *limits)
+void verity_io_hints(struct dm_target *ti, struct queue_limits *limits)
 {
 	struct dm_verity *v = ti->private;
 
@@ -833,8 +920,9 @@ static void verity_io_hints(struct dm_target *ti, struct queue_limits *limits)
 
 	blk_limits_io_min(limits, limits->logical_block_size);
 }
+EXPORT_SYMBOL_GPL(verity_io_hints);
 
-static void verity_dtr(struct dm_target *ti)
+void verity_dtr(struct dm_target *ti)
 {
 	struct dm_verity *v = ti->private;
 
@@ -863,6 +951,7 @@ static void verity_dtr(struct dm_target *ti)
 
 	kfree(v);
 }
+EXPORT_SYMBOL_GPL(verity_dtr);
 
 static int verity_alloc_zero_digest(struct dm_verity *v)
 {
@@ -961,7 +1050,7 @@ static int verity_parse_opt_args(struct dm_arg_set *as, struct dm_verity *v)
  *	<digest>
  *	<salt>		Hex string or "-" if no salt.
  */
-static int verity_ctr(struct dm_target *ti, unsigned argc, char **argv)
+int verity_ctr(struct dm_target *ti, unsigned argc, char **argv)
 {
 	struct dm_verity *v;
 	struct dm_arg_set as;
@@ -1173,7 +1262,9 @@ static int verity_ctr(struct dm_target *ti, unsigned argc, char **argv)
 	}
 
 	/* WQ_UNBOUND greatly improves performance when running on ramdisk */
-	v->verify_wq = alloc_workqueue("kverityd", WQ_CPU_INTENSIVE | WQ_MEM_RECLAIM | WQ_UNBOUND, num_online_cpus());
+	v->verify_wq = alloc_workqueue("kverityd",
+				       WQ_HIGHPRI | WQ_MEM_RECLAIM | WQ_UNBOUND,
+				       num_online_cpus());
 	if (!v->verify_wq) {
 		ti->error = "Cannot allocate workqueue";
 		r = -ENOMEM;
@@ -1197,6 +1288,7 @@ bad:
 
 	return r;
 }
+EXPORT_SYMBOL_GPL(verity_ctr);
 
 static struct target_type verity_target = {
 	.name		= "verity",

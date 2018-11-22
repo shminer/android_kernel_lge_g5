@@ -36,6 +36,10 @@
 #include <soc/qcom/lge/lge_cable_detection.h>
 #endif
 
+#ifdef CONFIG_LGE_USB_TYPE_C
+#define PD_MAX_PDO_NUM 7
+#endif
+
 enum DP_HPD_STATUS {
 	STATE_LINK_TRAINING = 0,
 	STATE_HDMI_HPD,
@@ -54,6 +58,7 @@ struct anx7688_data {
 	int rstn_gpio;
 	int sbu_gpio;
 	int vconn_gpio;
+	int avdd33_gpio;
 	u32 pd_max_volt;
 	u32 pd_max_power;
 	u32 pd_min_power;
@@ -61,6 +66,7 @@ struct anx7688_data {
 	bool vconn_always_on;
 	int vsafe0v_level;
 	bool auto_pd_support;
+	bool avdd33_ext_ldo;
 };
 
 struct anx7688_chip {
@@ -127,6 +133,15 @@ struct anx7688_chip {
 
 #ifdef CONFIG_LGE_USB_ANX7688_OVP
 	union power_supply_propval rp;
+#ifdef CONFIG_LGE_PM_LGE_POWER_CLASS_SIMPLE
+	int dp_alt_mode;
+#endif
+#endif
+#ifdef CONFIG_LGE_USB_TYPE_C
+	u32 src_pdo[PD_MAX_PDO_NUM];
+	u32 offered_pdo[PD_MAX_PDO_NUM];
+	u32 rdo;
+	u32 offered_rdo;
 #endif
 };
 

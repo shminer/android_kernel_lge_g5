@@ -104,6 +104,8 @@ DEFINE_CLK_DUMMY(gcc_ce1_axi_m_clk, 0);
 DEFINE_CLK_DUMMY(measure_only_bimc_hmss_axi_clk, 0);
 
 DEFINE_CLK_RPM_SMD_XO_BUFFER(ln_bb_clk, ln_bb_a_clk, LN_BB_CLK_ID);
+DEFINE_CLK_RPM_SMD_XO_BUFFER_PINCTRL(ln_bb_clk_pin, ln_bb_a_clk_pin,
+				LN_BB_CLK_PIN_ID);
 static DEFINE_CLK_VOTER(mcd_ce1_clk, &ce1_clk.c, 85710000);
 static DEFINE_CLK_VOTER(pnoc_keepalive_a_clk, &pnoc_a_clk.c, LONG_MAX);
 static DEFINE_CLK_VOTER(pnoc_msmbus_clk, &pnoc_clk.c, LONG_MAX);
@@ -1419,7 +1421,12 @@ static struct clk_freq_tbl ftbl_sdcc2_apps_clk_src[] = {
 	F(  25000000, gpll0_out_main,   12,    1,     2),
 	F(  50000000, gpll0_out_main,   12,    0,     0),
 	F( 100000000, gpll0_out_main,    6,    0,     0),
+#if defined (CONFIG_MACH_MSM8996_ELSA_KR) || defined (CONFIG_MACH_MSM8996_LUCYE_KR)
+/* change clk frequency from 200MHz to 171MHz to meet the RE standard */
+	F( 200000000, gpll0_out_main,    3.5,    0,     0),
+#else
 	F( 200000000, gpll0_out_main,    3,    0,     0),
+#endif
 	F_END
 };
 
@@ -3369,6 +3376,8 @@ static struct clk_lookup msm_clocks_rpm_8996[] = {
 	CLK_LIST(ipa_clk),
 	CLK_LIST(ln_bb_clk),
 	CLK_LIST(ln_bb_a_clk),
+	CLK_LIST(ln_bb_clk_pin),
+	CLK_LIST(ln_bb_a_clk_pin),
 	CLK_LIST(mcd_ce1_clk),
 	CLK_LIST(pnoc_keepalive_a_clk),
 	CLK_LIST(pnoc_msmbus_clk),

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2015-2016, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2015-2017, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -194,8 +194,13 @@ void wcd_clsh_imped_config(struct snd_soc_codec *codec, int imped, bool reset)
 		return;
 	}
 	index = get_impedance_index(imped);
-	if (index >= ARRAY_SIZE(imped_index)) {
+	if (index >= (ARRAY_SIZE(imped_index) - 1)) {
 		pr_debug("%s, impedance not in range = %d\n", __func__, imped);
+		return;
+	}
+	if (index >= ARRAY_SIZE(imped_table)) {
+		pr_debug("%s, impedance index not in range = %d\n", __func__,
+			index);
 		return;
 	}
 	for (i = 0; i < MAX_IMPED_PARAMS; i++)
@@ -446,8 +451,8 @@ static void wcd_clsh_set_gain_path(struct snd_soc_codec *codec,
 static void wcd_clsh_set_hph_mode(struct snd_soc_codec *codec,
 				  int mode)
 {
-	u8 val;
-	u8 gain;
+	u8 val = 0;
+	u8 gain = 0;
 	u8 res_val = VREF_FILT_R_0OHM;
 	u8 ipeak = DELTA_I_50MA;
 

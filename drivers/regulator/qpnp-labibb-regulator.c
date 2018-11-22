@@ -27,6 +27,10 @@
 #include <linux/regulator/of_regulator.h>
 #include <linux/qpnp/qpnp-revid.h>
 
+#ifdef CONFIG_LGE_DISPLAY_LABIBB_RECOVERY
+#include <linux/qpnp/power-on.h>
+#endif
+
 #ifdef CONFIG_LGE_LCD_POWER_CTRL
 #include <soc/qcom/lge/board_lge.h>
 #endif
@@ -1459,6 +1463,12 @@ static int qpnp_labibb_regulator_enable(struct qpnp_labibb *labibb)
 	return 0;
 err_out:
 	rc = qpnp_ibb_set_mode(labibb, IBB_SW_CONTROL_DIS);
+
+#ifdef CONFIG_LGE_DISPLAY_LABIBB_RECOVERY
+	pr_err("[Display] Issue happened in warm reset. Need cold reset.\n");
+	mdelay(10000);
+	do_msm_hard_reset();
+#endif
 	if (rc) {
 		pr_err("Unable to set IBB_MODULE_EN rc = %d\n", rc);
 		return rc;
@@ -1602,7 +1612,8 @@ static int qpnp_labibb_regulator_short_circuit_on(struct qpnp_labibb *labibb, un
 	return rc;
 }
 
-static int qpnp_labibb_regulator_ttw(struct qpnp_labibb *labibb, unsigned int mode){
+static int qpnp_labibb_regulator_ttw(struct qpnp_labibb *labibb, unsigned int mode)
+{
 
 	if(mode == REGULATOR_MODE_TTW_ON && !labibb->ttw_en){
 			labibb->ttw_en = true;
@@ -1618,6 +1629,60 @@ static int qpnp_labibb_regulator_ttw(struct qpnp_labibb *labibb, unsigned int mo
 
 	return 0;
 }
+
+#if defined(CONFIG_LGE_DISPLAY_LUCYE_COMMON)
+static int qpnp_labibb_pulldown(struct qpnp_labibb *labibb, unsigned int mode)
+{
+	int rc;
+	u8 val;
+
+	if (mode == REGULATOR_MODE_ENABLE_PULLDOWN) {
+		val = LAB_PD_CTL_STRONG_PULL; // 0x01 -> Enable pulldown. Strong
+		rc = qpnp_labibb_write(labibb, labibb->lab_base + REG_LAB_PD_CTL,
+					&val, 1);
+		if (rc) {
+			pr_err("qpnp_labibb_write register %x failed rc = %d\n",
+				REG_LAB_PD_CTL, rc);
+			return rc;
+		}
+
+		val = IBB_PD_CTL_EN; // 0x80 -> Enable pulldown. Strong
+		rc = qpnp_labibb_write(labibb, labibb->ibb_base + REG_IBB_PD_CTL,
+					&val, 1);
+		if (rc) {
+			pr_err("qpnp_labibb_read register %x failed rc = %d\n",
+				REG_IBB_PD_CTL, rc);
+			return rc;
+		}
+		pr_info("[Display] labibb. enable pull down\n");
+	} else if (mode == REGULATOR_MODE_DISABLE_PULLDOWN) {
+		val = LAB_PD_CTL_DISABLE_PD; // 0x02 -> Disable pulldown
+		rc = qpnp_labibb_write(labibb, labibb->lab_base + REG_LAB_PD_CTL,
+					&val, 1);
+		if (rc) {
+			pr_err("qpnp_labibb_write register %x failed rc = %d\n",
+				REG_LAB_PD_CTL, rc);
+			return rc;
+		}
+
+		val = 0; // 0x00 -> Disable pulldown
+		rc = qpnp_labibb_write(labibb, labibb->ibb_base + REG_IBB_PD_CTL,
+					&val, 1);
+		if (rc) {
+			pr_err("qpnp_labibb_read register %x failed rc = %d\n",
+				REG_IBB_PD_CTL, rc);
+			return rc;
+		}
+
+		pr_info("[Display] labibb. disable pull down\n");
+	}
+
+	labibb->lab_vreg.mode = mode;
+	labibb->ibb_vreg.mode = mode;
+
+	return 0;
+}
+#endif
 #endif
 
 static int qpnp_lab_regulator_enable(struct regulator_dev *rdev)
@@ -1866,7 +1931,13 @@ static int qpnp_lab_regulator_setmode(struct regulator_dev *rdev, unsigned int m
 		if (!labibb->standalone)
 			return qpnp_labibb_regulator_ttw(labibb, mode);
 	break;
-
+#if defined(CONFIG_LGE_DISPLAY_LUCYE_COMMON)
+	case REGULATOR_MODE_ENABLE_PULLDOWN:
+	case REGULATOR_MODE_DISABLE_PULLDOWN:
+		if (!labibb->standalone)
+			return qpnp_labibb_pulldown(labibb, mode);
+	break;
+#endif
 	default:
 		pr_err("%s: unknown mode %x\n", __func__, mode);
 		rc = -EINVAL;
@@ -2069,6 +2140,9 @@ static int register_qpnp_lab_regulator(struct qpnp_labibb *labibb,
 				rc);
 			return rc;
 		}
+#ifdef CONFIG_LGE_DISPLAY_LABIBB_RECOVERY
+		pr_err("[Display] LABIBB is not enabled in LK!!\n");
+#endif
 	} else {
 		rc = qpnp_labibb_read(labibb, &val,
 			labibb->lab_base + REG_LAB_LCD_AMOLED_SEL, 1);

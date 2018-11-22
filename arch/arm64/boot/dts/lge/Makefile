@@ -90,6 +90,14 @@ ifeq ($(CONFIG_MACH_MSM8996_ELSA_GLOBAL_COM),y)
 DTS_TARGET := msm8996-elsa_global_com
 endif
 
+ifeq ($(CONFIG_MACH_MSM8996_ANNA_GLOBAL_COM),y)
+DTS_TARGET := msm8996-anna_global_com
+endif
+
+ifeq ($(CONFIG_MACH_MSM8996_ANNA_KR),y)
+DTS_TARGET := msm8996-anna_kr
+endif
+
 ifeq ($(CONFIG_MACH_MSM8996_ELSA_GLOBAL_LIVE_DUMMY),y)
 DTS_TARGET := msm8996-elsa_global_livedummy
 endif
@@ -108,6 +116,58 @@ endif
 
 ifeq ($(CONFIG_MACH_MSM8996_ELSA_DCM_JP),y)
 DTS_TARGET := msm8996-elsa_dcm
+endif
+
+ifeq ($(CONFIG_MACH_MSM8996_LUCYE_KR),y)
+DTS_TARGET := msm8996-lucye_kr
+endif
+
+ifeq ($(CONFIG_MACH_MSM8996_LUCYE_GLOBAL_COM),y)
+DTS_TARGET := msm8996-lucye_global_com
+endif
+
+ifeq ($(CONFIG_MACH_MSM8996_LUCYE_GLOBAL_CA),y)
+DTS_TARGET := msm8996-lucye_global_ca
+endif
+
+ifeq ($(CONFIG_MACH_MSM8996_LUCYE_VZW),y)
+DTS_TARGET := msm8996-lucye_vzw
+endif
+
+ifeq ($(CONFIG_MACH_MSM8996_LUCYE_SPR_US),y)
+DTS_TARGET := msm8996-lucye_spr_us
+endif
+
+ifeq ($(CONFIG_MACH_MSM8996_LUCYE_NAO_US),y)
+DTS_TARGET := msm8996-lucye_nao_us
+endif
+
+ifeq ($(CONFIG_MACH_MSM8996_LUCYE_ATT_US),y)
+DTS_TARGET := msm8996-lucye_att_us
+endif
+
+ifeq ($(CONFIG_MACH_MSM8996_LUCYE_TMO_US),y)
+DTS_TARGET := msm8996-lucye_tmo_us
+endif
+
+ifeq ($(CONFIG_MACH_MSM8996_LUCYE_CLR_PR),y)
+DTS_TARGET := msm8996-lucye_tmo_us
+endif
+
+ifeq ($(CONFIG_MACH_MSM8996_LUCYE_GLOBAL_LDU),y)
+DTS_TARGET := msm8996-lucye_global_ldu
+endif
+
+ifeq ($(CONFIG_MACH_MSM8996_LUCYE_LGU_LDU),y)
+DTS_TARGET := msm8996-lucye_lgu_ldu
+endif
+
+ifeq ($(CONFIG_MACH_MSM8996_LUCYE_ACG_US),y)
+DTS_TARGET := msm8996-lucye_acg_us
+endif
+
+ifeq ($(CONFIG_MACH_MSM8996_LUCYE_TRF_US_VZW),y)
+DTS_TARGET := msm8996-lucye_trf_us_vzw
 endif
 
 ALL_DTS := $(notdir $(wildcard echo $(srctree)/$(src)/$(DTS_TARGET)/*.dts))

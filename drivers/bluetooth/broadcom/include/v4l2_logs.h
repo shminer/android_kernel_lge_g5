@@ -13,7 +13,7 @@
  * for more details.
 
 
- *  Copyright (C) 2009-2014 Broadcom Corporation
+ *  Copyright (C) 2009-2017 Broadcom Corporation
  */
 
 
@@ -27,9 +27,8 @@
  *
  ******************************************************************************/
 
+#include "v4l2_target.h"
 
-#define TRUE 1
-#define FALSE 0
 
 #define V4L2_DBG_INIT     (1 << 0) /* enable logs for init and release in drivers */
 #define V4L2_DBG_OPEN     (1 << 1) /* enable logs for open call to drivers */
@@ -37,5 +36,74 @@
 #define V4L2_DBG_TX       (1 << 3) /* enable logs for tx in drivers */
 #define V4L2_DBG_RX       (1 << 4) /* enable logs for rx in drivers */
 
+extern int ldisc_dbg_param;
+extern int bt_dbg_param;
+extern int fm_dbg_param;
+extern int ant_dbg_param;
 
+#if BTLDISC_DEBUG
+#define BT_LDISC_DBG(flag, fmt, arg...) \
+    do { \
+        if (ldisc_dbg_param & flag) \
+            printk(KERN_DEBUG "(brcmldisc):%s:%d  "fmt"\n" , \
+                                            __func__, __LINE__, ## arg); \
+    } while(0)
+#else
+#define BT_LDISC_DBG(flag, fmt, arg...)
+#endif
+#define BT_LDISC_ERR(fmt, arg...)  printk(KERN_ERR "(brcmldisc)ERR:%s:%d  "fmt"\n" , \
+                                           __func__, __LINE__,## arg)
+
+#if BTLDISC_DEBUG
+#define BRCM_HCI_DBG(flag, fmt, arg...) \
+    do { \
+        if (ldisc_dbg_param & flag) \
+            printk(KERN_DEBUG "(brcmhci):%s:%d  "fmt"\n" , \
+                                            __func__, __LINE__, ## arg); \
+    } while(0)
+#else
+#define BRCM_HCI_DBG(flag,fmt, arg...)
+#endif
+#define BRCM_HCI_ERR(fmt, arg...)  printk(KERN_ERR "(brcmhci):%s:%d  "fmt"\n" , \
+                                           __func__, __LINE__,## arg)
+
+/* Debugging for BT protocol driver */
+#if BTDRV_DEBUG
+#define BT_DRV_DBG(flag, fmt, arg...) \
+    do { \
+        if (bt_dbg_param & flag) \
+            printk(KERN_DEBUG "(btdrv):%s:%d  "fmt"\n" , \
+                                            __func__, __LINE__, ## arg); \
+    } while(0)
+#else
+    #define BT_DRV_DBG(flag, fmt, arg...)
+#endif
+#define BT_DRV_ERR(fmt, arg...)  printk(KERN_ERR "(btdrv):%s:%d  "fmt"\n" , \
+                                           __func__, __LINE__,## arg)
+
+#if V4L2_FM_DEBUG
+#define V4L2_FM_DRV_DBG(flag, fmt, arg...) \
+    do { \
+        if (fm_dbg_param & flag) \
+            printk(KERN_DEBUG "(v4l2fmdrv):%s:%d  "fmt"\n" , \
+                                            __func__, __LINE__, ## arg); \
+    } while(0)
+#else
+#define V4L2_FM_DRV_DBG(flag, fmt, arg...)
+#endif
+#define V4L2_FM_DRV_ERR(fmt, arg...)  printk(KERN_ERR "(v4l2fmdrv):%s:%d  "fmt"\n" , \
+                                           __func__, __LINE__,## arg)
+
+#if V4L2_ANT_DEBUG
+#define V4L2_ANT_DBG(flag, fmt, arg...) \
+    do { \
+        if (ant_dbg_param & flag) \
+            printk(KERN_DEBUG "(v4l2ant):%s:%d  "fmt"\n" , \
+                                            __func__, __LINE__,## arg); \
+    } while(0)
+#else
+#define V4L2_ANT_DBG(flag, fmt, arg...)
+#endif
+#define V4L2_ANT_ERR(fmt, arg...)  printk(KERN_ERR "(v4l2ant):%s:%d "fmt"\n" , \
+                                           __func__,__LINE__,## arg)
 

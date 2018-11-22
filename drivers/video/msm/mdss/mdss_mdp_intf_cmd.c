@@ -1,4 +1,4 @@
-/* Copyright (c) 2013-2016, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2013-2017, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -21,6 +21,7 @@
 #include "mdss_debug.h"
 #include "mdss_mdp_trace.h"
 #include "mdss_dsi_clk.h"
+#include <linux/interrupt.h>
 #if defined(CONFIG_LGE_DISPLAY_COMMON)
 #include <linux/input/lge_touch_notify.h>
 #include <soc/qcom/lge/board_lge.h>
@@ -43,6 +44,8 @@ extern int skip_lcd_error_check;
 #endif
 
 static DEFINE_MUTEX(cmd_clk_mtx);
+
+static DEFINE_MUTEX(cmd_off_mtx);
 
 enum mdss_mdp_cmd_autorefresh_state {
 	MDP_AUTOREFRESH_OFF,
@@ -1034,7 +1037,7 @@ static int mdss_mdp_cmd_wait4readptr(struct mdss_mdp_cmd_ctx *ctx)
 	return rc;
 }
 
-static void mdss_mdp_cmd_intf_callback(void *data, int event)
+static int mdss_mdp_cmd_intf_callback(void *data, int event)
 {
 	struct mdss_mdp_cmd_ctx *ctx = data;
 	struct mdss_mdp_pp_tear_check *te = NULL;
@@ -1043,11 +1046,11 @@ static void mdss_mdp_cmd_intf_callback(void *data, int event)
 
 	if (!data) {
 		pr_err("%s: invalid ctx\n", __func__);
-		return;
+		return -EINVAL;
 	}
 
 	if (!ctx->ctl)
-		return;
+		return -EINVAL;
 
 	switch (event) {
 	case MDP_INTF_CALLBACK_DSI_WAIT:
@@ -1059,7 +1062,7 @@ static void mdss_mdp_cmd_intf_callback(void *data, int event)
 		 * just return
 		 */
 		if (ctx->intf_stopped || !is_pingpong_split(ctx->ctl->mfd))
-			return;
+			return -EINVAL;
 		atomic_inc(&ctx->rdptr_cnt);
 
 		/* enable clks and rd_ptr interrupt */
@@ -1068,7 +1071,7 @@ static void mdss_mdp_cmd_intf_callback(void *data, int event)
 		mixer = mdss_mdp_mixer_get(ctx->ctl, MDSS_MDP_MIXER_MUX_LEFT);
 		if (!mixer) {
 			pr_err("%s: null mixer\n", __func__);
-			return;
+			return -EINVAL;
 		}
 
 		/* wait for read pointer */
@@ -1092,6 +1095,7 @@ static void mdss_mdp_cmd_intf_callback(void *data, int event)
 		pr_debug("%s: unhandled event=%d\n", __func__, event);
 		break;
 	}
+	return 0;
 }
 
 static void mdss_mdp_cmd_lineptr_done(void *arg)
@@ -1117,7 +1121,7 @@ static void mdss_mdp_cmd_lineptr_done(void *arg)
 	spin_unlock(&ctx->clk_lock);
 }
 
-static void mdss_mdp_cmd_intf_recovery(void *data, int event)
+static int mdss_mdp_cmd_intf_recovery(void *data, int event)
 {
 	struct mdss_mdp_cmd_ctx *ctx = data;
 	unsigned long flags;
@@ -1125,11 +1129,11 @@ static void mdss_mdp_cmd_intf_recovery(void *data, int event)
 
 	if (!data) {
 		pr_err("%s: invalid ctx\n", __func__);
-		return;
+		return -EINVAL;
 	}
 
 	if (!ctx->ctl)
-		return;
+		return -EINVAL;
 
 	/*
 	 * Currently, only intf_fifo_underflow is
@@ -1139,7 +1143,7 @@ static void mdss_mdp_cmd_intf_recovery(void *data, int event)
 	if (event != MDP_INTF_DSI_CMD_FIFO_UNDERFLOW) {
 		pr_warn("%s: unsupported recovery event:%d\n",
 					__func__, event);
-		return;
+		return -EPERM;
 	}
 
 	if (atomic_read(&ctx->koff_cnt)) {
@@ -1163,6 +1167,7 @@ static void mdss_mdp_cmd_intf_recovery(void *data, int event)
 	if (notify_frame_timeout)
 		mdss_mdp_ctl_notify(ctx->ctl, MDP_NOTIFY_FRAME_TIMEOUT);
 
+	return 0;
 }
 
 static void mdss_mdp_cmd_pingpong_done(void *arg)
@@ -1210,7 +1215,8 @@ static void mdss_mdp_cmd_pingpong_done(void *arg)
 			       atomic_read(&ctx->koff_cnt));
 		if (sync_ppdone) {
 			atomic_inc(&ctx->pp_done_cnt);
-			schedule_work(&ctx->pp_done_work);
+			if (!ctl->commit_in_progress)
+				schedule_work(&ctx->pp_done_work);
 
 			mdss_mdp_resource_control(ctl,
 				MDP_RSRC_CTL_EVENT_PP_DONE);
@@ -1293,7 +1299,7 @@ static int mdss_mdp_cmd_add_lineptr_handler(struct mdss_mdp_ctl *ctl,
 	unsigned long flags;
 	int ret = 0;
 
-	mutex_lock(&ctl->offlock);
+	mutex_lock(&cmd_off_mtx);
 	ctx = (struct mdss_mdp_cmd_ctx *) ctl->intf_ctx[MASTER_CTX];
 	if (!ctx || !ctl->is_master) {
 		ret = -EINVAL;
@@ -1321,7 +1327,7 @@ static int mdss_mdp_cmd_add_lineptr_handler(struct mdss_mdp_ctl *ctl,
 	if (ctl->mfd->split_mode == MDP_DUAL_LM_DUAL_DISPLAY)
 		mutex_unlock(&cmd_clk_mtx);
 done:
-	mutex_unlock(&ctl->offlock);
+	mutex_unlock(&cmd_off_mtx);
 
 	return ret;
 }
@@ -1762,7 +1768,7 @@ static int mdss_mdp_cmd_add_vsync_handler(struct mdss_mdp_ctl *ctl,
 	bool enable_rdptr = false;
 	int ret = 0;
 
-	mutex_lock(&ctl->offlock);
+	mutex_lock(&cmd_off_mtx);
 	ctx = (struct mdss_mdp_cmd_ctx *) ctl->intf_ctx[MASTER_CTX];
 	if (!ctx) {
 		pr_err("%s: invalid ctx\n", __func__);
@@ -1799,7 +1805,7 @@ static int mdss_mdp_cmd_add_vsync_handler(struct mdss_mdp_ctl *ctl,
 	}
 
 done:
-	mutex_unlock(&ctl->offlock);
+	mutex_unlock(&cmd_off_mtx);
 
 	return ret;
 }
@@ -1877,12 +1883,35 @@ int mdss_mdp_cmd_reconfigure_splash_done(struct mdss_mdp_ctl *ctl,
 	return ret;
 }
 
+static int __mdss_mdp_wait4pingpong(struct mdss_mdp_cmd_ctx *ctx)
+{
+	int rc = 0;
+	s64 expected_time = ktime_to_ms(ktime_get()) + KOFF_TIMEOUT_MS;
+	s64 time;
+
+	do {
+		rc = wait_event_timeout(ctx->pp_waitq,
+				atomic_read(&ctx->koff_cnt) == 0,
+				KOFF_TIMEOUT);
+		time = ktime_to_ms(ktime_get());
+
+		MDSS_XLOG(rc, time, expected_time, atomic_read(&ctx->koff_cnt));
+		/*
+		 * If we time out, counter is valid and time is less,
+		 * wait again.
+		 */
+	} while (atomic_read(&ctx->koff_cnt) && (rc == 0) &&
+			(time < expected_time));
+
+	return rc;
+}
+
 static int mdss_mdp_cmd_wait4pingpong(struct mdss_mdp_ctl *ctl, void *arg)
 {
 	struct mdss_mdp_cmd_ctx *ctx;
 	struct mdss_panel_data *pdata;
 	unsigned long flags;
-	int rc = 0;
+	int rc = 0, te_irq;
 
 	ctx = (struct mdss_mdp_cmd_ctx *) ctl->intf_ctx[MASTER_CTX];
 	if (!ctx) {
@@ -1897,9 +1926,7 @@ static int mdss_mdp_cmd_wait4pingpong(struct mdss_mdp_ctl *ctl, void *arg)
 	pr_debug("%s: intf_num=%d ctx=%pK koff_cnt=%d\n", __func__,
 			ctl->intf_num, ctx, atomic_read(&ctx->koff_cnt));
 
-	rc = wait_event_timeout(ctx->pp_waitq,
-			atomic_read(&ctx->koff_cnt) == 0,
-			KOFF_TIMEOUT);
+	rc = __mdss_mdp_wait4pingpong(ctx);
 
 	trace_mdp_cmd_wait_pingpong(ctl->num,
 				atomic_read(&ctx->koff_cnt));
@@ -1930,13 +1957,25 @@ static int mdss_mdp_cmd_wait4pingpong(struct mdss_mdp_ctl *ctl, void *arg)
 #else
 	if (rc <= 0) {
 #endif
-
 		pr_err("%s:wait4pingpong timed out ctl=%d rc=%d cnt=%d koff_cnt=%d\n",
 				__func__,
 				ctl->num, rc, ctx->pp_timeout_report_cnt,
 				atomic_read(&ctx->koff_cnt));
-		if (ctx->pp_timeout_report_cnt == 0) {
-			WARN(1, "mdss_mdp_cmd_wait4pingpong timed out: rc=%d, ctl=%d\n", rc, ctl->num);
+
+		/* enable TE irq to check if it is coming from the panel */
+		te_irq = gpio_to_irq(pdata->panel_te_gpio);
+		enable_irq(te_irq);
+
+		/* wait for 20ms to ensure we are getting the next TE */
+		usleep_range(20000, 20010);
+
+		reinit_completion(&pdata->te_done);
+		rc = wait_for_completion_timeout(&pdata->te_done, KOFF_TIMEOUT);
+
+		if (!rc) {
+			MDSS_XLOG(0xbac);
+			mdss_fb_report_panel_dead(ctl->mfd);
+		} else if (ctx->pp_timeout_report_cnt == 0) {
 			MDSS_XLOG(0xbad);
 			MDSS_XLOG_TOUT_HANDLER("mdp", "dsi0_ctrl", "dsi0_phy",
 				"dsi1_ctrl", "dsi1_phy", "vbif", "vbif_nrt",
@@ -1948,6 +1987,10 @@ static int mdss_mdp_cmd_wait4pingpong(struct mdss_mdp_ctl *ctl, void *arg)
 				"dbg_bus", "vbif_dbg_bus", "panic");
 			mdss_fb_report_panel_dead(ctl->mfd);
 		}
+
+		/* disable te irq */
+		disable_irq_nosync(te_irq);
+
 		ctx->pp_timeout_report_cnt++;
 		rc = -EPERM;
 
@@ -2194,6 +2237,7 @@ int mdss_mdp_cmd_set_autorefresh_mode(struct mdss_mdp_ctl *mctl, int frame_cnt)
 		 */
 		ctx->autorefresh_state = MDP_AUTOREFRESH_ON_REQUESTED;
 		ctx->autorefresh_frame_cnt = frame_cnt;
+		mctl->mdata->serialize_wait4pp = true;
 
 		/* Cancel GATE Work Item */
 		if (cancel_work_sync(&ctx->gate_clk_work))
@@ -2207,8 +2251,10 @@ int mdss_mdp_cmd_set_autorefresh_mode(struct mdss_mdp_ctl *mctl, int frame_cnt)
 		if (frame_cnt == 0) {
 			ctx->autorefresh_state = MDP_AUTOREFRESH_OFF;
 			ctx->autorefresh_frame_cnt = 0;
+			mctl->mdata->serialize_wait4pp = false;
 		} else {
 			ctx->autorefresh_frame_cnt = frame_cnt;
+			mctl->mdata->serialize_wait4pp = true;
 		}
 		break;
 	case MDP_AUTOREFRESH_ON:
@@ -2220,6 +2266,7 @@ int mdss_mdp_cmd_set_autorefresh_mode(struct mdss_mdp_ctl *mctl, int frame_cnt)
 			ctx->autorefresh_state = MDP_AUTOREFRESH_OFF_REQUESTED;
 		} else {
 			ctx->autorefresh_frame_cnt = frame_cnt;
+			mctl->mdata->serialize_wait4pp = true;
 		}
 		break;
 	case MDP_AUTOREFRESH_OFF_REQUESTED:
@@ -2229,6 +2276,7 @@ int mdss_mdp_cmd_set_autorefresh_mode(struct mdss_mdp_ctl *mctl, int frame_cnt)
 			pr_debug("cancelling autorefresh off request\n");
 			ctx->autorefresh_state = MDP_AUTOREFRESH_ON;
 			ctx->autorefresh_frame_cnt = frame_cnt;
+			mctl->mdata->serialize_wait4pp = true;
 		}
 		break;
 	default:
@@ -2339,7 +2387,7 @@ static void mdss_mdp_cmd_wait4_autorefresh_pp(struct mdss_mdp_ctl *ctl)
 
 	MDSS_XLOG(ctl->num, line_out, ctl->mixer_left->roi.h);
 
-	if (line_out < ctl->mixer_left->roi.h) {
+	if ((line_out < ctl->mixer_left->roi.h) && line_out) {
 		reinit_completion(&ctx->autorefresh_ppdone);
 
 		/* enable ping pong done */
@@ -2413,7 +2461,7 @@ static u32 get_autorefresh_timeout(struct mdss_mdp_ctl *ctl,
 		line_count = mdss_mdp_pingpong_read(mixer->pingpong_base,
 			MDSS_MDP_REG_PP_SYNC_CONFIG_HEIGHT) & 0xffff;
 
-	fps = mdss_panel_get_framerate(pinfo);
+	fps = mdss_panel_get_framerate(pinfo, FPS_RESOLUTION_HZ);
 	v_total = mdss_panel_get_vtotal(pinfo);
 
 	/*
@@ -2591,6 +2639,7 @@ static int mdss_mdp_disable_autorefresh(struct mdss_mdp_ctl *ctl,
 	mdss_mdp_pingpong_write(pp_base,
 				MDSS_MDP_REG_PP_SYNC_CONFIG_VSYNC, cfg);
 
+	ctl->mdata->serialize_wait4pp = false;
 	return 0;
 }
 
@@ -2883,6 +2932,8 @@ int mdss_mdp_cmd_ctx_stop(struct mdss_mdp_ctl *ctl,
 		ctx->default_pp_num, NULL, NULL);
 
 	memset(ctx, 0, sizeof(*ctx));
+	/* intf stopped,  no more kickoff */
+	ctx->intf_stopped = 1;
 
 	return 0;
 }
@@ -2979,6 +3030,7 @@ int mdss_mdp_cmd_stop(struct mdss_mdp_ctl *ctl, int panel_power_state)
 	MDSS_XLOG(ctx->panel_power_state, panel_power_state);
 
 	mutex_lock(&ctl->offlock);
+	mutex_lock(&cmd_off_mtx);
 	if (mdss_panel_is_power_off(panel_power_state)) {
 		/* Transition to display off */
 		send_panel_events = true;
@@ -3025,7 +3077,11 @@ int mdss_mdp_cmd_stop(struct mdss_mdp_ctl *ctl, int panel_power_state)
 			ctx->intf_stopped = 0;
 			if (sctx)
 				sctx->intf_stopped = 0;
-
+			/*
+			 * Tearcheck was disabled while entering LP2 state.
+			 * Enable it back to allow updates in LP1 state.
+			 */
+			mdss_mdp_tearcheck_enable(ctl, true);
 			goto end;
 		}
 	}
@@ -3098,6 +3154,7 @@ end:
 	}
 
 	MDSS_XLOG(ctl->num, atomic_read(&ctx->koff_cnt), XLOG_FUNC_EXIT);
+	mutex_unlock(&cmd_off_mtx);
 	mutex_unlock(&ctl->offlock);
 	pr_debug("%s:-\n", __func__);
 

@@ -46,8 +46,6 @@ int pcibios_add_device(struct pci_dev *dev)
 
 	return 0;
 }
-
-
 #ifdef CONFIG_PCI_DOMAINS_GENERIC
 static bool dt_domain_found = false;
 

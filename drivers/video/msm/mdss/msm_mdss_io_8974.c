@@ -1,4 +1,4 @@
-/* Copyright (c) 2012-2016, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2012-2017, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -23,6 +23,10 @@
 #include "mdss_edp.h"
 #include "mdss_debug.h"
 #include "mdss_dsi_phy.h"
+
+#if defined(CONFIG_LGE_DISPLAY_MFTS_DET_SUPPORTED) && !defined(CONFIG_LGE_DISPLAY_DYN_DSI_MODE_SWITCH)
+#include <soc/qcom/lge/board_lge.h>
+#endif
 
 #define MDSS_DSI_DSIPHY_REGULATOR_CTRL_0	0x00
 #define MDSS_DSI_DSIPHY_REGULATOR_CTRL_1	0x04
@@ -502,6 +506,7 @@ void mdss_dsi_phy_sw_reset(struct mdss_dsi_ctrl_pdata *ctrl)
 	}
 	mutex_unlock(&sdata->phy_reg_lock);
 
+	/* All other quirks go here */
 	MDSS_XLOG(ctrl->ndx, sctrl ? sctrl->ndx : 0xff);
 
 	if ((sdata->hw_rev == MDSS_DSI_HW_REV_103) &&
@@ -1205,7 +1210,9 @@ void mdss_dsi_phy_init(struct mdss_dsi_ctrl_pdata *ctrl)
 	MDSS_XLOG(ctrl ? ctrl->ndx : 0xff);
 	mdss_dsi_phy_regulator_ctrl(ctrl, true);
 	mdss_dsi_phy_ctrl(ctrl, true);
-	MDSS_XLOG(ctrl->ndx, MIPI_INP(ctrl->phy_io.base + 0x10));
+	if (ctrl){
+		MDSS_XLOG(ctrl->ndx, MIPI_INP(ctrl->phy_io.base + 0x10));
+	}
 }
 
 void mdss_dsi_core_clk_deinit(struct device *dev, struct dsi_shared_data *sdata)
@@ -1250,6 +1257,16 @@ int mdss_dsi_clk_refresh(struct mdss_panel_data *pdata, bool update_phy)
 
 	if (update_phy) {
 		pinfo->mipi.frame_rate = mdss_panel_calc_frame_rate(pinfo);
+#if defined(CONFIG_LGE_DISPLAY_MFTS_DET_SUPPORTED) && !defined(CONFIG_LGE_DISPLAY_DYN_DSI_MODE_SWITCH)
+		if (lge_get_factory_boot()) {
+			if (pinfo->is_validate_lcd == 1)
+				pinfo->mipi.frame_rate = 89;
+			else
+				pinfo->mipi.frame_rate = 60;
+			pr_info("%s: new frame rate %d, validate %d \n",
+					__func__, pinfo->mipi.frame_rate, pinfo->is_validate_lcd);
+		}
+#endif
 		pr_debug("%s: new frame rate %d\n",
 				__func__, pinfo->mipi.frame_rate);
 	}
@@ -1264,6 +1281,12 @@ int mdss_dsi_clk_refresh(struct mdss_panel_data *pdata, bool update_phy)
 	ctrl_pdata->refresh_clk_rate = false;
 	ctrl_pdata->pclk_rate = pdata->panel_info.mipi.dsi_pclk_rate;
 	ctrl_pdata->byte_clk_rate = pdata->panel_info.clk_rate / 8;
+#if defined(CONFIG_LGE_DISPLAY_MFTS_DET_SUPPORTED) && !defined(CONFIG_LGE_DISPLAY_DYN_DSI_MODE_SWITCH)
+	if (lge_get_factory_boot()) {
+		pr_info("%s ctrl_pdata->byte_clk_rate=%d ctrl_pdata->pclk_rate=%d\n",
+			__func__, ctrl_pdata->byte_clk_rate, ctrl_pdata->pclk_rate);
+	}
+#endif
 	pr_debug("%s ctrl_pdata->byte_clk_rate=%d ctrl_pdata->pclk_rate=%d\n",
 		__func__, ctrl_pdata->byte_clk_rate, ctrl_pdata->pclk_rate);
 
@@ -1806,8 +1829,10 @@ static int mdss_dsi_ulps_config(struct mdss_dsi_ctrl_pdata *ctrl,
 		 * to be in stop state.
 		 */
 		MIPI_OUTP(ctrl->ctrl_base + 0x0AC, active_lanes << 16);
+		wmb(); /* ensure lanes are put to stop state */
 
 		MIPI_OUTP(ctrl->ctrl_base + 0x0AC, 0x0);
+		wmb(); /* ensure lanes are in proper state */
 
 		/*
 		 * Wait for a short duration before enabling
@@ -2246,10 +2271,10 @@ int mdss_dsi_post_clkoff_cb(void *priv,
 		return -EINVAL;
 	}
 
+	pdata = &ctrl->panel_data;
 	if ((clk_type & MDSS_DSI_CORE_CLK) &&
 	    (curr_state == MDSS_DSI_CLK_OFF)) {
 		sdata = ctrl->shared_data;
-		pdata = &ctrl->panel_data;
 
 		for (i = DSI_MAX_PM - 1; i >= DSI_CORE_PM; i--) {
 			if ((ctrl->ctrl_state & CTRL_STATE_DSI_ACTIVE) &&
@@ -2268,6 +2293,16 @@ int mdss_dsi_post_clkoff_cb(void *priv,
 			}
 			MDSS_XLOG(ctrl->ndx, ctrl->core_power);
 		}
+
+		/*
+		 * temp workaround until framework issues pertaining to LP2
+		 * power state transitions are fixed. For now, we internally
+		 * transition to LP2 state whenever core power is turned off
+		 * in LP1 state
+		 */
+		if (mdss_dsi_is_panel_on_lp(pdata))
+			mdss_dsi_panel_power_ctrl(pdata,
+				MDSS_PANEL_POWER_LP2);
 	}
 	return rc;
 }
@@ -2287,10 +2322,10 @@ int mdss_dsi_pre_clkon_cb(void *priv,
 		return -EINVAL;
 	}
 
+	pdata = &ctrl->panel_data;
 	if ((clk_type & MDSS_DSI_CORE_CLK) && (new_state == MDSS_DSI_CLK_ON) &&
 	    (ctrl->core_power == false)) {
 		sdata = ctrl->shared_data;
-		pdata = &ctrl->panel_data;
 		/*
 		 * Enable DSI core power
 		 * 1.> PANEL_PM are controlled as part of
@@ -2318,8 +2353,15 @@ int mdss_dsi_pre_clkon_cb(void *priv,
 			}
 			MDSS_XLOG(ctrl->ndx, ctrl->core_power);
 		}
+		/*
+		 * temp workaround until framework issues pertaining to LP2
+		 * power state transitions are fixed. For now, if we intend to
+		 * send a frame update when in LP1, we have to explicitly exit
+		 * LP2 state here
+		 */
+		if (mdss_dsi_is_panel_on_ulp(pdata))
+			mdss_dsi_panel_power_ctrl(pdata, MDSS_PANEL_POWER_LP1);
 	}
-
 	/* Disable dynamic clock gating*/
 	if (ctrl->mdss_util->dyn_clk_gating_ctrl)
 		ctrl->mdss_util->dyn_clk_gating_ctrl(0);

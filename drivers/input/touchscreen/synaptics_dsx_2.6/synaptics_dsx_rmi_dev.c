@@ -576,6 +576,10 @@ static ssize_t rmidev_read(struct file *filp, char __user *buf,
 		goto clean_up;
 	}
 
+	if (count == 0) {
+		retval = 0;
+		goto clean_up;
+	}
 	address = (unsigned short)(*f_pos);
 
 	rmidev_allocate_buffer(count);
@@ -653,6 +657,10 @@ static ssize_t rmidev_write(struct file *filp, const char __user *buf,
 		goto unlock;
 	}
 
+	if (count == 0) {
+		retval = 0;
+		goto unlock;
+	}
 	rmidev_allocate_buffer(count);
 
 	if (copy_from_user(rmidev->tmpbuf, buf, count)) {

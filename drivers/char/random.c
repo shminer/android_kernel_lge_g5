@@ -272,6 +272,7 @@
 
 #ifdef CONFIG_CRYPTO_CCMODE
 #include <linux/cc_mode.h>
+#define RETRY_CNT_SIZE 300
 #endif //CONFIG_CRYPTO_CCMODE
 /* #define ADD_INTERRUPT_BENCH */
 
@@ -1374,6 +1375,49 @@ _random_read(int nonblock, char __user *buf, size_t nbytes)
 }
 
 static ssize_t
+_random_read_cc(int nonblock, char __user *buf, size_t nbytes)
+{
+	ssize_t n = 0;
+	size_t tot_len = 0, ent_len = 0;
+	int retry_cnt = RETRY_CNT_SIZE;
+
+	if (nbytes == 0)
+		return 0;
+
+	nbytes = min_t(size_t, nbytes, SEC_XFER_SIZE);
+	ent_len = nbytes;
+	while (1) {
+		n = extract_entropy_user(&blocking_pool, buf+tot_len, ent_len);
+		if (n < 0)
+			return n;
+		trace_random_read(n*8, (ent_len-n)*8,
+				  ENTROPY_BITS(&blocking_pool),
+				  ENTROPY_BITS(&input_pool));
+
+		tot_len += n;
+		ent_len -= n;
+
+		if(tot_len > nbytes)
+			tot_len = nbytes;
+		else if(ent_len < 0)
+			ent_len = 0;
+
+		if (tot_len == nbytes)
+			return tot_len;
+
+		if(retry_cnt-- < 0)
+			return -EAGAIN;
+
+		wait_event_interruptible(random_read_wait,
+			ENTROPY_BITS(&input_pool) >=
+			random_read_wakeup_bits);
+		if (signal_pending(current))
+			return -ERESTARTSYS;
+	}
+}
+
+
+static ssize_t
 random_read(struct file *file, char __user *buf, size_t nbytes, loff_t *ppos)
 {
 	return _random_read(file->f_flags & O_NONBLOCK, buf, nbytes);
@@ -1382,7 +1426,7 @@ random_read(struct file *file, char __user *buf, size_t nbytes, loff_t *ppos)
 static ssize_t
 urandom_read(struct file *file, char __user *buf, size_t nbytes, loff_t *ppos)
 {
-	int ret;
+	ssize_t ret = 0;
 #ifdef CONFIG_CRYPTO_CCMODE
 	int cc_flag = 0;
 #endif //CONFIG_CRYPTO_CCMODE
@@ -1399,18 +1443,19 @@ urandom_read(struct file *file, char __user *buf, size_t nbytes, loff_t *ppos)
         /* When SYSCALL(getrandom) is called,
            If file or ppos pointer is NULL, set nonblock 0 */
         if (file == NULL || ppos == NULL)
-            ret = _random_read(0, buf, nbytes);
+			ret = _random_read_cc(0, buf, nbytes);
         else
-            ret = random_read(file, buf, nbytes, ppos);
-    }
+			ret = _random_read_cc(file->f_flags & O_NONBLOCK, buf, nbytes);
+	}
 	else {
 #endif
 	ret = extract_entropy_user(&nonblocking_pool, buf, nbytes);
+		trace_urandom_read(8 * nbytes, ENTROPY_BITS(&nonblocking_pool),
+			ENTROPY_BITS(&input_pool));
 #ifdef CONFIG_CRYPTO_CCMODE
     }
 #endif
-	trace_urandom_read(8 * nbytes, ENTROPY_BITS(&nonblocking_pool),
-			   ENTROPY_BITS(&input_pool));
+
 	return ret;
 }
 
@@ -1734,13 +1779,15 @@ int random_int_secret_init(void)
 	return 0;
 }
 
+static DEFINE_PER_CPU(__u32 [MD5_DIGEST_WORDS], get_random_int_hash)
+		__aligned(sizeof(unsigned long));
+
 /*
  * Get a random word for internal kernel use only. Similar to urandom but
  * with the goal of minimal entropy pool depletion. As a result, the random
  * value is not cryptographically secure but for several uses the cost of
  * depleting entropy is too high
  */
-static DEFINE_PER_CPU(__u32 [MD5_DIGEST_WORDS], get_random_int_hash);
 unsigned int get_random_int(void)
 {
 	__u32 *hash;

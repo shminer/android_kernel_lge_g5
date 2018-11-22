@@ -92,9 +92,6 @@ void update_cpufreq(int cpu, int freq)
 {
 	unsigned long flag = 0;
 	int cluster = -1, fcpu, lcpu;
-#ifdef CURR_HIST
-	int i;
-#endif
 	struct sys_cmd_freq_req *pfreq;
 
 	spin_lock_irqsave(&platform_data.frequency_change_lock,
@@ -110,11 +107,6 @@ void update_cpufreq(int cpu, int freq)
 	pfreq->req_cluster = cluster;
 	pfreq->req_cpu = cpu;
 	pfreq->req_freq = freq;
-#ifdef CURR_HIST
-	for(i = 0 ; i < MAX_CORES; i++) {
-		pfreq->each_load[i] = get_busy(i);
-	}
-#endif
 
 	spin_unlock_irqrestore(&platform_data.frequency_change_lock, flag);
 
@@ -194,10 +186,6 @@ static int start_kpolicy(int kpolicy)
 	return 0;
 }
 
-#ifdef FPS_BOOST
-extern u64 last_commit_ms;
-static struct commit_sync sync;
-#endif
 static int stop_kpolicy(void)
 {
 	int last_policy, cl = -1, dest_cpu = -1;
@@ -209,10 +197,6 @@ static int stop_kpolicy(void)
 	platform_data.notify_info.cur_policy = NT;
 	platform_data.state = FREEZE;
 	platform_data.level = CEILING;
-#ifdef FPS_BOOST
-	platform_data.state &= ~BOOST;
-	sync.drop_count= 0;
-#endif
 	cancel_delayed_work(&platform_data.frequency_changed_wq);
 
 	/* confirmed stop */
@@ -262,50 +246,7 @@ noti:
 	return -EINVAL;
 }
 
-#ifdef BMC
 #define ABS_DIFF(x,y) ((x > y)? (x-y) : (y-x))
-#ifdef FPS_BOOST
-static int fps_boost
-(struct sys_cmd_tunables_bmc_req *bmc_ptr)
-{
-	int ret = 0;
-
-	if(!sync.drop_thres)
-		return ret;
-
-	if(platform_data.state & BOOST) {
-
-		u64 curr = ktime_to_ms(ktime_get());
-
-		if(curr - sync.sync_start <= sync.sync_duration) {
-			if(sync.last_commit_ms == last_commit_ms) {
-				sync.sync_start = ktime_to_ms(ktime_get());
-				sync.sync_duration += bmc_ptr->duration;
-			}
-			return 1;
-		} else {
-			platform_data.state &= ~BOOST;
-			sync.sync_start = 0;
-			sync.drop_count = 0;
-			sync.sync_duration = bmc_ptr->duration;
-		}
-	}
-	if(last_commit_ms == sync.last_commit_ms) {
-		++sync.drop_count;
-	} else {
-		if(sync.drop_count > 0)
-			--sync.drop_count;
-	}
-	if(sync.drop_count >= sync.drop_thres) {
-		platform_data.state = RUNNING | BOOST;
-		sync.sync_start= ktime_to_ms(ktime_get());
-		return 1;
-	}
-	sync.last_commit_ms = last_commit_ms;
-
-	return ret;
-}
-#endif
 static int get_opt_frequency(int cl, int lvl)
 {
 	int cpu, lcpu, fcpu, freq = 0;
@@ -317,12 +258,6 @@ static int get_opt_frequency(int cl, int lvl)
 
 	bmc_param = &platform_data.ioctl.tunables_bmc_param[cl];
 	freq = platform_data.ioctl.freq_per_cluster[cl].req_freq;
-#ifdef FPS_BOOST
-	if(bmc_param->thres > 0 && fps_boost(bmc_param)) {
-		return ((freq <= bmc_param->turbo) ?
-				bmc_param->turbo : freq);
-	}
-#endif
 
 	if(freq < bmc_param->minturbo)
 		return bmc_param->minturbo;
@@ -358,7 +293,7 @@ static int get_opt_frequency(int cl, int lvl)
 		freq = bmc_param->maxturbo;
 	return freq;
 }
-#endif
+
 
 static int get_dst_freq(int dest_cpu, int lvl)
 {
@@ -379,11 +314,7 @@ static int get_dst_freq(int dest_cpu, int lvl)
 		pr_err("%s gov %d is not valid\n", __func__, dest_cpu);
 		return -1;
 	}
-#ifdef BMC
 	return get_opt_frequency(cl, lvl);
-#else
-	return req_freq;
-#endif
 }
 static void sysfs_noti_process(struct work_struct *sysfs_noti_work)
 {
@@ -550,21 +481,6 @@ static int update_sys_frequency
 
 	return ret;
 }
-#ifdef CURR_HIST
-static int update_sys_cpu_load(unsigned long arg)
-{
-	struct sys_cmd_freq_req pfreq;
-	int i, ret = 0;
-	for(i = 0 ; i < MAX_CORES; i++) {
-		pfreq.each_load[i] = get_busy(i);
-		pfreq.cstate[i] = sched_get_cpu_cstate(i);
-	}
-	ret = copy_to_user((void __user*)arg,
-			&pfreq,
-		    sizeof(struct sys_cmd_freq_req));
-	return ret;
-}
-#endif
 
 static int update_sys_tunables(unsigned long arg)
 {
@@ -577,13 +493,9 @@ static int update_sys_tunables(unsigned long arg)
 		return -ENOTTY;
 	return ret;
 }
-#ifdef BMC
 static int update_sys_opt_tunables(unsigned long arg)
 {
 	void __user *argp = (void __user *)arg;
-#ifdef FPS_BOOST
-	struct sys_cmd_tunables_bmc_req *bmc_req;
-#endif
 	int ret = 0;
 
 	ret = copy_from_user(&platform_data.ioctl.tunables_bmc_param,
@@ -592,15 +504,9 @@ static int update_sys_opt_tunables(unsigned long arg)
 	if(ret)
 		return -ENOTTY;
 
-#ifdef FPS_BOOST
-	bmc_req = &platform_data.ioctl.tunables_bmc_param[BIT_BIG];
-	sync.sync_duration = bmc_req->duration;
-	sync.drop_thres = bmc_req->thres;
-#endif
 	return ret;
 
 }
-#endif
 static int update_sys_perf_level(unsigned long arg)
 {
 	void __user *argp = (void __user *)arg;
@@ -638,20 +544,13 @@ static long io_progress(struct file *filep, unsigned int cmd,
 	case IOCTL_BASIC_TUNABLE_REQ:
 		ret = update_sys_tunables(arg);
 		break;
-#ifdef BMC
 	case IOCTL_TUNALBE_BMC_REQ:
 		update_sys_opt_tunables(arg);
 		break;
-#endif
 	case IOCTL_PING_REQ:
 		ping_expired = 0;
 		ping_time = ktime_to_ms(ktime_get());
 		break;
-#ifdef CURR_HIST
-	case IOCTL_LOAD_REQ:
-		update_sys_cpu_load(arg);
-		break;
-#endif
 	default:
 		break;
 	}

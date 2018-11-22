@@ -4,7 +4,7 @@
  * Copyright (C) 2003 Al Borchers (alborchers@steinerpoint.com)
  * Copyright (C) 2008 David Brownell
  * Copyright (C) 2008 by Nokia Corporation
- * Copyright (c) 2013-2015 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2013-2015, 2017 The Linux Foundation. All rights reserved.
  *
  * This code also borrows from usbserial.c, which is
  * Copyright (C) 1999 - 2002 Greg Kroah-Hartman (greg@kroah.com)
@@ -330,8 +330,18 @@ EXPORT_SYMBOL_GPL(gs_alloc_req);
  */
 void gs_free_req(struct usb_ep *ep, struct usb_request *req)
 {
+#ifdef CONFIG_LGE_USB_G_ANDROID
+	if (req != NULL) {
+		if (req->buf != NULL) {
+			kfree(req->buf);
+			req->buf = NULL;
+		}
+		usb_ep_free_request(ep, req);
+	}
+#else
 	kfree(req->buf);
 	usb_ep_free_request(ep, req);
+#endif
 }
 EXPORT_SYMBOL_GPL(gs_free_req);
 
@@ -415,6 +425,8 @@ __acquires(&port->port_lock)
 					printk(KERN_ERR "%s: %s err %d\n",
 					__func__, "queue", status);
 					list_add(&req->list, pool);
+				} else {
+					port->write_started++;
 				}
 				prev_len = 0;
 			}
@@ -875,7 +887,7 @@ static int gs_open(struct tty_struct *tty, struct file *file)
 		spin_lock_irq(&port->port_lock);
 
 		if (status) {
-			pr_debug("gs_open: ttyGS%d (%p,%p) no buffer\n",
+			pr_debug("gs_open: ttyGS%d (%pK,%pK) no buffer\n",
 				port->port_num, tty, file);
 			port->openclose = false;
 			goto exit_unlock_port;
@@ -910,7 +922,7 @@ static int gs_open(struct tty_struct *tty, struct file *file)
 			gser->connect(gser);
 	}
 
-	pr_debug("gs_open: ttyGS%d (%p,%p)\n", port->port_num, tty, file);
+	pr_debug("gs_open: ttyGS%d (%pK,%pK)\n", port->port_num, tty, file);
 
 	status = 0;
 
@@ -946,7 +958,7 @@ static void gs_close(struct tty_struct *tty, struct file *file)
 		goto exit;
 	}
 
-	pr_debug("gs_close: ttyGS%d (%p,%p) ...\n", port->port_num, tty, file);
+	pr_debug("gs_close: ttyGS%d (%pK,%pK) ...\n", port->port_num, tty, file);
 
 	/* mark port as closing but in use; we can drop port lock
 	 * and sleep if necessary
@@ -984,7 +996,7 @@ static void gs_close(struct tty_struct *tty, struct file *file)
 
 	port->openclose = false;
 
-	pr_debug("gs_close: ttyGS%d (%p,%p) done!\n",
+	pr_debug("gs_close: ttyGS%d (%pK,%pK) done!\n",
 			port->port_num, tty, file);
 
 	wake_up(&port->port.close_wait);
@@ -1000,7 +1012,7 @@ static int gs_write(struct tty_struct *tty, const unsigned char *buf, int count)
 
 	if (!port)
 		return 0;
-	pr_vdebug("gs_write: ttyGS%d (%p) writing %d bytes\n",
+	pr_vdebug("gs_write: ttyGS%d (%pK) writing %d bytes\n",
 			port->port_num, tty, count);
 
 	spin_lock_irqsave(&port->port_lock, flags);
@@ -1022,7 +1034,7 @@ static int gs_put_char(struct tty_struct *tty, unsigned char ch)
 
 	if (!port)
 		return 0;
-	pr_vdebug("gs_put_char: (%d,%p) char=0x%x, called from %pf\n",
+	pr_vdebug("gs_put_char: (%d,%pK) char=0x%x, called from %pKf\n",
 		port->port_num, tty, ch, __builtin_return_address(0));
 
 	spin_lock_irqsave(&port->port_lock, flags);
@@ -1039,7 +1051,7 @@ static void gs_flush_chars(struct tty_struct *tty)
 
 	if (!port)
 		return;
-	pr_vdebug("gs_flush_chars: (%d,%p)\n", port->port_num, tty);
+	pr_vdebug("gs_flush_chars: (%d,%pK)\n", port->port_num, tty);
 
 	spin_lock_irqsave(&port->port_lock, flags);
 	if (port->port_usb)
@@ -1060,7 +1072,7 @@ static int gs_write_room(struct tty_struct *tty)
 		room = gs_buf_space_avail(&port->port_write_buf);
 	spin_unlock_irqrestore(&port->port_lock, flags);
 
-	pr_vdebug("gs_write_room: (%d,%p) room=%d\n",
+	pr_vdebug("gs_write_room: (%d,%pK) room=%d\n",
 		port->port_num, tty, room);
 
 	return room;
@@ -1078,7 +1090,7 @@ static int gs_chars_in_buffer(struct tty_struct *tty)
 	chars = gs_buf_data_avail(&port->port_write_buf);
 	spin_unlock_irqrestore(&port->port_lock, flags);
 
-	pr_vdebug("gs_chars_in_buffer: (%d,%p) chars=%d\n",
+	pr_vdebug("gs_chars_in_buffer: (%d,%pK) chars=%d\n",
 		port->port_num, tty, chars);
 
 	return chars;

@@ -26,6 +26,11 @@
 #include <linux/of_slimbus.h>
 #include <linux/timer.h>
 #include <linux/msm-sps.h>
+#ifdef CONFIG_MACH_LGE
+#include <linux/reboot.h>
+#include <soc/qcom/lge/board_lge.h>
+#endif
+
 #include "slim-msm.h"
 
 #define NGD_SLIM_NAME	"ngd_msm_ctrl"
@@ -1258,9 +1263,12 @@ hw_init_retry:
 				retries++;
 				goto hw_init_retry;
 			}
-
-			panic("[LGE_BSP_AUDIO]SLIM power req failed all 3 times... reboot");
-			
+#ifdef CONFIG_MACH_LGE
+            if((lge_get_boot_mode() == LGE_BOOT_MODE_QEM_56K) || (lge_get_boot_mode() == LGE_BOOT_MODE_QEM_910K))
+				kernel_restart(NULL);
+            else
+			    panic("[LGE_BSP_AUDIO]SLIM power req failed all 3 times... reboot");
+#endif
 			return ret;
 		}
 	}
@@ -1403,8 +1411,7 @@ static int ngd_slim_rx_msgq_thread(void *data)
 		int retries = 0;
 		u8 wbuf[8];
 
-		set_current_state(TASK_INTERRUPTIBLE);
-		wait_for_completion(notify);
+		wait_for_completion_interruptible(notify);
 
 		txn.dt = SLIM_MSG_DEST_LOGICALADDR;
 		txn.ec = 0;
@@ -1465,8 +1472,7 @@ static int ngd_notify_slaves(void *data)
 	}
 
 	while (!kthread_should_stop()) {
-		set_current_state(TASK_INTERRUPTIBLE);
-		wait_for_completion(&dev->qmi.slave_notify);
+		wait_for_completion_interruptible(&dev->qmi.slave_notify);
 		/* Probe devices for first notification */
 		if (!i) {
 			i++;

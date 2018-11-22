@@ -13,7 +13,7 @@
  * for more details.
 
 
- *  Copyright (C) 2009-2014 Broadcom Corporation
+ *  Copyright (C) 2009-2017 Broadcom Corporation
  */
 
 
@@ -31,8 +31,6 @@
 #include <net/bluetooth/bluetooth.h>
 #include <linux/interrupt.h>
 
-#define TRUE   1
-#define FALSE  0
 
 #define WORKER_QUEUE TRUE
 
@@ -47,7 +45,6 @@
 #define BT_ST_REGISTERED   1
 #define BT_TX_Q_EMPTY      2
 #define BT_RX_Q_EMPTY      3
-
 
 #define BRCM_BT_DEV_MAJOR 0
 
@@ -76,9 +73,9 @@ struct brcm_bt_dev {
     spinlock_t rx_q_lock;                /* Rx queue lock */
 
     struct sk_buff_head tx_q;            /* TX queue */
-#if TASKLET_SUPPORT
+#ifdef TASKLET_SUPPORT
     struct tasklet_struct tx_task;       /* TX Tasklet */
-#else if WORKER_QUEUE
+#else
     struct workqueue_struct *tx_wq;     /* Fm drv workqueue */
     struct work_struct tx_workqueue;    /* Tx work queue */
 #endif
@@ -111,9 +108,9 @@ static void brcm_bt_st_registration_completion_cb(void *priv_data,
     char data);
 
 static long brcm_bt_st_receive(void *priv_data, struct sk_buff *skb);
-#if TASKLET_SUPPORT
+#ifdef TASKLET_SUPPORT
 static void __send_tasklet(unsigned long arg);
-#else if WORKER_QUEUE
+#else
 static void bt_send_data_ldisc(struct work_struct *work);
 #endif
 

@@ -26,12 +26,18 @@
 #include <linux/clk.h>
 #include <linux/clk/msm-clk.h>
 
+enum core_ldo_levels {
+	CORE_LEVEL_NONE = 0,
+	CORE_LEVEL_MIN,
+	CORE_LEVEL_MAX,
+};
+
 #define INIT_MAX_TIME_USEC			1000
 
+/* default CORE votlage and load values */
 #define USB_SSPHY_1P8_VOL_MIN		1800000 /* uV */
 #define USB_SSPHY_1P8_VOL_MAX		1800000 /* uV */
-#define USB_SSPHY_1P8_HPM_LOAD		23000	/* uA */
-
+#define USB_SSPHY_HPM_LOAD		23000	/* uA */
 
 /* USB3PHY_PCIE_USB3_PCS_PCS_STATUS bit */
 #define PHYSTATUS				BIT(6)
@@ -173,8 +179,6 @@ static const struct qmp_reg_val qmp_settings_rev1[] = {
 	{0x38, 0x12}, /* QSERDES_COM_PLL_IP_SETP */
 	{0x3C, 0x0F}, /* QSERDES_COM_PLL_CP_SETP */
 	{0x24, 0x01}, /* QSERDES_COM_PLL_IP_SETI */
-	{0x0C, 0x0F}, /* QSERDES_COM_IE_TRIM */
-	{0x10, 0x0F}, /* QSERDES_COM_IP_TRIM */
 	{0x14, 0x46}, /* QSERDES_COM_PLL_CNTRL */
 
 	/* CDR Settings */
@@ -332,6 +336,7 @@ static const struct qmp_reg_val qmp_settings_rev1_misc[] = {
 #ifdef CONFIG_LGE_USB_G_ANDROID
 #define QSERDES_TX_TX_EMP_POST1_LVL 0x218
 #define QSERDES_TX_TX_DRV_LVL       0x22C
+#define RX_RX_EQU_ADAPTOR_CNTRL4    0x4E0
 
 static uint32_t override_tx_pre_emphasis = 0;
 module_param(override_tx_pre_emphasis, uint, S_IRUGO|S_IWUSR);
@@ -340,6 +345,10 @@ MODULE_PARM_DESC(override_tx_pre_emphasis, "Overide TX_PRE_EMPHASIS tuning regis
 static uint32_t override_tx_swing = 0;
 module_param(override_tx_swing, uint, S_IRUGO|S_IWUSR);
 MODULE_PARM_DESC(override_tx_swing, "Override TX_SWING tuning register");
+
+static uint32_t override_rx_equalization = 0;
+module_param(override_rx_equalization, uint, S_IRUGO|S_IWUSR);
+MODULE_PARM_DESC(override_rx_equalization, "Override rx_equalization tuning register");
 #endif
 
 struct msm_ssphy_qmp {
@@ -349,8 +358,9 @@ struct msm_ssphy_qmp {
 	void __iomem		*tcsr_phy_clk_scheme_sel;
 
 	struct regulator	*vdd;
-	struct regulator	*vdda18;
 	int			vdd_levels[3]; /* none, low, high */
+	struct regulator	*core_ldo;
+	int			core_voltage_levels[3];
 	struct clk		*ref_clk_src;
 	struct clk		*ref_clk;
 	struct clk		*aux_clk;
@@ -373,6 +383,7 @@ struct msm_ssphy_qmp {
 #ifdef CONFIG_LGE_USB_G_ANDROID
 	uint32_t		tx_pre_emphasis;
 	uint32_t		tx_swing;
+	uint32_t		rx_equalization;
 #endif
 };
 
@@ -464,42 +475,44 @@ static int msm_ssusb_qmp_ldo_enable(struct msm_ssphy_qmp *phy, int on)
 	if (!on)
 		goto disable_regulators;
 
-
-	rc = regulator_set_optimum_mode(phy->vdda18, USB_SSPHY_1P8_HPM_LOAD);
+	rc = regulator_set_optimum_mode(phy->core_ldo, USB_SSPHY_HPM_LOAD);
 	if (rc < 0) {
-		dev_err(phy->phy.dev, "Unable to set HPM of vdda18\n");
+		dev_err(phy->phy.dev, "Unable to set HPM of core_ldo\n");
 		return rc;
 	}
 
-	rc = regulator_set_voltage(phy->vdda18, USB_SSPHY_1P8_VOL_MIN,
-						USB_SSPHY_1P8_VOL_MAX);
+	rc = regulator_set_voltage(phy->core_ldo,
+			phy->core_voltage_levels[CORE_LEVEL_MIN],
+			phy->core_voltage_levels[CORE_LEVEL_MAX]);
 	if (rc) {
-		dev_err(phy->phy.dev, "unable to set voltage for vdda18\n");
-		goto put_vdda18_lpm;
+		dev_err(phy->phy.dev, "unable to set voltage for core_ldo\n");
+		goto put_core_ldo_lpm;
 	}
 
-	rc = regulator_enable(phy->vdda18);
+	rc = regulator_enable(phy->core_ldo);
 	if (rc) {
-		dev_err(phy->phy.dev, "Unable to enable vdda18\n");
-		goto unset_vdda18;
+		dev_err(phy->phy.dev, "Unable to enable core_ldo\n");
+		goto unset_core_ldo;
 	}
 
 	return 0;
 
 disable_regulators:
-	rc = regulator_disable(phy->vdda18);
+	rc = regulator_disable(phy->core_ldo);
 	if (rc)
-		dev_err(phy->phy.dev, "Unable to disable vdda18\n");
+		dev_err(phy->phy.dev, "Unable to disable core_ldo\n");
 
-unset_vdda18:
-	rc = regulator_set_voltage(phy->vdda18, 0, USB_SSPHY_1P8_VOL_MAX);
+unset_core_ldo:
+	rc = regulator_set_voltage(phy->core_ldo,
+			phy->core_voltage_levels[CORE_LEVEL_NONE],
+			phy->core_voltage_levels[CORE_LEVEL_MAX]);
 	if (rc)
-		dev_err(phy->phy.dev, "unable to set voltage for vdda18\n");
+		dev_err(phy->phy.dev, "unable to set voltage for core_ldo\n");
 
-put_vdda18_lpm:
-	rc = regulator_set_optimum_mode(phy->vdda18, 0);
+put_core_ldo_lpm:
+	rc = regulator_set_optimum_mode(phy->core_ldo, 0);
 	if (rc < 0)
-		dev_err(phy->phy.dev, "Unable to set LPM of vdda18\n");
+		dev_err(phy->phy.dev, "Unable to set LPM of core_ldo\n");
 
 	return rc < 0 ? rc : 0;
 }
@@ -561,6 +574,19 @@ static int configure_phy_regs(struct usb_phy *uphy,
 			writel_relaxed(phy->tx_swing | 0x20,
 					phy->base + QSERDES_TX_TX_DRV_LVL);
 	}
+
+	if (override_rx_equalization) {
+		dev_dbg(uphy->dev, "%s(), Programming rx_equalization tuning"
+					" register as: %d",
+					__func__,
+					override_rx_equalization);
+		writel_relaxed(override_rx_equalization | 0x20,
+				phy->base + RX_RX_EQU_ADAPTOR_CNTRL4);
+	} else {
+		if (phy->rx_equalization)
+			writel_relaxed(phy->rx_equalization | 0x20,
+					phy->base + RX_RX_EQU_ADAPTOR_CNTRL4);
+	}
 #endif
 
 	return 0;
@@ -616,6 +642,7 @@ static int msm_ssphy_qmp_init(struct usb_phy *uphy)
 		break;
 	case 0x10000001:
 	case 0x10010000:
+	case 0x10020000:
 		reg = qmp_settings_rev1;
 		misc = qmp_settings_rev1_misc;
 		break;
@@ -694,6 +721,11 @@ static int msm_ssphy_qmp_init(struct usb_phy *uphy)
 			QSERDES_TX_TX_EMP_POST1_LVL) & 0x1F),
 			(readl_relaxed(phy->base +\
 			QSERDES_TX_TX_DRV_LVL)) & 0x1F);
+
+	dev_dbg(uphy->dev, "%s, RX_EQUALIZATION tuning register: 0x%X\n",
+			__func__,
+			(readl_relaxed(phy->base +\
+			RX_RX_EQU_ADAPTOR_CNTRL4)) & 0x1F);
 #endif
 
 	return 0;
@@ -904,7 +936,7 @@ static int msm_ssphy_qmp_probe(struct platform_device *pdev)
 	struct msm_ssphy_qmp *phy;
 	struct device *dev = &pdev->dev;
 	struct resource *res;
-	int ret = 0, size = 0;
+	int ret = 0, size = 0, len;
 	const struct of_device_id *phy_ver;
 
 	phy = devm_kzalloc(dev, sizeof(*phy), GFP_KERNEL);
@@ -1068,16 +1100,45 @@ static int msm_ssphy_qmp_probe(struct platform_device *pdev)
 						&phy->tx_swing);
 	if (ret)
 		phy->tx_swing = 0;
+
+	ret = of_property_read_u32(dev->of_node, "qcom,rx_equalization",
+						&phy->rx_equalization);
+	if (ret)
+		phy->rx_equalization = 0;
 #endif
 
 	phy->emulation = of_property_read_bool(dev->of_node,
 						"qcom,emulation");
+	/* Set default core voltage values */
+	phy->core_voltage_levels[CORE_LEVEL_NONE] = 0;
+	phy->core_voltage_levels[CORE_LEVEL_MIN] = USB_SSPHY_1P8_VOL_MIN;
+	phy->core_voltage_levels[CORE_LEVEL_MAX] = USB_SSPHY_1P8_VOL_MAX;
 
-	ret = of_property_read_u32_array(dev->of_node, "qcom,vdd-voltage-level",
-					 (u32 *) phy->vdd_levels,
-					 ARRAY_SIZE(phy->vdd_levels));
-	if (ret) {
-		dev_err(dev, "error reading qcom,vdd-voltage-level property\n");
+	if (of_get_property(dev->of_node, "qcom,core-voltage-level", &len) &&
+		len == sizeof(phy->core_voltage_levels)) {
+		ret = of_property_read_u32_array(dev->of_node,
+				"qcom,core-voltage-level",
+				(u32 *)phy->core_voltage_levels,
+				len / sizeof(u32));
+		if (ret) {
+			dev_err(dev, "err qcom,core-voltage-level property\n");
+			goto err;
+		}
+	}
+
+	if (of_get_property(dev->of_node, "qcom,vdd-voltage-level", &len) &&
+		len == sizeof(phy->vdd_levels)) {
+		ret = of_property_read_u32_array(dev->of_node,
+				"qcom,vdd-voltage-level",
+				(u32 *) phy->vdd_levels,
+				len / sizeof(u32));
+		if (ret) {
+			dev_err(dev, "err qcom,vdd-voltage-level property\n");
+			goto err;
+		}
+	} else {
+		ret = -EINVAL;
+		dev_err(dev, "error invalid inputs for vdd-voltage-level\n");
 		goto err;
 	}
 
@@ -1088,10 +1149,10 @@ static int msm_ssphy_qmp_probe(struct platform_device *pdev)
 		goto err;
 	}
 
-	phy->vdda18 = devm_regulator_get(dev, "vdda18");
-	if (IS_ERR(phy->vdda18)) {
-		dev_err(dev, "unable to get vdda18 supply\n");
-		ret = PTR_ERR(phy->vdda18);
+	phy->core_ldo = devm_regulator_get(dev, "core");
+	if (IS_ERR(phy->core_ldo)) {
+		dev_err(dev, "unable to get core ldo supply\n");
+		ret = PTR_ERR(phy->core_ldo);
 		goto err;
 	}
 

@@ -21,7 +21,6 @@
 #include <linux/delay.h>
 #include <linux/io.h>
 #include <asm/setup.h>
-//#include <mach/board_lge.h>
 #include <soc/qcom/lge/board_lge.h>
 #include <linux/slab.h>
 #include <linux/random.h>
@@ -29,13 +28,14 @@
 #include <linux/syscalls.h>
 #include <asm/uaccess.h>
 #include <linux/buffer_head.h>
-//#include <mach/secinfo.h>
-//#include <mach/qfprom_addr.h>
 #include <soc/qcom/lge/secinfo.h>
 #include <soc/qcom/lge/qfprom_addr.h>
 #include <linux/crypto.h>
 #include <linux/scatterlist.h>
 #include <linux/mutex.h>
+#include <linux/fs_struct.h>
+#include <linux/sched.h>
+#include <linux/path.h>
 
 #define LGE_QFPROM_INTERFACE_NAME "lge-qfprom"
 #define DEFENSIVE_LOOP_NUM 3
@@ -221,6 +221,59 @@ static ssize_t qfprom_antirollback_show(struct device *dev, struct device_attrib
 
 static DEVICE_ATTR(antirollback, S_IWUSR | S_IRUGO, qfprom_antirollback_show, NULL);
 
+static ssize_t qfprom_deviceid_show(struct device *dev, struct device_attribute *attr, char *buf)
+{
+  u32 lsb = 0, msb = 0, i = 0;
+  unsigned char temp[DEVICE_ID_INPUT_SIZE+1];
+  unsigned char device_id_hash[SHA256_SIZE];
+  unsigned char device_id_char[SHA256_SIZE_CHAR+1];
+  struct hash_desc desc;
+  struct scatterlist sg;
+
+  memset(temp, 0x00, sizeof(temp));
+  memset(device_id_hash, 0x00, sizeof(device_id_hash));
+  memset(device_id_char, 0x00, sizeof(device_id_char));
+
+  lsb = qfprom_read(qfprom_device_id.addr);
+  msb = qfprom_read(qfprom_device_id.addr+4);
+
+  sprintf(temp, "%08X%08X", lsb, msb);
+
+  sg_init_one(&sg, temp, DEVICE_ID_INPUT_SIZE);
+  desc.flags=0;
+
+  desc.tfm = crypto_alloc_hash("sha256", 0, CRYPTO_ALG_ASYNC);
+  if (IS_ERR(desc.tfm)){
+    printk(KERN_ERR "[QFUSE]%s :hash alloc error\n", __func__);
+    goto hash_err;
+  }
+
+  if (crypto_hash_init(&desc) != 0){
+    printk(KERN_ERR "[QFUSE]%s : hash init error\n", __func__);
+    goto hash_err;
+  }
+
+  if(crypto_hash_digest(&desc, &sg, DEVICE_ID_INPUT_SIZE, device_id_hash) != 0){
+    printk(KERN_ERR "[QFUSE]%s : hash_digest error\n", __func__);
+    goto hash_err;
+  }
+  crypto_free_hash(desc.tfm);
+
+  for (i = 0; i < SHA256_SIZE; i++)
+  {
+    sprintf(temp, "%02X", device_id_hash[i]);
+    strcat(device_id_char, temp);
+  }
+  return sprintf(buf, "%s\n", device_id_char);
+
+hash_err:
+  if (desc.tfm)
+    crypto_free_hash(desc.tfm);
+
+  return sprintf(buf, "0\n");
+}
+static DEVICE_ATTR(device_id, S_IWUSR | S_IRUGO, qfprom_deviceid_show, NULL);
+
 static struct attribute *qfprom_attributes[] = {
   &dev_attr_sec_read.attr,
   &dev_attr_qfusing.attr,
@@ -232,6 +285,7 @@ static struct attribute *qfprom_attributes[] = {
   &dev_attr_msb.attr,
   &dev_attr_read.attr,
   &dev_attr_antirollback.attr,
+  &dev_attr_device_id.attr,
   NULL
 };
 
@@ -419,8 +473,6 @@ static u32 qfprom_read(u32 fuse_addr)
   void __iomem *value_addr;
   u32 value;
 
-  printk(KERN_INFO "[QFUSE]%s start\n", __func__);
-
   if(fuse_addr ==  QFPROM_SEC_HW_KEY){
     value_addr = ioremap(QFPROM_HW_KEY_STATUS, sizeof(u32));
   }else{
@@ -433,32 +485,19 @@ static u32 qfprom_read(u32 fuse_addr)
   value = (u32)readl(value_addr);
   iounmap(value_addr);
   printk(KERN_INFO "[QFUSE]%s address:0x%x, value:0x%x\n", __func__, fuse_addr, value);
-  printk(KERN_INFO "[QFUSE]%s end\n", __func__);
   return value;
 }
 
 static u32 qfprom_secdat_read(void)
 {
   struct file *fp;
+  struct path root;
   int cnt=0;
+  struct scatterlist sg[FUSEPROV_SEC_STRUCTURE_MAX_NUM];
+  int i=0;
+  int sg_idx=0;
   u32 ret = RET_OK;
   mm_segment_t old_fs=get_fs();
-
-#ifdef CONFIG_LGE_QFPROM_SECHASH
-  struct crypto_hash *tfm = NULL;
-  struct hash_desc desc;
-  struct scatterlist sg[FUSEPROV_SEC_STRUCTURE_MAX_NUM];
-  char result[32]={0};
-  unsigned char temp_buf[4]={0};
-  unsigned char config_hash[32]={0};
-  int i=0;
-  int temp=0;
-  int sg_idx=0;
-  int segment_size=0;
-#else
-  printk(KERN_ERR "[QFUSE]%s : CONFIG_LGE_QFPROM_SECHASH is not exist\n", __func__);
-  return RET_ERR;
-#endif
 
   printk(KERN_INFO "[QFUSE]%s start\n", __func__);
 
@@ -469,9 +508,12 @@ static u32 qfprom_secdat_read(void)
     return RET_OK;
   }
 
-
   set_fs(KERNEL_DS);
-  fp=filp_open(SEC_PATH, O_RDONLY, S_IRUSR);
+  task_lock(&init_task);
+  get_fs_root(init_task.fs, &root);
+  task_unlock(&init_task);
+  fp = file_open_root(root.dentry, root.mnt, SEC_PATH, O_RDONLY, 0);
+  path_put(&root);
 
   if(IS_ERR(fp)){
     int temp_err=0;
@@ -479,21 +521,6 @@ static u32 qfprom_secdat_read(void)
     printk(KERN_ERR "[QFUSE]%s : secdata file open error : %d\n", __func__, temp_err);
     ret = RET_ERR;
     goto err;
-  }
-
-  tfm = crypto_alloc_hash("sha256", 0, CRYPTO_ALG_ASYNC);
-  if (IS_ERR(tfm)){
-    printk(KERN_ERR "[QFUSE]%s :hash alloc error\n", __func__);
-    ret = RET_ERR;
-    goto err_mem;
-  }
-  desc.tfm=tfm;
-  desc.flags=0;
-
-  if (crypto_hash_init(&desc) != 0){
-    printk(KERN_ERR "[QFUSE]%s : hash init error\n", __func__);
-    ret = RET_ERR;
-    goto err_mem;
   }
 
   sg_init_table(sg, ARRAY_SIZE(sg));
@@ -519,7 +546,6 @@ static u32 qfprom_secdat_read(void)
       }
       sg_set_buf(&sg[sg_idx++], (const char*)&secdat.segment, sizeof(fuseprov_secdat_hdr_segment_type));
     }
-    segment_size = cnt;
   }
 
   cnt = vfs_read(fp, (char*)&secdat.list_hdr, sizeof(secdat.list_hdr),&fp->f_pos);
@@ -577,35 +603,7 @@ static u32 qfprom_secdat_read(void)
   }
   sg_set_buf(&sg[sg_idx], (const char*)&secdat.footer, sizeof(fuseprov_secdat_footer_type));
 
-  if(crypto_hash_digest(&desc, sg, sizeof(fuseprov_secdat_hdr_type)+segment_size+secdat.hdr.size, result) != 0){
-    printk(KERN_ERR "[QFUSE]%s : hash_digest error\n", __func__);
-    ret = RET_ERR;
-    goto err_mem;
-  }
-
-  for(i=0;i<64;i=i+2){
-    memset(temp_buf, 0, 4);
-    memcpy(temp_buf, CONFIG_LGE_QFPROM_SECHASH+i, 2);
-    sscanf(temp_buf, "%x", &temp);
-    config_hash[i/2] = temp;
-  }
-
-  if(strncmp(result, config_hash, sizeof(result))!=0){
-    printk(KERN_ERR "[QFUSE]%s : sec hash different\n", __func__);
-    printk(KERN_ERR "[QFUSE]partition hash : %02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x\n",
-          result[0],result[1],result[2],result[3],result[4],result[5],result[6],result[7],
-          result[8],result[9],result[10],result[11],result[12],result[13],result[14],result[15],
-          result[16],result[17],result[18],result[19],result[20],result[21],result[22],result[23],
-          result[24],result[25],result[26],result[27],result[28],result[29],result[30],result[31]);
-    printk(KERN_ERR "[QFUSE]config hash : %s\n",CONFIG_LGE_QFPROM_SECHASH);
-    ret = RET_ERR;
-    goto err_mem;
-  }
-
 err_mem:
-  if(tfm)
-    crypto_free_hash(tfm);
-
   if(ret == RET_ERR && secdat.pentry){
     kfree(secdat.pentry);
     secdat.pentry=NULL;
@@ -761,5 +759,5 @@ module_init(lge_qfprom_interface_init);
 module_exit(lge_qfprom_interface_exit);
 
 MODULE_DESCRIPTION("LGE QFPROM interface driver");
-MODULE_AUTHOR("lg-security@lge.com");
+MODULE_AUTHOR("dev-security@lge.com");
 MODULE_LICENSE("GPL");

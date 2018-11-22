@@ -1,3 +1,9 @@
+config LGE_USB_MOISTURE_DETECT
+	bool "enable usb moisture detect"
+	default n
+	help
+	  usb moisture detect
+
 config LGE_USB_HOST_SUPPORT_LIST_HID
 	bool "enable usb host compatible hid devices list"
 	default n
@@ -183,7 +189,7 @@ config LGE_USB_HOST_SUPPORT_LIST_STORAGE
 	select USB_STORAGE_KARMA
 	select USB_STORAGE_CYPRESS_ATACB
 #	select USB_STORAGE_ENE_UB6250
-	select USB_UAS
+#	select USB_UAS
 	help
 	  sound devices include specials, change to yes here to support high
 	  compatiblily usb host devices

@@ -331,6 +331,7 @@
 			<0xff 132>, /* blsp1_qup_irq(5) - LGE : COMMON_I2C */
 			<0xff 133>, /* blsp2_qup_irq(0) */
 			<0xff 134>, /* blsp2_qup_irq(1) */
+			/* <0xff 135>, *//* blsp2_qup_irq(2) */
 			<0xff 135>, /* blsp2_spi_irq(2) - LGE : FINGER_SPI */
 			<0xff 137>, /* blsp2_spi_irq(4) - LGE : TDMB_SPI */
 			<0xff 138>, /* blsp2_qup_irq(5) */

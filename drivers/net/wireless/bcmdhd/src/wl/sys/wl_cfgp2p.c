@@ -2075,8 +2075,9 @@ wl_cfgp2p_find_attrib_in_all_p2p_Ies(u8 *parse, u32 len, u32 attrib)
 				return pAttrib;
 			}
 			else {
-				parse += (ie->len + TLV_HDR_LEN);
-				len -= (ie->len + TLV_HDR_LEN);
+				/* move to next IE */
+				len -= (u32)((u8 *)ie + TLV_HDR_LEN + ie->len - parse);
+				parse = (uint8 *)ie + TLV_HDR_LEN + ie->len;
 				CFGP2P_INFO(("P2P Attribute %d not found Moving parse"
 					" to %p len to %d", attrib, parse, len));
 			}

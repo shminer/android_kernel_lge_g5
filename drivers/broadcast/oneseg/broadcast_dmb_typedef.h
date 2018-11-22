@@ -190,13 +190,14 @@ typedef unsigned char        BOOLEAN;
 typedef unsigned int        Bool;
 #endif
 
-#if defined (CONFIG_ARCH_MSM8992) || (CONFIG_ARCH_MSM8996)
-typedef ULONG				UDynamic_32_64;
-typedef int32				Dynamic_32_64;
-#elif defined (CONFIG_ARCH_MSM8974)
-typedef uint32		UDynamic_32_64;
-typedef ssize_t		Dynamic_32_64;
+#if defined(CONFIG_64BIT)
+typedef ULONG        UDynamic_32_64;
+typedef int32        Dynamic_32_64;
+#else
+typedef uint32        UDynamic_32_64;
+typedef ssize_t        Dynamic_32_64;
 #endif
+
 typedef int(*dmb_function_type)(void *);
 typedef int(*dmb_callback_type)(int);
 

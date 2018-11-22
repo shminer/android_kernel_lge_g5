@@ -478,15 +478,23 @@ out_create_rtentry2:
  * This function is used to obtain a reference to the rounting table entry
  * corresponding to a node id.
  */
+static struct msm_ipc_routing_table_entry *ipc_router_get_rtentry_ref_lock(
+	uint32_t node_id)
+{
+	struct msm_ipc_routing_table_entry *rt_entry;
+
+	rt_entry = lookup_routing_table(node_id);
+	if (rt_entry)
+		kref_get(&rt_entry->ref);
+	return rt_entry;
+}
 static struct msm_ipc_routing_table_entry *ipc_router_get_rtentry_ref(
 	uint32_t node_id)
 {
 	struct msm_ipc_routing_table_entry *rt_entry;
 
 	down_read(&routing_table_lock_lha3);
-	rt_entry = lookup_routing_table(node_id);
-	if (rt_entry)
-		kref_get(&rt_entry->ref);
+	rt_entry = ipc_router_get_rtentry_ref_lock(node_id);
 	up_read(&routing_table_lock_lha3);
 	return rt_entry;
 }
@@ -2176,7 +2184,6 @@ static void cleanup_rmt_server(struct msm_ipc_router_xprt_info *xprt_info,
 {
 	union rr_control_msg ctl;
 
-	ipc_router_reset_conn(rport_ptr);
 	memset(&ctl, 0, sizeof(ctl));
 	ctl.cmd = IPC_ROUTER_CTRL_CMD_REMOVE_SERVER;
 	ctl.srv.service = server->name.service;
@@ -2207,6 +2214,7 @@ static void cleanup_rmt_ports(struct msm_ipc_router_xprt_info *xprt_info,
 			server = rport_ptr->server;
 			rport_ptr->server = NULL;
 			mutex_unlock(&rport_ptr->rport_lock_lhb2);
+			ipc_router_reset_conn(rport_ptr);
 			if (server) {
 				cleanup_rmt_server(xprt_info, rport_ptr,
 						   server);
@@ -2361,13 +2369,13 @@ static void ipc_router_reset_conn(struct msm_ipc_router_remote_port *rport_ptr)
 	list_for_each_entry_safe(conn_info, tmp_conn_info,
 				&rport_ptr->conn_info_list, list) {
 		port_ptr = ipc_router_get_port_ref(conn_info->port_id);
-		if (!port_ptr)
-			continue;
-		mutex_lock(&port_ptr->port_lock_lhc3);
-		port_ptr->conn_status = CONNECTION_RESET;
-		mutex_unlock(&port_ptr->port_lock_lhc3);
-		wake_up(&port_ptr->port_rx_wait_q);
-		kref_put(&port_ptr->ref, ipc_router_release_port);
+		if (port_ptr) {
+			mutex_lock(&port_ptr->port_lock_lhc3);
+			port_ptr->conn_status = CONNECTION_RESET;
+			mutex_unlock(&port_ptr->port_lock_lhc3);
+			wake_up(&port_ptr->port_rx_wait_q);
+			kref_put(&port_ptr->ref, ipc_router_release_port);
+		}
 
 		list_del(&conn_info->list);
 		kfree(conn_info);
@@ -2651,6 +2659,7 @@ static int process_rmv_client_msg(struct msm_ipc_router_xprt_info *xprt_info,
 		server = rport_ptr->server;
 		rport_ptr->server = NULL;
 		mutex_unlock(&rport_ptr->rport_lock_lhb2);
+		ipc_router_reset_conn(rport_ptr);
 		down_write(&server_list_lock_lha2);
 		if (server)
 			cleanup_rmt_server(NULL, rport_ptr, server);
@@ -3042,6 +3051,12 @@ static int msm_ipc_router_write_pkt(struct msm_ipc_port *src,
 	hdr->dst_node_id = rport_ptr->node_id;
 	hdr->dst_port_id = rport_ptr->port_id;
 
+	if (unlikely(!virt_addr_valid(pkt->pkt_fragment_q)))
+		 __dma_flush_range((void *)&pkt->pkt_fragment_q, (void *)&pkt->pkt_fragment_q + (sizeof(struct sk_buff_head *)));
+
+	if (pkt->pkt_fragment_q == NULL)
+		return -EINVAL;
+
 	ret = ipc_router_tx_wait(src, rport_ptr, &set_confirm_rx, timeout);
 	if (ret < 0)
 		return ret;
@@ -3054,14 +3069,16 @@ static int msm_ipc_router_write_pkt(struct msm_ipc_port *src,
 		ret = loopback_data(src, hdr->dst_port_id, pkt);
 		return ret;
 	}
-
-	rt_entry = ipc_router_get_rtentry_ref(hdr->dst_node_id);
+	down_read(&routing_table_lock_lha3);//LGE
+	rt_entry = ipc_router_get_rtentry_ref_lock(hdr->dst_node_id);
 	if (!rt_entry) {
 		IPC_RTR_ERR("%s: Remote node %d not up\n",
 			__func__, hdr->dst_node_id);
+		up_read(&routing_table_lock_lha3);//LGE
 		return -ENODEV;
 	}
-	down_read(&rt_entry->lock_lha4);
+	down_read(&rt_entry->lock_lha4);//LGE
+	up_read(&routing_table_lock_lha3);
 	xprt_info = rt_entry->xprt_info;
 	ret = ipc_router_get_xprt_info_ref(xprt_info);
 	if (ret < 0) {

@@ -71,6 +71,11 @@ module_param(min_cpu_freq, uint, S_IRUGO | S_IWUSR);
 MODULE_PARM_DESC(min_cpu_freq,
 	"to set minimum cpu frquency to when ethernet ifc is active");
 
+static unsigned int skb_timestamp_enable;
+module_param(skb_timestamp_enable, uint, S_IRUGO | S_IWUSR);
+MODULE_PARM_DESC(skb_timestamp_enable,
+	"to enable timestamping for TX and RX packets");
+
 /* this refers to max number sgs per transfer
  * which includes headers/data packets
  */
@@ -546,7 +551,7 @@ extra:
 
 static int alloc_requests(struct eth_dev *dev, struct gether *link, unsigned n)
 {
-	int	status;
+	int	status = 0;
 
 	spin_lock(&dev->req_lock);
 	/*
@@ -701,6 +706,8 @@ process_frame:
 		dev->net->stats.rx_packets++;
 		dev->net->stats.rx_bytes += skb->len;
 
+		if (skb_timestamp_enable)
+			skb->tstamp = ktime_get();
 		status = netif_rx_ni(skb);
 	}
 	set_wake_up_idle(false);
@@ -1091,13 +1098,14 @@ static netdev_tx_t eth_start_xmit(struct sk_buff *skb,
 	int			extra_alloc = 0;
 	int			retval;
 	struct usb_request	*req = NULL;
-	struct sk_buff		*new_skb;
+	struct sk_buff		*new_skb, *clone = NULL;
 	unsigned long		flags;
 	struct usb_ep		*in = NULL;
 	u16			cdc_filter = 0;
 	bool			multi_pkt_xfer = false;
-	u32			fixed_in_len;
-	bool			is_fixed;
+	u32			fixed_in_len = 0;
+	bool			is_fixed = false;
+	struct skb_shared_hwtstamps hwtstamps;
 
 	spin_lock_irqsave(&dev->lock, flags);
 	if (dev->port_usb) {
@@ -1309,6 +1317,16 @@ static netdev_tx_t eth_start_xmit(struct sk_buff *skb,
 		spin_unlock_irqrestore(&dev->req_lock, flags);
 	} else {
 		req->no_interrupt = 0;
+	}
+
+	if (skb_timestamp_enable) {
+		skb->tstamp = ktime_get();
+		clone = skb_clone_sk(skb);
+		if (clone) {
+			memset(&hwtstamps, 0,
+					sizeof(struct skb_shared_hwtstamps));
+			skb_complete_tx_timestamp(clone, &hwtstamps);
+		}
 	}
 
 	retval = usb_ep_queue(in, req, GFP_ATOMIC);
@@ -1950,7 +1968,11 @@ int gether_get_host_addr_cdc(struct net_device *net, char *host_addr, int len)
 		return -EINVAL;
 
 	dev = netdev_priv(net);
-	snprintf(host_addr, len, "%pm", dev->host_mac);
+#ifdef CONFIG_LGE_USB_G_ANDROID
+  snprintf(host_addr, len, "%pm", dev->host_mac);
+#else
+	snprintf(host_addr, len, "%pM", dev->host_mac);
+#endif
 
 	return strlen(host_addr);
 }

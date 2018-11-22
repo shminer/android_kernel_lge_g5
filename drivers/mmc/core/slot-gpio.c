@@ -31,6 +31,21 @@ struct mmc_gpio {
 	char cd_label[0];
 };
 
+#ifdef CONFIG_LGE_TRAY_EVENT //support the TRAY uevent
+static int send_sd_slot_tray_state (struct mmc_host *host, int state) {
+	char event_string[20]; /* check the event string length */
+	char *envp[2] = { event_string, NULL };
+
+	if (state)
+		sprintf(event_string, "TRAY_STATE=INSERTED");
+	else
+		sprintf(event_string, "TRAY_STATE=EJECTED");
+
+	pr_info("%s: %s", __func__, envp[0]);
+	return kobject_uevent_env(&host->class_dev.kobj, KOBJ_CHANGE, envp);
+}
+#endif
+
 #ifdef CONFIG_MACH_LGE
 extern unsigned int is_damaged_sd;
 #endif
@@ -62,6 +77,11 @@ static irqreturn_t mmc_gpio_cd_irqt(int irq, void *dev_id)
 	mmc_detect_change(host, 0);
 #else
 	mmc_detect_change(host, msecs_to_jiffies(200));
+#endif
+
+#ifdef CONFIG_LGE_TRAY_EVENT //support the TRAY uevent
+	if (send_sd_slot_tray_state(host, mmc_gpio_get_cd(host)) < 0)
+		pr_err("%s: send_sd_slot_tray_state was failed.\n", __func__);
 #endif
 
 	return IRQ_HANDLED;

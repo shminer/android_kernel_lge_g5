@@ -139,7 +139,7 @@ int tunerbb_drv_fc8300_read_chip_id(void)
    	res = bbm_com_hostif_select(NULL, BBM_I2C);
     res |= bbm_com_i2c_init(NULL, FCI_HPI_TYPE);
     res |= bbm_com_probe(NULL, DIV_BROADCAST);
-    print_log(NULL, "[FC8300] read chp id : %d \n", res);
+    print_log(NULL, "[FC8300] read chip id : %d \n", res);
     return res;
 }
 

@@ -1,4 +1,4 @@
-/* Copyright (c) 2012-2016, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2012-2017, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -61,7 +61,7 @@ struct msm_camera_cci_client {
 	uint16_t retries;
 	uint16_t id_map;
 
-#ifdef CONFIG_MACH_LGE
+#if 1 //def CONFIG_MACH_LGE
 	bool  cci_acquired;	/*LGE_CHANGE, CST, check if cci is acquired */
 #endif
 };
@@ -129,7 +129,7 @@ struct msm_camera_cci_master_info {
 	struct mutex mutex_q[NUM_QUEUES];
 	struct completion report_q[NUM_QUEUES];
 	atomic_t done_pending[NUM_QUEUES];
-	spinlock_t  report_lock[NUM_QUEUES]; /*LGE_CHANGE, fix I2C write timeout, 2016-04-08, Camera-Stability@lge.com*/
+	spinlock_t lock_q[NUM_QUEUES];
 };
 
 struct msm_cci_clk_params_t {

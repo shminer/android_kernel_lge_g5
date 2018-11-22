@@ -1,7 +1,7 @@
 #ifndef __MACH_QFPROM_ADDR_8996_H__
 #define __MACH_QFPROM_ADDR_8996_H__
 
-#define SEC_PATH "/dev/block/platform/soc/624000.ufshc/by-name/sec"
+#define SEC_PATH "/dev/block/bootdevice/by-name/sec"
 /* QFPROM address to blow */
 #define QFPROM_CTRL_BASE        (0x00070000)
 
@@ -23,7 +23,8 @@
 
 #define QFPROM_OEM_PK_HASH		(QFPROM_CTRL_BASE + 0x01C8) /* 0x000701C8 */
 #define QFPROM_SEC_ENABLE		(QFPROM_CTRL_BASE + 0x0378) /* 0x00070378 */
-#define QFPROM_HW_KEY_STATUS	(QFPROM_CTRL_BASE + 0x208C) /* 0x00070000 */
+#define QFPROM_HW_KEY_STATUS	(QFPROM_CTRL_BASE + 0x208C) /* 0x0007208C */
+#define QFPROM_CORR_SERIAL_NUM  (QFPROM_CTRL_BASE + 0x4138) /* 0x00074138 */
 
 typedef enum {
   QFPROM_RESULT_OEM_CONFIG		= 0,
@@ -86,6 +87,11 @@ typedef struct {
 } qfprom_version_typename;
 
 qfprom_result_bits anti_rollback_enable = {QFPROM_RESULT_OEM_CONFIG, QFPROM_OEM_CONFIG3, 0x00000000, 0x0000000F};
+
+#define DEVICE_ID_INPUT_SIZE 16
+#define SHA256_SIZE 32
+#define SHA256_SIZE_CHAR 64
+qfprom_result_bits qfprom_device_id = {QFPROM_VERSION_MAX, QFPROM_CORR_SERIAL_NUM, 0xFFFFFFFF, 0xFFFFFFFF};
 
 qfprom_version_typename version_type[QFPROM_VERSION_MAX] = {
   {QFPROM_VERSION_SBL1,   "sbl1"  },

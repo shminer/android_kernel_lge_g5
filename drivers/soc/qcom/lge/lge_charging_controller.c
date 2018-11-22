@@ -71,20 +71,47 @@ typedef enum vzw_chg_state {
 } chg_state;
 #endif
 
-enum qpnp_quick_charging_status {
-	QC20_STATUS_NONE,
-	QC20_STATUS_LCD_ON,
-	QC20_STATUS_LCD_OFF,
-	QC20_STATUS_CALL_ON,
-	QC20_STATUS_CALL_OFF,
-	QC20_STATUS_THERMAL_ON,
-	QC20_STATUS_THERMAL_OFF,
+enum lgcc_vote_reason {
+	LGCC_REASON_DEFAULT,
+	LGCC_REASON_LCD,
+	LGCC_REASON_CALL,
+	LGCC_REASON_TDMB,
+	LGCC_REASON_UHD_RECORD,
+	LGCC_REASON_MIRACAST,
+	LGCC_REASON_MAX,
+};
+
+static char *restricted_chg_name[] = {
+	[LGCC_REASON_DEFAULT] 		= "DEFAULT",
+	[LGCC_REASON_LCD] 		= "LCD",
+	[LGCC_REASON_CALL]		= "CALL",
+	[LGCC_REASON_TDMB]		= "TDMB",
+	[LGCC_REASON_UHD_RECORD]	= "UHDREC",
+	[LGCC_REASON_MIRACAST]		= "WFD",
+	[LGCC_REASON_MAX]		= NULL,
+};
+
+enum {
+	RESTRICTED_CHG_STATUS_OFF,
+	RESTRICTED_CHG_STATUS_ON,
+	RESTRICTED_CHG_STATUS_MODE1,
+	RESTRICTED_CHG_STATUS_MODE2,
+	RESTRICTED_CHG_STATUS_MAX,
+};
+
+static char *retricted_chg_status[] = {
+	[RESTRICTED_CHG_STATUS_OFF]	= "OFF",
+	[RESTRICTED_CHG_STATUS_ON]	= "ON",
+	[RESTRICTED_CHG_STATUS_MODE1]	= "MODE1",
+	[RESTRICTED_CHG_STATUS_MODE2]	= "MODE2",
+	[RESTRICTED_CHG_STATUS_MAX]	= NULL,
 };
 
 extern int lgcc_is_charger_present(void);
 extern int lgcc_set_ibat_current(int type, int state, int chg_current);
 extern void lgcc_set_tdmb_mode(int on);
 extern int lgcc_set_charging_enable(int enable, int state);
+extern int lgcc_set_iusb_enable(int enable, int state);
 extern int lgcc_get_effective_fcc_result(void);
 
 int lgcc_is_probed = 0;
@@ -141,6 +168,7 @@ struct lge_charging_controller{
 #ifdef CONFIG_LGE_PM_LLK_MODE
 	int store_demo_enabled;
 	int llk_charging_status;
+	int llk_iusb_status;
 #endif
 	int tdmb_mode_on;
 };
@@ -158,6 +186,20 @@ enum fcc_voters {
 	USER_FCC_VOTER,
 	NUM_FCC_VOTER,
 };
+
+#ifdef CONFIG_LGE_PM_LLK_MODE
+enum enable_voters {
+	USER_EN_VOTER,
+	POWER_SUPPLY_EN_VOTER,
+	USB_EN_VOTER,
+	WIRELESS_EN_VOTER,
+	THERMAL_EN_VOTER,
+	OTG_EN_VOTER,
+	WEAK_CHARGER_EN_VOTER,
+	FAKE_BATTERY_EN_VOTER,
+	NUM_EN_VOTERS,
+};
+#endif
 
 enum battchg_enable_voters {
 	/* userspace has disabled battery charging */
@@ -179,7 +221,7 @@ static int is_hvdcp_present(void)
 	union power_supply_propval ret = {0, };
 
 	the_controller->usb_psy->get_property(the_controller->usb_psy,
-			POWER_SUPPLY_PROP_TYPE, &ret);
+			POWER_SUPPLY_PROP_REAL_TYPE, &ret);
 
 	pr_err("%s - charger_type[%d]\n", __func__, ret.intval);
 
@@ -337,7 +379,9 @@ static void lgcc_set_vzw_chg_work(struct work_struct *work)
 		}
 #ifdef CONFIG_LGE_PM_LLK_MODE
 		if (controller->store_demo_enabled) {
-			pr_err("llk_charging_status = %d\n", controller->llk_charging_status);
+			pr_err("llk_iusb_status = %d, llk_charging_status = %d\n",
+					controller->llk_iusb_status,
+					controller->llk_charging_status);
 			if (!controller->llk_charging_status) {
 				controller->vzw_chg_mode = VZW_LLK_NOT_CHARGING;
 				pr_info("charging stopped in llk mode\n");
@@ -357,6 +401,7 @@ static bool lgcc_check_llk_mode(int usb_present)
 {
 	int capacity = 0;
 	int battery_charging_enabled;
+	int iusb_enabled;
 	struct power_supply     *bms_psy;
 	union power_supply_propval pval = {0, };
 	int rc = 0;
@@ -383,8 +428,26 @@ static bool lgcc_check_llk_mode(int usb_present)
 			POWER_SUPPLY_PROP_BATTERY_CHARGING_ENABLED, &pval);
 	battery_charging_enabled = pval.intval;
 
+	rc = the_controller->batt_psy->get_property(the_controller->batt_psy,
+			POWER_SUPPLY_PROP_CHARGING_ENABLED, &pval);
+	iusb_enabled = pval.intval;
+
 	if (usb_present) {
 		if (capacity > LLK_MAX_THR_SOC) {
+			if (iusb_enabled == true) {
+				lgcc_set_iusb_enable(0, USER_EN_VOTER);
+				pr_info("disable iusb by LLK mode. soc[%d]\n", capacity);
+				the_controller->llk_iusb_status = false;
+			}
+		} else {
+			if (iusb_enabled == false) {
+				lgcc_set_iusb_enable(1, USER_EN_VOTER);
+				pr_info("enable iusb by LLK mode. soc[%d]\n", capacity);
+			}
+			the_controller->llk_iusb_status = true;
+		}
+
+		if (capacity >= LLK_MAX_THR_SOC) {
 			if (battery_charging_enabled == true) {
 				lgcc_set_charging_enable(0, BATTCHG_LLK_MODE_EN_VOTER);
 				pr_info("stop charging by LLK mode. soc[%d]\n", capacity);
@@ -394,8 +457,11 @@ static bool lgcc_check_llk_mode(int usb_present)
 				(capacity <= LLK_MAX_THR_SOC)) {
 			if (battery_charging_enabled == false)
 				the_controller->llk_charging_status = false;
-			else
+			else {
+				lgcc_set_charging_enable(0, BATTCHG_LLK_MODE_EN_VOTER);
+				pr_info("stop charging by LLK mode. soc[%d]\n", capacity);
 				the_controller->llk_charging_status = true;
+			}
 		} else if (capacity < LLK_MIN_THR_SOC) {
 			if (battery_charging_enabled == false) {
 				lgcc_set_charging_enable(1, BATTCHG_LLK_MODE_EN_VOTER);
@@ -625,12 +691,16 @@ static void lgcc_external_power_changed(struct power_supply *psy)
 #ifdef CONFIG_LGE_PM_LLK_MODE
 	if (controller->usb_present != usb_present) {
 		controller->usb_present = usb_present;
-		if (!controller->usb_present)
+		if (!controller->usb_present) {
 			controller->llk_charging_status = false;
+			controller->llk_iusb_status = false;
+		}
 	}
 
 	if (controller->store_demo_enabled) {
-		pr_err("lgcc_check_llk_mode called : %d\n", controller->llk_charging_status);
+		pr_err("lgcc_check_llk_mode iusb : %d, charging : %d\n",
+				controller->llk_iusb_status,
+				controller->llk_charging_status);
 		lgcc_check_llk_mode(usb_present);
 	}
 #endif
@@ -654,7 +724,7 @@ static void usb_current_max_check_work(struct work_struct *work)
 	}
 
 	the_controller->usb_psy->get_property(the_controller->usb_psy,
-			POWER_SUPPLY_PROP_TYPE, &pval);
+			POWER_SUPPLY_PROP_REAL_TYPE, &pval);
 
 	usb_supply_type = pval.intval;
 
@@ -850,6 +920,132 @@ static int lgcc_set_iusb_control(const char *val,
 module_param_call(lgcc_iusb_control, lgcc_set_iusb_control,
 	param_get_int, &lgcc_iusb_control, 0644);
 
+static char *restricted_charging;
+static int restricted_charging_param_set(const char *, const struct kernel_param *);
+static struct kernel_param_ops restricted_charging_param_ops = {
+	.set 	=	restricted_charging_param_set,
+	.get 	=	param_get_charp,
+	.free	=	param_free_charp,
+};
+
+module_param_cb(restricted_charging, &restricted_charging_param_ops,
+		&restricted_charging, 0644);
+
+static int restricted_charging_set_current(int reason, int status)
+{
+	int chg_curr;
+
+	switch (reason) {
+		case LGCC_REASON_CALL:
+			if (status == RESTRICTED_CHG_STATUS_ON) {
+				chg_curr = RESTRICTED_CHG_CURRENT;
+				lgcc_set_ibat_current(RESTRICTED_CHG_FCC_VOTER,true,chg_curr);
+#ifdef CONFIG_LGE_ALICE_FRIENDS
+				atomic_set(&in_call_status, 1);
+#endif
+			} else {
+				chg_curr = NORMAL_CHG_CURRENT_MAX;
+				lgcc_set_ibat_current(RESTRICTED_CHG_FCC_VOTER,true,chg_curr);
+#ifdef CONFIG_LGE_ALICE_FRIENDS
+				atomic_set(&in_call_status, 0);
+#endif
+			}
+			break;
+		case LGCC_REASON_TDMB:
+			if (status == RESTRICTED_CHG_STATUS_MODE1 ||
+					status == RESTRICTED_CHG_STATUS_MODE2) {
+				lgcc_set_tdmb_mode(1);
+				chg_curr = RESTRICTED_CHG_CURRENT;
+			} else {
+				lgcc_set_tdmb_mode(0);
+				chg_curr = NORMAL_CHG_CURRENT_MAX;
+			}
+			lgcc_set_ibat_current(USER_FCC_VOTER,true, chg_curr);
+			break;
+		case LGCC_REASON_LCD:
+		case LGCC_REASON_UHD_RECORD:
+		case LGCC_REASON_MIRACAST:
+			chg_curr = -EINVAL;
+			break;
+		case LGCC_REASON_DEFAULT:
+		default:
+			chg_curr = NORMAL_CHG_CURRENT_MAX;
+			lgcc_set_ibat_current(USER_FCC_VOTER,true, chg_curr);
+			lgcc_set_ibat_current(USER_FCC_VOTER,true, chg_curr);
+			break;
+	}
+
+	return chg_curr;
+}
+
+static int restricted_charging_find_name(char *name)
+{
+	int i;
+
+	for (i = 0; i < LGCC_REASON_MAX; i++) {
+		// exclude voters which is not registered in the user space.
+		if (restricted_chg_name[i] == NULL)
+			continue;
+
+		if (!strcmp(name, restricted_chg_name[i]))
+			return i;
+	}
+
+	return -EINVAL;
+}
+
+static int restricted_charging_find_status(char *status)
+{
+	int i;
+
+	for (i = 0; i < RESTRICTED_CHG_STATUS_MAX; i++) {
+
+		if (!strcmp(status, retricted_chg_status[i]))
+			return i;
+	}
+
+	return -EINVAL;
+}
+
+static int restricted_charging_param_set(const char *val, const struct kernel_param *kp)
+{
+	char *s = strstrip((char *)val);
+	char *voter_name, *voter_status;
+	int chg_curr, name, status, ret;
+
+	if (s == NULL) {
+		pr_err("Restrict charging param is NULL! \n");
+		return -EINVAL;
+	}
+
+	pr_info("Restricted charging param = %s \n", s);
+
+	ret = param_set_charp(val, kp);
+
+	if (ret) {
+		pr_err("Error setting param %d\n", ret);
+		return ret;
+	}
+
+	voter_name = strsep(&s, " ");
+	voter_status = s;
+
+	name = restricted_charging_find_name(voter_name);
+	status = restricted_charging_find_status(voter_status);
+
+	if (name == -EINVAL || status == -EINVAL) {
+		pr_err("Restrict charging param is invalid! \n");
+		return -EINVAL;
+	}
+
+	chg_curr = restricted_charging_set_current(name, status);
+	pr_info("voter_name = %s[%d], voter_status = %s[%d], chg_curr = %d \n",
+				voter_name, name, voter_status, status, chg_curr);
+
+
+	return 0;
+}
+
 static int lgcc_thermal_mitigation = 0;
 static int lgcc_set_thermal_chg_current(const char *val,
 		struct kernel_param *kp){
@@ -883,46 +1079,6 @@ static int lgcc_set_thermal_chg_current(const char *val,
 module_param_call(lgcc_thermal_mitigation, lgcc_set_thermal_chg_current,
 	param_get_int, &lgcc_thermal_mitigation, 0644);
 
-static int quick_charging_state;
-static int set_quick_charging_state(const char *val, struct kernel_param *kp)
-{
-	int ret;
-
-	ret = param_set_int(val, kp);
-	if (ret) {
-		pr_err("quick_charging_state error = %d\n", ret);
-		return ret;
-	}
-
-	switch (quick_charging_state) {
-	case QC20_STATUS_NONE:
-		break;
-
-	case QC20_STATUS_CALL_ON:
-		lgcc_set_ibat_current(RESTRICTED_CHG_FCC_VOTER, true,
-				RESTRICTED_CHG_CURRENT);
-#ifdef CONFIG_LGE_ALICE_FRIENDS
-		atomic_set(&in_call_status, 1);
-#endif
-		break;
-
-	case QC20_STATUS_CALL_OFF:
-		lgcc_set_ibat_current(RESTRICTED_CHG_FCC_VOTER, true,
-				NORMAL_CHG_CURRENT_MAX);
-#ifdef CONFIG_LGE_ALICE_FRIENDS
-		atomic_set(&in_call_status, 0);
-#endif
-		break;
-	default:
-		break;
-	}
-	pr_err("set quick_charging_state[%d]\n",
-			quick_charging_state);
-
-	return 0;
-}
-module_param_call(quick_charging_state, set_quick_charging_state,
-		param_get_int, &quick_charging_state, 0644);
 
 #define OTP_CHG_NORMAL_IBAT     3100
 #define OTP_CHG_DECCUR_IBAT     450
@@ -937,7 +1093,7 @@ static void lge_monitor_batt_temp_work(struct work_struct *work){
 
 	the_controller->batt_psy->get_property(the_controller->batt_psy,
 		POWER_SUPPLY_PROP_TEMP, &ret);
-	req.batt_temp = ret.intval / 10;
+	req.batt_temp = ret.intval;
 	the_controller->batt_temp = req.batt_temp;
 
 	the_controller->batt_psy->get_property(the_controller->batt_psy,
@@ -975,7 +1131,7 @@ static void lge_monitor_batt_temp_work(struct work_struct *work){
 			(res.force_update == true)) {
 		if (res.change_lvl == STS_CHE_NORMAL_TO_DECCUR ||
 				(res.state == CHG_BATT_DECCUR_STATE &&
-				 res.dc_current != DC_CURRENT_DEF &&
+				 res.chg_current != DC_CURRENT_DEF &&
 				 res.change_lvl != STS_CHE_STPCHG_TO_DECCUR)) {
 			pr_info("ibatmax_set STS_CHE_NORMAL_TO_DECCUR\n");
 			the_controller->otp_ibat_current = OTP_CHG_DECCUR_IBAT;
@@ -993,8 +1149,8 @@ static void lge_monitor_batt_temp_work(struct work_struct *work){
 				the_controller->otp_ibat_current);
 			lgcc_set_charging_enable(0, BATTCHG_USER_EN_VOTER);
 
-		} else if (res.change_lvl == STS_CHE_DECCUR_TO_NORAML) {
-			pr_info("ibatmax_set STS_CHE_DECCUR_TO_NORAML\n");
+		} else if (res.change_lvl == STS_CHE_DECCUR_TO_NORMAL) {
+			pr_info("ibatmax_set STS_CHE_DECCUR_TO_NORMAL\n");
 			the_controller->otp_ibat_current = OTP_CHG_NORMAL_IBAT;
 			lgcc_set_ibat_current(OTP_FCC_VOTER, true,
 				the_controller->otp_ibat_current);
@@ -1029,7 +1185,7 @@ static void lge_monitor_batt_temp_work(struct work_struct *work){
 
 		} else if (res.force_update == true &&
 				res.state == CHG_BATT_NORMAL_STATE &&
-				res.dc_current != DC_CURRENT_DEF) {
+				res.chg_current != DC_CURRENT_DEF) {
 			pr_info("ibatmax_set CHG_BATT_NORMAL_STATE\n");
 			lgcc_set_charging_enable(1, BATTCHG_USER_EN_VOTER);
 		}

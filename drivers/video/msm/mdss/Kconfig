@@ -63,17 +63,15 @@ config FB_MSM_MDSS_XLOG_DEBUG
 	driver during fatal errors and enable some display-driver logging
 	into an internal buffer (this avoids logging overhead).
 
-config LGE_MIPI_H1_INCELL_QHD_CMD_PANEL
-	bool "LGE_MIPI_H1_INCELL_QHD_CMD_PANEL"
+config FB_MSM_MDSS_FRC_DEBUG
+	depends on DEBUG_FS && FB_MSM_MDSS
+	bool "Enable Video FRC debugging"
 	default n
-	help
-	  if you say yes here you get support for the Incell Panel.
-
-config LGE_MIPI_LGD_LG4945_QHD_CMD_PANEL
-     bool "LGE_MIPI_LGD_LG4945_QHD_CMD_PANEL"
-     default n
-     help
-     if you say yes here you get support LG4945 Incell Panel.
+	---help---
+	The MDSS FRC debugging provides support to enable the deterministic
+	frame rate control (FRC) debugging features to: Collect video frame
+	statistics and check whether its output pattern matches expected
+	cadence.
 
 config LGE_DISPLAY_AOD_SUPPORTED
 	bool "Enable AOD function"
@@ -122,6 +120,7 @@ config LGE_LCD_TUNING
 config LGE_DISPLAY_DYNAMIC_LOG
 	depends on LGE_LCD_TUNING
 	bool "Dynamic Log"
+	depends on MACH_LGE
 	default y
 	---help---
 	If you say Y here, developers can enable/disable display logs through adb
@@ -148,6 +147,7 @@ config LGE_PP_AD_SUPPORTED
 
 config LGE_ENHANCE_GALLERY_SHARPNESS
 	bool "CONFIG_LGE_ENHANCE_GALLERY_SHARPNESS"
+	depends on MACH_LGE
 	default y
 	help
 	if you say yes here you get support for enhance sharpness at gallery app
@@ -160,13 +160,15 @@ config LGE_VSYNC_SKIP
 
 config LGE_LCD_POWER_CTRL
 	bool "LCD power control mode"
+	depends on MACH_LGE
 	default y
 	---help---
 	if you say yes here you get support for lcd power on/off control.
 
 config LGE_PANEL_RECOVERY
-	depends on  LGE_MIPI_H1_INCELL_QHD_CMD_PANEL
+	depends on  LGE_DISPLAY_COMMON
 	bool "Panel recovery support"
+	depends on MACH_LGE
 	default y
 	---help---
 	if you say yes here, you get support for panel recovery routine.
@@ -180,6 +182,7 @@ config LGE_THERMAL_BL_MAX
 config LGE_LCD_MFTS_MODE
 	depends on LGE_LCD_POWER_CTRL
 	bool "LCD MFTS mode"
+	depends on MACH_LGE
 	default y
 	---help---
 	if you say yes here you get support for lcd mfts control.
@@ -192,6 +195,7 @@ config LGE_CAM_PREVIEW_TUNE
 
 config LGE_LCD_DYNAMIC_CABC_MIE_CTRL
 	bool "LGE_LCD_DYNAMIC_CABC_MIE_CTRL"
+	depends on MACH_LGE
 	default y
 	help
 	if you say yes here you get support for cabc, image enhance function dynamic control
@@ -202,6 +206,47 @@ config LGE_DISPLAY_READER_MODE
 	---help---
 	The reader mode provides support to change color temperature
 	by sending proper cmds to panel.
+
+config LGE_DISPLAY_READER_MONO_MODE
+	depends on FB_MSM_MDSS
+	bool "LGE reader mono mode"
+	---help---
+	The reader mode provides support to change mono color
+	by sending proper cmds to panel.
+
+config LGE_DISPLAY_SRE_MODE
+	depends on FB_MSM_MDSS
+	bool "LGE sre mode"
+	---help---
+	The sre mode provides support to improve outdoor visibility
+	by sending proper cmds to panel.
+
+config LGE_DISPLAY_HDR_MODE
+	depends on FB_MSM_MDSS
+	bool "LGE HDR mode"
+	---help---
+	The HDR mode provides support to ensure high definition for playing movies
+	by sending proper cmds to panel.
+
+config LGE_DISPLAY_DOLBY_MODE
+	depends on FB_MSM_MDSS
+	bool "LGE Dolby mode"
+	---help---
+	The Dolby mode provides support to ensure high definition for playing movies
+	by sending proper cmds to panel.
+
+config LGE_DISPLAY_LINEAR_GAMMA
+	depends on FB_MSM_MDSS
+	bool "LGE linear gamma"
+	---help---
+	The linear gamma mode provides support to change linear gamma
+	by sending proper cmds to panel.
+
+config LGE_DISPLAY_SW49408
+	depends on FB_MSM_MDSS
+	bool "LGE sw49408"
+	---help---
+	The SW49408 provides support for SW49408 features made by LGE.
 
 config LGE_DISPLAY_COMMON
 	depends on FB_MSM_MDSS
@@ -274,4 +319,41 @@ config LGE_EXTERNAL_DISPLAY_BLOCK
 	default n
 	---help---
 	Support EXTERNAL DISPLAY block
+
+config LGE_DISPLAY_DYN_DSI_MODE_SWITCH
+	bool "LG DYNAMIC DSI MODE SWITCH"
+	default n
+	---help---
+	Support Dynamic DSI mode switch
+
+config LGE_DISPLAY_MFTS_DET_SUPPORTED
+	bool "LG MFTS Detection"
+	default n
+	---help---
+	Support MFTS Detection
+
+config LGE_DISPLAY_LUCYE_COMMON
+	depends on LGE_DISPLAY_COMMON
+	bool "Use LGE DISPLAY LUCYE COMMON"
+	---help---
+	The LUCYE COMMON provides support for 49407 1440X2880 panel
+
+config LGE_DISPLAY_AOD_WITH_MIPI
+	bool "Enable AOD_WITH_MIPI"
+	default n
+	---help---
+	Feature for AOD_WITH_MIPI scenario.
+
+config LGE_DP_UNSUPPORT_NOTIFY
+	bool "Enable DP UNSUPPORT NOTIFY FEATURE"
+	default n
+	---help---
+	This config is for notification to framework unsupported
+	Displayport
+
+config LGE_DISPLAY_LABIBB_RECOVERY
+	bool "Recover labibb by reboot system"
+	default n
+	---help---
+	Recovery labibb by reboot system
 

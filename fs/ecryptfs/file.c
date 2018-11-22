@@ -122,7 +122,6 @@ static int ecryptfs_readdir(struct file *file, struct dir_context *ctx)
 		.sb = inode->i_sb,
 	};
 	lower_file = ecryptfs_file_to_lower(file);
-	lower_file->f_pos = ctx->pos;
 	rc = iterate_dir(lower_file, &buf.ctx);
 	ctx->pos = buf.ctx.pos;
 	if (rc < 0)
@@ -159,6 +158,14 @@ static int read_or_initialize_metadata(struct dentry *dentry)
 	rc = ecryptfs_read_metadata(dentry);
 	if (!rc)
 		goto out;
+#ifdef CONFIG_SDP
+	/*
+	 * initialize file
+	 * no passthrough/xattr for sensitive files
+	 */
+	if ((rc) && crypt_stat->flags & ECRYPTFS_SDP_SENSITIVE)
+		goto out;
+#endif
 
 	if (mount_crypt_stat->flags & ECRYPTFS_PLAINTEXT_PASSTHROUGH_ENABLED) {
 		crypt_stat->flags &= ~(ECRYPTFS_I_SIZE_INITIALIZED
@@ -177,20 +184,45 @@ static int read_or_initialize_metadata(struct dentry *dentry)
 	rc = -EIO;
 out:
 	mutex_unlock(&crypt_stat->cs_mutex);
+#ifdef CONFIG_SDP
+	if(!rc) {
+		/*
+		 * read file
+		 * SDP v2.0 : sensitive directory (SDP vault)
+		 * Files under sensitive directory automatically becomes sensitive
+		 */
+		struct dentry *p = dentry->d_parent;
+		struct inode *parent_inode = p->d_inode;
+		struct ecryptfs_crypt_stat *parent_crypt_stat =
+				&ecryptfs_inode_to_private(parent_inode)->crypt_stat;
+
+		if (!(crypt_stat->flags & ECRYPTFS_SDP_SENSITIVE) &&
+				((S_ISDIR(parent_inode->i_mode)) &&
+						(parent_crypt_stat->flags & ECRYPTFS_SDP_SENSITIVE))) {
+		}
+		if ((crypt_stat->flags & ECRYPTFS_SDP_SENSITIVE) && (crypt_stat->pubkey_len != 0)) {
+			SDP_LOGD("Convert Public key to symmetric key");
+			rc = sdp_file_set_sensitive(dentry, crypt_stat->storage_id);
+			if (rc) {
+				SDP_LOGE("Failed to convert FEKEK to symmetric");
+			}
+		}
+	}
+#endif //CONFIG_SDP
 	return rc;
 }
 
 static int ecryptfs_mmap(struct file *file, struct vm_area_struct *vma)
 {
-    struct file *lower_file = ecryptfs_file_to_lower(file);
-    /*
-     * Don't allow mmap on top of file systems that don't support it
-     * natively.  If FILESYSTEM_MAX_STACK_DEPTH > 2 or ecryptfs
-     * allows recursive mounting, this will need to be extended.
-     */
-    if (!lower_file->f_op->mmap)
-        return -ENODEV;
-    return generic_file_mmap(file, vma);
+	struct file *lower_file = ecryptfs_file_to_lower(file);
+	/*
+	 * Don't allow mmap on top of file systems that don't support it
+	 * natively.  If FILESYSTEM_MAX_STACK_DEPTH > 2 or ecryptfs
+	 * allows recursive mounting, this will need to be extended.
+	 */
+	if (!lower_file->f_op->mmap)
+		return -ENODEV;
+	return generic_file_mmap(file, vma);
 }
 
 /**
@@ -264,15 +296,19 @@ static int ecryptfs_open(struct inode *inode, struct file *file)
 	}
 	ecryptfs_set_file_lower(
 		file, ecryptfs_inode_to_private(inode)->lower_file);
-	if (S_ISDIR(ecryptfs_dentry->d_inode->i_mode)) {
-		ecryptfs_printk(KERN_DEBUG, "This is a directory\n");
+	rc = read_or_initialize_metadata(ecryptfs_dentry);
+
+#ifdef CONFIG_SDP
+	if (rc && (file->f_flags & O_SDP)) {
+		SDP_LOGE("failed read_or_initialize_metadata\n");
 		mutex_lock(&crypt_stat->cs_mutex);
-		crypt_stat->flags &= ~(ECRYPTFS_ENCRYPTED);
+		crypt_stat->flags &= ~(ECRYPTFS_KEY_VALID);
 		mutex_unlock(&crypt_stat->cs_mutex);
 		rc = 0;
 		goto out;
 	}
-	rc = read_or_initialize_metadata(ecryptfs_dentry);
+#endif
+
 	if (rc)
 		goto out_put;
 	ecryptfs_printk(KERN_DEBUG, "inode w/ addr = [0x%p], i_ino = "
@@ -288,11 +324,50 @@ out:
 	return rc;
 }
 
+/**
+ * ecryptfs_dir_open
+ * @inode: inode speciying file to open
+ * @file: Structure to return filled in
+ *
+ * Opens the file specified by inode.
+ *
+ * Returns zero on success; non-zero otherwise
+ */
+static int ecryptfs_dir_open(struct inode *inode, struct file *file)
+{
+	struct dentry *ecryptfs_dentry = file->f_path.dentry;
+	/* Private value of ecryptfs_dentry allocated in
+	 * ecryptfs_lookup() */
+	struct ecryptfs_file_info *file_info;
+	struct file *lower_file;
+
+	/* Released in ecryptfs_release or end of function if failure */
+	file_info = kmem_cache_zalloc(ecryptfs_file_info_cache, GFP_KERNEL);
+	ecryptfs_set_file_private(file, file_info);
+	if (unlikely(!file_info)) {
+		ecryptfs_printk(KERN_ERR,
+				"Error attempting to allocate memory\n");
+		return -ENOMEM;
+	}
+	lower_file = dentry_open(ecryptfs_dentry_to_lower_path(ecryptfs_dentry),
+				 file->f_flags, current_cred());
+	if (IS_ERR(lower_file)) {
+		printk(KERN_ERR "%s: Error attempting to initialize "
+			"the lower file for the dentry with name "
+			"[%pd]; rc = [%ld]\n", __func__,
+			ecryptfs_dentry, PTR_ERR(lower_file));
+		kmem_cache_free(ecryptfs_file_info_cache, file_info);
+		return PTR_ERR(lower_file);
+	}
+	ecryptfs_set_file_lower(file, lower_file);
+	return 0;
+}
+
 static int ecryptfs_flush(struct file *file, fl_owner_t td)
 {
 	struct file *lower_file = ecryptfs_file_to_lower(file);
 
-	if (lower_file->f_op->flush) {
+	if (lower_file->f_op && lower_file->f_op->flush) {
 		filemap_write_and_wait(file->f_mapping);
 		return lower_file->f_op->flush(lower_file, td);
 	}
@@ -302,11 +377,33 @@ static int ecryptfs_flush(struct file *file, fl_owner_t td)
 
 static int ecryptfs_release(struct inode *inode, struct file *file)
 {
+#ifdef CONFIG_SDP
+	struct ecryptfs_crypt_stat *crypt_stat;
+	crypt_stat = &ecryptfs_inode_to_private(inode)->crypt_stat;
+
+	mutex_lock(&crypt_stat->cs_mutex);
+#endif
 	ecryptfs_put_lower_file(inode);
+#ifdef CONFIG_SDP
+	mutex_unlock(&crypt_stat->cs_mutex);
+#endif
 	kmem_cache_free(ecryptfs_file_info_cache,
 			ecryptfs_file_to_private(file));
 
 	return 0;
+}
+
+static int ecryptfs_dir_release(struct inode *inode, struct file *file)
+{
+	fput(ecryptfs_file_to_lower(file));
+	kmem_cache_free(ecryptfs_file_info_cache,
+			ecryptfs_file_to_private(file));
+	return 0;
+}
+
+static loff_t ecryptfs_dir_llseek(struct file *file, loff_t offset, int whence)
+{
+	return vfs_llseek(ecryptfs_file_to_lower(file), offset, whence);
 }
 
 static int
@@ -327,7 +424,7 @@ static int ecryptfs_fasync(int fd, struct file *file, int flag)
 	struct file *lower_file = NULL;
 
 	lower_file = ecryptfs_file_to_lower(file);
-	if (lower_file->f_op->fasync)
+	if (lower_file->f_op && lower_file->f_op->fasync)    // hoon.shin
 		rc = lower_file->f_op->fasync(fd, lower_file, flag);
 	return rc;
 }
@@ -337,6 +434,13 @@ ecryptfs_unlocked_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 {
 	struct file *lower_file = ecryptfs_file_to_lower(file);
 	long rc = -ENOTTY;
+
+#ifdef CONFIG_SDP
+	rc = sdp_file_ioctl(file, cmd, arg);
+	if (rc == 0)    //Normal operation
+		return rc;
+    SDP_LOGE("failed to sdp_file_ioctl[%ld]", rc);
+#endif
 
 	if (!lower_file->f_op->unlocked_ioctl)
 		return rc;
@@ -362,6 +466,12 @@ ecryptfs_compat_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 {
 	struct file *lower_file = ecryptfs_file_to_lower(file);
 	long rc = -ENOIOCTLCMD;
+
+#ifdef CONFIG_SDP
+	rc = sdp_file_ioctl(file, cmd, arg);
+	if (rc == 0)
+		return rc;
+#endif
 
 	if (!lower_file->f_op->compat_ioctl)
 		return rc;
@@ -389,13 +499,10 @@ const struct file_operations ecryptfs_dir_fops = {
 #ifdef CONFIG_COMPAT
 	.compat_ioctl = ecryptfs_compat_ioctl,
 #endif
-	.open = ecryptfs_open,
-	.flush = ecryptfs_flush,
-	.release = ecryptfs_release,
+	.open = ecryptfs_dir_open,
+	.release = ecryptfs_dir_release,
 	.fsync = ecryptfs_fsync,
-	.fasync = ecryptfs_fasync,
-	.splice_read = generic_file_splice_read,
-	.llseek = default_llseek,
+	.llseek = ecryptfs_dir_llseek,
 };
 
 const struct file_operations ecryptfs_main_fops = {
@@ -404,7 +511,6 @@ const struct file_operations ecryptfs_main_fops = {
 	.read_iter = ecryptfs_read_update_atime,
 	.write = new_sync_write,
 	.write_iter = generic_file_write_iter,
-	.iterate = ecryptfs_readdir,
 	.unlocked_ioctl = ecryptfs_unlocked_ioctl,
 #ifdef CONFIG_COMPAT
 	.compat_ioctl = ecryptfs_compat_ioctl,

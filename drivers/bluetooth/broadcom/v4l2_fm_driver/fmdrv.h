@@ -13,7 +13,7 @@
  * for more details.
 
 
- *  Copyright (C) 2009-2014 Broadcom Corporation
+ *  Copyright (C) 2009-2017 Broadcom Corporation
  */
 
 /************************************************************************************
@@ -34,6 +34,7 @@
 #include <linux/version.h>
 #include <linux/videodev2.h>
 #include <media/v4l2-device.h>
+
 /*******************************************************************************
 **  Constants & Macros
 *******************************************************************************/
@@ -87,6 +88,11 @@
 
 #define FM_STEP_NONE               0xff
 
+/* FM/RDS flag bits */
+#define FM_RDS_FLAG_CLEAN_BIT       0x01 /* clean FM_RDS_FLAG region */
+#define FM_RDS_FLAGSCH_FRZ_BIT          0x02 /* interrupt freeze */
+#define FM_RDS_FLAG_SCH_BIT         0x04 /* Pending search_tune */
+
 /* bits in I2C_FM_REG_FM_RDS_FLAG 0x12 */
 #define I2C_MASK_SRH_TUNE_CMPL_BIT     (0x0001 << 0)    /* FM/RDS register search/tune cmpl bit */
 #define I2C_MASK_SRH_TUNE_FAIL_BIT     (0x0001 << 1)    /* FM/RDS register search/tune fail bit */
@@ -99,6 +105,7 @@
 #define I2C_MASK_RDS_FIFO_WLINE_BIT    (0x0100 << 1)    /* RDS tuples are currently available at
                                                         a level >= waterline */
 #define I2C_MASK_BB_MATCH_BIT          (0x0100 << 3)    /* PI code match found */
+#define I2C_MASK_SYNC_LOST_BIT         (0x0100 << 4)    /* RDS synchronization was lost */
 #define I2C_MASK_PI_MATCH_BIT          (0x0100 << 5)    /* PI code match found */
 
 /* FM_REG_RDS_DATA 0x80 reading */
@@ -107,18 +114,15 @@
 #define FM_RDS_END_TUPLE_3RD_BYTE    0xff /* 3rd byte of a RDS ending tuple */
 
 /* FM/RDS flag bits used with fm_dev->rx.fm_rds_flag */
-#define     FM_RDS_FLAG_CLEAN_BIT         0x01    /* clean FM_RDS_FLAG register */
-#define     FM_RDS_FLAG_SCH_FRZ_BIT     0x02    /* interrupt freeze */
-#define     FM_RDS_FLAG_SCH_BIT             0x04    /* pending search_tune */
+#define FM_RDS_FLAG_CLEAN_BIT         0x01    /* clean FM_RDS_FLAG register */
+#define FM_RDS_FLAG_SCH_FRZ_BIT     0x02    /* interrupt freeze */
+#define FM_RDS_FLAG_SCH_BIT             0x04    /* pending search_tune */
 
-#define     FM_RDS_UPD_TUPLE            64       /* 64 tuples per read(64*3 = 192 bytes),
-                                                    one tuple contains 1 RDS block  */
+#define FM_RDS_UPD_TUPLE            64       /* 64 tuples per read(64*3 = 192 bytes),
+                                                one tuple contains 1 RDS block  */
 
-#define     FM_READ_1_BYTE_DATA     1
-#define     FM_READ_2_BYTE_DATA     2
-
-#define TRUE 1
-#define FALSE 0
+#define FM_READ_1_BYTE_DATA     1
+#define FM_READ_2_BYTE_DATA     2
 
 #define WORKER_QUEUE TRUE
 
@@ -173,9 +177,7 @@ struct fm_rx {
     unsigned char curr_mute_mode;   /* Current mute mode */
     unsigned short curr_volume;     /* Current volume level */
     char  curr_snr_threshold;       /* Current SNR threshold level */
-//BRCM_LOCAL [CSP#1014809] : Can't adjust scan level through the threshold value
     unsigned char curr_rssi_threshold;  /* Current RSSI threshold value */
-//BRCM_LOCAL [CSP#1014809]
     unsigned char curr_sch_mode;    /* current search mode */
     unsigned char curr_noise_floor; /* current noise floor estimation */
     unsigned char rds_mode;         /* RDS operation mode (RDS/RDBS) */
@@ -193,11 +195,8 @@ struct fm_rx {
     unsigned char fm_func_mask;
     struct fm_rds rds;
 
-//BRCM_LOCAL [CSP#1011785] : FM radio Kernel crash
     u8 abort_flag;
     u8 seek_pending;
-//BRCM_LOCAL [CSP#1011785]
-
     u8 af_mode;         /* Alternate frequency on/off */
     u8 no_of_chans;     /* Number stations found */
     char current_pins[3]; /*Current pins configuration. either I2S or PCM*/
@@ -215,17 +214,17 @@ struct fm_device_info {
 struct fmdrv_ops {
     struct video_device *radio_dev;   /* V4L2 video device pointer */
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(3, 11, 0)
-    struct v4l2_device v4l2_dev;	/* V4L2 top level struct */
+    struct v4l2_device v4l2_dev;    /* V4L2 top level struct */
 #endif
     spinlock_t resp_skb_lock;         /* To protect access to received SKB */
     spinlock_t rds_cbuff_lock;        /* To protect access to RDS Circular buffer */
 
     long flag;                         /*  FM driver state machine info */
     struct sk_buff_head rx_q;          /* RX queue */
-#if TASKLET_SUPPORT
+#ifdef TASKLET_SUPPORT
     struct tasklet_struct rx_task;  /* RX Tasklet */
     struct tasklet_struct tx_task;  /* TX Tasklet */
-#else if WORKER_QUEUE
+#else
     struct workqueue_struct *tx_wq;     /* Fm workqueue */
     struct work_struct tx_workqueue;    /* Tx work queue */
     struct workqueue_struct *rx_wq;     /* Fm workqueue */
@@ -237,7 +236,6 @@ struct fmdrv_ops {
     atomic_t tx_cnt;                         /* Number of packets can send at a time */
 
     struct sk_buff *response_skb;   /* Response from the chip */
-
     struct sk_buff *response_skb_vse;   /* Response from the chip - VSE interrupt */
 
     /* Main task completion handler */
@@ -254,6 +252,7 @@ struct fmdrv_ops {
     struct fm_device_info device_info; /* FM Device info */
     struct mutex wait_completion_lock;
 };
+
 #define GET_PI_CODE     1
 #define GET_TP_CODE     2
 #define GET_PTY_CODE    3
@@ -263,4 +262,5 @@ struct fmdrv_ops {
 #define GET_RT_MSG      7
 #define GET_CT_DATA     8
 #define GET_TMC_CHANNEL 9
+
 #endif

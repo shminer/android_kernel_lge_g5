@@ -13,7 +13,7 @@
  * for more details.
 
 
- *  Copyright (C) 2009-2014 Broadcom Corporation
+ *  Copyright (C) 2009-2017 Broadcom Corporation
  */
 
 
@@ -32,19 +32,19 @@
 **  Constants & Macros
 *******************************************************************************/
 
-#define    FM_REGION_EUR    0x00
-#define    FM_REGION_JP     0x01
-#define    FM_REGION_NA     0x02
-#define    FM_REGION_RUS    0x03
-#define    FM_REGION_CHN    0x04
+#define FM_REGION_EUR    0x00
+#define FM_REGION_JP     0x01
+#define FM_REGION_NA     0x02
+#define FM_REGION_RUS    0x03
+#define FM_REGION_CHN    0x04
 
-#define    FM_RDS_BIT       1<<4
-#define    FM_RBDS_BIT      1<<5
-#define    FM_AF_BIT        1<<6
+#define FM_RDS_BIT       1<<4
+#define FM_RBDS_BIT      1<<5
+#define FM_AF_BIT        1<<6
 
-#define     FM_REGION_MAX           FM_REGION_JP
+#define FM_REGION_MAX           FM_REGION_JP
 /* low 3 bits (bit0, 1)of FUNC mask is region code */
-#define     FM_REGION_MASK          (FM_REGION_NA | FM_REGION_EUR)
+#define FM_REGION_MASK          (FM_REGION_NA | FM_REGION_EUR)
 
 /* FM audio output mode */
 enum
@@ -62,33 +62,24 @@ enum
 #define FM_AUDIO_BT_MONO    0x04  /* routing FM over SCO */
 #define FM_AUDIO_BT_STEREO  0x08  /* routing FM over BT Stereo */
 
-#define     FM_DEEMPHA_50U      0       /* 6th bit in FM_AUDIO_CTRL0 set to 0, Europe default */
-#define     FM_DEEMPHA_75U      (1<<6)  /* 6th bit in FM_AUDIO_CTRL0 set to 1, US  default */
+#define FM_DEEMPHA_50U      0       /* 6th bit in FM_AUDIO_CTRL0 set to 0, Europe default */
+#define FM_DEEMPHA_75U      (1<<6)  /* 6th bit in FM_AUDIO_CTRL0 set to 1, US  default */
 
-#define  FM_STEP_50KHZ      0x00
-#define  FM_STEP_100KHZ     0x01
-#define  FM_STEP_200KHZ     0x02
+#define FM_STEP_50KHZ      0x00
+#define FM_STEP_100KHZ     0x01
+#define FM_STEP_200KHZ     0x02
 
-#define  CHL_SPACE_ONE      0x01
-#define  CHL_SPACE_TWO      0x02
-#define  CHL_SPACE_FOUR     0x04
-
-
+#define CHL_SPACE_ONE      0x01
+#define CHL_SPACE_TWO      0x02
+#define CHL_SPACE_FOUR     0x04
 
 #define FM_GET_FREQ(x) ((unsigned short) ((x * 10) - 64000))
 #define FM_SET_FREQ(x) ((unsigned int) ((x + 64000)/10))
+
 enum
 {
     FM_RDS,
     FM_RBDS
 };
-
-#ifndef FALSE
-#define FALSE  0
-#endif
-
-#ifndef TRUE
-#define TRUE  1
-#endif
 
 #endif

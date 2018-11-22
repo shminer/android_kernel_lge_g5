@@ -169,42 +169,44 @@ int fc8300_power_on(void)
 {
     int rc = OK;
 
-	if(IsdbCtrlInfo.pwr_state != 1)
-	{
+    if(IsdbCtrlInfo.pwr_state != 1) {
 #ifndef _NOT_USE_WAKE_LOCK_
         wake_lock(&IsdbCtrlInfo.wake_lock);
-#endif
+#endif /* _NOT_USE_WAKE_LOCK_ */
 
         gpio_set_value(IsdbCtrlInfo.reset_gpio, 0);
-        gpio_set_value(IsdbCtrlInfo.enable_gpio, 1);
-        mdelay(3);
-        gpio_set_value(IsdbCtrlInfo.reset_gpio, 1);
-        mdelay(2);
 
 #ifdef FEATURE_DMB_USE_REGULATOR
         broadcast_isdbt_set_regulator(1);
-#endif
+#endif /* FEATURE_DMB_USE_REGULATOR */
+
+        gpio_set_value(IsdbCtrlInfo.enable_gpio, 1);
 
 #ifdef FEATURE_DMB_USE_XO
         if(IsdbCtrlInfo.xo_clk!= NULL) {
-            printk("[dtv]fc8300_power on clk enable\n");
+            printk("[dtv] fc8300_power on clk enable\n");
             rc = clk_prepare_enable(IsdbCtrlInfo.xo_clk);
         }
-        mdelay(2);
-#endif
-	}
-	else
-	{
-		printk("[dtv]aready on!! \n");
-	}
 
-	IsdbCtrlInfo.pwr_state = 1;
-	return rc;
+        mdelay(2);
+#endif /* FEATURE_DMB_USE_XO */
+
+        mdelay(3);
+        gpio_set_value(IsdbCtrlInfo.reset_gpio, 1);
+        mdelay(2);
+    }
+    else {
+        printk("[dtv] already on!!\n");
+    }
+
+    IsdbCtrlInfo.pwr_state = 1;
+
+    return rc;
 }
 
 int fc8300_is_power_on()
 {
-	return (int)IsdbCtrlInfo.pwr_state;
+    return (int)IsdbCtrlInfo.pwr_state;
 }
 
 
@@ -253,7 +255,7 @@ static int broadcast_Isdb_config_gpios(void)
     IsdbCtrlInfo.reset_gpio = of_get_named_gpio(IsdbCtrlInfo.pdev->dev.of_node,
         "isdbt-fc8300,reset-gpio" ,0);
 
-    printk("[dtv]enable_gpio =(%d), reset_gpio =(%d)",
+    printk("[dtv]enable_gpio =(%d), reset_gpio =(%d)\n",
             IsdbCtrlInfo.enable_gpio, IsdbCtrlInfo.reset_gpio);
 
     rc =  gpio_request(IsdbCtrlInfo.enable_gpio, "DMB_EN");
@@ -280,7 +282,7 @@ static int broadcast_Isdb_i2c_probe(struct i2c_client *client, const struct i2c_
 	int rc = 0;
 	int addr = 0;
 
-#if defined (CONFIG_ARCH_MSM8992) || defined (CONFIG_ARCH_MSM8994) || defined (CONFIG_ARCH_MSM8996)
+#if defined (CONFIG_ARCH_MSM8992) || defined (CONFIG_ARCH_MSM8994) || defined (CONFIG_ARCH_MSM8996) || defined (CONFIG_ARCH_MSM8998)
     printk("[dtv]broadcast_Isdb_i2c_probe client:0x%lX\n", (UDynamic_32_64)client);
 #else
     printk("[dtv]broadcast_Isdb_i2c_probe client:0x%X\n", (UDynamic_32_64)client);
@@ -288,11 +290,11 @@ static int broadcast_Isdb_i2c_probe(struct i2c_client *client, const struct i2c_
 
 	if(!i2c_check_functionality(client->adapter, I2C_FUNC_I2C)) {
 		print_log(NULL, "need I2C_FUNC_I2C\n");
+
 		return -ENODEV;
 	}
     IsdbCtrlInfo.pdev = to_platform_device(&client->dev);
 
-	/* taew00k.kang added for Device Tree Structure 2013-06-04 [start] */
 	addr = client->addr; //Slave Addr
 	pr_err("[dtv] i2c Slaveaddr [%x] \n", addr);
 
@@ -303,15 +305,19 @@ static int broadcast_Isdb_i2c_probe(struct i2c_client *client, const struct i2c_
     IsdbCtrlInfo.xo_clk = clk_get(&IsdbCtrlInfo.pclient->dev, "isdbt_xo");
     if(IS_ERR(IsdbCtrlInfo.xo_clk)){
         rc = PTR_ERR(IsdbCtrlInfo.xo_clk);
-        dev_err(&IsdbCtrlInfo.pclient->dev, "[dtv]could not get clock\n");
+        dev_err(&IsdbCtrlInfo.pclient->dev, "[dtv] could not get clock\n");
+
         return rc;
     }
+
     /* We enable/disable the clock only to assure it works */
     rc = clk_prepare_enable(IsdbCtrlInfo.xo_clk);
     if(rc) {
         dev_err(&IsdbCtrlInfo.pclient->dev, "[dtv] could not enable clock\n");
+
         return rc;
     }
+
     clk_disable_unprepare(IsdbCtrlInfo.xo_clk);
 #endif
 
@@ -332,7 +338,7 @@ static int broadcast_Isdb_i2c_probe(struct i2c_client *client, const struct i2c_
 					dev_name(&client->dev));
 #endif
 
-#if defined (CONFIG_ARCH_MSM8992) || defined (CONFIG_ARCH_MSM8994) || defined (CONFIG_ARCH_MSM8996)
+#if defined (CONFIG_ARCH_MSM8992) || defined (CONFIG_ARCH_MSM8994) || defined (CONFIG_ARCH_MSM8996) || (CONFIG_ARCH_MSM8998)
     fc8300_power_on();
     tunerbb_drv_fc8300_read_chip_id();
     fc8300_power_off();
@@ -371,21 +377,18 @@ static int broadcast_Isdb_i2c_resume(struct i2c_client* client)
 #endif
 
 static const struct i2c_device_id isdbt_fc8300_id[] = {
-/* taew00k.kang added for Device Tree Structure 2013-06-04 [start] */
 	{"tcc3535_i2c",	0},
-/* taew00k.kang added for Device Tree Structure 2013-06-04 [end] */
 	{},
 };
+
 
 MODULE_DEVICE_TABLE(i2c, isdbt_fc8300_id);
 
 
-/* taew00k.kang added for Device Tree Structure 2013-06-04 [start] */
 static struct of_device_id tcc3535_i2c_table[] = {
 { .compatible = "telechips,tcc3535-i2c",}, //Compatible node must match dts
 { },
 };
-/* taew00k.kang added for Device Tree Structure 2013-06-04 [end] */
 
 static struct i2c_driver broadcast_Isdb_driver = {
 	.driver = {

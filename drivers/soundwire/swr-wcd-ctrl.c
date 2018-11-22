@@ -1,4 +1,4 @@
-/* Copyright (c) 2015-2016, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2015-2017, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -61,6 +61,10 @@ struct usecase uc[] = {
 	{6, 14, 6600},		/* UC11: 2*(Spkr + Comp + SB) */
 	{2, 3, 2700},		/* UC12: Spkr + SB */
 	{4, 6, 5400},		/* UC13: 2*(Spkr + SB) */
+	{3, 5, 3900},		/* UC14: Spkr + SB + VI */
+	{6, 10, 7800},		/* UC15: 2*(Spkr + SB + VI) */
+	{2, 3, 3600},		/* UC16: Spkr + VI */
+	{4, 6, 7200},		/* UC17: 2*(Spkr + VI) */
 };
 #define MAX_USECASE	ARRAY_SIZE(uc)
 
@@ -147,6 +151,33 @@ struct port_params pp[MAX_USECASE][SWR_MSTR_PORT_LEN] = {
 		{63, 12, 31},
 		{7, 6, 0},
 		{63, 13, 31},
+	},
+	/* UC 14 */
+	{
+		{7, 1, 0},
+		{63, 12, 31},
+		{15, 7, 0},
+	},
+	/* UC 15 */
+	{
+		{7, 1, 0},
+		{63, 12, 31},
+		{15, 7, 0},
+		{7, 6, 0},
+		{63, 13, 31},
+		{15, 10, 0},
+	},
+	/* UC 16 */
+	{
+		{7, 1, 0},
+		{15, 7, 0},
+	},
+	/* UC 17 */
+	{
+		{7, 1, 0},
+		{15, 7, 0},
+		{7, 6, 0},
+		{15, 10, 0},
 	},
 };
 
@@ -476,7 +507,7 @@ static int swrm_read(struct swr_master *master, u8 dev_num, u16 reg_addr,
 {
 	struct swr_mstr_ctrl *swrm = swr_get_ctrl_data(master);
 	int ret = 0;
-	int val;
+	int val = 0;
 	u8 *reg_val = (u8 *)buf;
 
 	if (!swrm) {
@@ -722,7 +753,7 @@ inc_loop:
 			list_del(&mport->list);
 			kfree(mport);
 		}
-		if (!mport_next) {
+		if (!mport_next || (&mport_next->list == &swrm->mport_list)) {
 			dev_err(swrm->dev, "%s: end of list\n", __func__);
 			break;
 		}
@@ -1227,7 +1258,7 @@ static int swrm_get_logical_dev_num(struct swr_master *mstr, u64 dev_id,
 				u8 *dev_num)
 {
 	int i;
-	u64 id;
+	u64 id = 0;
 	int ret = -EINVAL;
 	struct swr_mstr_ctrl *swrm = swr_get_ctrl_data(mstr);
 

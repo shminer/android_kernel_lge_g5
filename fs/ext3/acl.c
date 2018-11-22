@@ -199,7 +199,7 @@ __ext3_set_acl(handle_t *handle, struct inode *inode, int type,
 				if (error)
 					return error;
 				inode->i_ctime = CURRENT_TIME_SEC;
-				ext4_mark_inode_dirty(handle, inode);
+				ext3_mark_inode_dirty(handle, inode);
 			}
 			break;
 

@@ -130,60 +130,6 @@
 		};
 //[H1_BT_BRINGUP_E]
 
-		pmx_spi_tdmb {
-			spi_tdmb_active: spi_tdmb_active {
-				mux {
-					pins =  "gpio58", "gpio59", "gpio60", "gpio61";
-					function = "blsp_spi11";
-				};
-
-				config {
-					pins =  "gpio58", "gpio59", "gpio60", "gpio61";
-					drive-strength = <8>; /* 8MA */
-					bias-disable;
-				};
-			};
-
-			spi_tdmb_suspend: spi_tdmb_suspend {
-				mux {
-					pins =  "gpio58", "gpio59", "gpio60", "gpio61";
-					function = "gpio";
-				};
-
-				config {
-					pins =  "gpio58", "gpio59", "gpio60", "gpio61";
-					drive-strength = <2>; /* 8MA */
-					bias-pull-down;
-				};
-			};
-		};
-
-		pmx_gpio_tdmb_suspend {
-			tdmb_ctrl: tdmb_ctrl {
-				mux {
-					pins = "gpio39";
-					function = "gpio";
-				};
-				config {
-					pins = "gpio39";
-					drive-strength = <8>; /* 8MA */
-					bias-disable;
-				};
-			};
-
-			tdmb_int: tdmb_int {
-				mux {
-					pins = "gpio21";
-					function = "gpio";
-				};
-				config {
-					pins = "gpio21";
-					drive-strength = <8>; /* 8MA */
-					bias-pull-up;
-				};
-			};
-		};
-
 		pmx_mdss: pmx_mdss {
 			mdss_dsi_active: mdss_dsi_active {
 				mux {

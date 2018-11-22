@@ -204,4 +204,4 @@ module_exit(tlc_tui_exit);
 
 MODULE_AUTHOR("Trustonic Limited");
 MODULE_LICENSE("GPL v2");
-MODULE_DESCRIPTION("<t-base TUI");
+MODULE_DESCRIPTION("Kinibi TUI");

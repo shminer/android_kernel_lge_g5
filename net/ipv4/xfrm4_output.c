@@ -94,7 +94,7 @@ static int __xfrm4_output(struct sk_buff *skb)
 #ifdef CONFIG_XFRM_FRAG_ESP_BEFORE_TUNNEL_ENC
     if (x->props.mode == XFRM_MODE_TUNNEL &&
             skb != NULL && skb->protocol == htons(ETH_P_IP) &&
-            ip_hdr(skb) != NULL && ip_hdr(skb)->protocol == IPPROTO_UDP &&
+            skb->sk != NULL && skb->sk->sk_protocol != IPPROTO_TCP &&
             skb_dst(skb)->next != NULL && skb_dst(skb)->next->xfrm != NULL &&
             !(skb_dst(skb)->next->xfrm->outer_mode->flags & XFRM_MODE_FLAG_TUNNEL)) {
         int mtu;
@@ -116,6 +116,7 @@ static int __xfrm4_output(struct sk_buff *skb)
         if (x->props.mode == XFRM_MODE_TUNNEL &&
                 ((skb->len > mtu && !skb_is_gso(skb)) ||
                  dst_allfrag(skb_dst(skb)))) {
+            printk("XFRM_FRAG_ESP_BEFORE_TUNNEL_ENC go fragment\n");
             return ip_fragment(skb, x->outer_mode->afinfo->output_finish);
         }
     }

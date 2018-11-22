@@ -146,8 +146,10 @@ static fci_s32 spi_bulkwrite(HANDLE handle, fci_u16 addr, fci_u8 command, fci_u8
     tx_data[2] = (fci_u8) ((command & 0xfc) | CHIPID);
     tx_data[3] = (fci_u8) (length & 0xff);
 
-    for (i = 0; i < length; i++)
-        tx_data[4+i] = data[i];
+    for (i = 0; i < length; i++) {
+        if(length < 6)
+            tx_data[4+i] = data[i];
+    }
 
     res = fc8080_spi_write_then_read(
         fc8080_spi, &tx_data[0], length+4, NULL, 0);

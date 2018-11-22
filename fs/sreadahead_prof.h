@@ -67,4 +67,5 @@ struct sreadahead_prof {
 };
 
 int sreadahead_prof(struct file *filp, size_t len, loff_t pos);
+extern unsigned long sreadahead_ra_pages;
 /* LGE_CHANGE_E */

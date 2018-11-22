@@ -7,7 +7,11 @@ obj-$(CONFIG_LGE_PM) += lge_monitor_thermal.o
 obj-$(CONFIG_LGE_PM_CABLE_DETECTION) += lge_cable_detection.o
 obj-$(CONFIG_LGE_PM_SMPL_COUNTER) += lge_smpl_count.o
 obj-$(CONFIG_LGE_PM_CHARGING_CONTROLLER) += lge_charging_controller.o
+ifdef CONFIG_LGE_PM_CHARGING_SCENARIO_V18
+obj-$(CONFIG_LGE_PM_CHARGING_SCENARIO) += lge_charging_scenario_v18.o
+else
 obj-$(CONFIG_LGE_PM_CHARGING_SCENARIO) += lge_charging_scenario.o
+endif
 obj-$(CONFIG_LGE_PM_UNIFIED_NODE) += lge_power_sysfs.o
 obj-$(CONFIG_LGE_PM_PSEUDO_BATTERY) += lge_pseudo_batt.o
 obj-$(CONFIG_LGE_QSDL_SUPPORT) += lge_qsdl.o
@@ -17,3 +21,4 @@ obj-$(CONFIG_LGE_LCD_TUNING) += lge_lcd_misc_ctrl.o
 obj-$(CONFIG_LGE_QFPROM_INTERFACE) += lge_qfprom_access.o
 obj-$(CONFIG_PRE_SELF_DIAGNOSIS) += lge_pre_selfd.o
 obj-$(CONFIG_LGE_PM_SUPPORT_LG_POWER_CLASS) += power/
+obj-$(CONFIG_LGE_PKM) += lge_pkm_drv.o

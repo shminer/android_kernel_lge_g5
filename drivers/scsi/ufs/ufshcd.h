@@ -75,7 +75,7 @@
 
 #define UFS_BIT(x)	BIT(x)
 
-#if defined(CONFIG_UFS_LGE_FEATURE) && defined(CONFIG_MACH_MSM8996_ELSA) && !defined(CONFIG_MACH_MSM8996_ELSA_KDDI_JP)
+#if defined(CONFIG_UFS_LGE_FEATURE) && defined(CONFIG_MACH_MSM8996_ELSA) && !defined(CONFIG_MACH_MSM8996_ELSA_KDDI_JP) && !defined(CONFIG_MACH_MSM8996_ELSA_DCM_JP) && !defined(CONFIG_MACH_MSM8996_ANNA)
 #define LGE_UFS_THERM_TWEAK
 #endif
 
@@ -433,6 +433,7 @@ struct ufs_clk_gating {
 	struct device_attribute enable_attr;
 	bool is_enabled;
 	int active_reqs;
+	struct workqueue_struct *ungating_workq;
 };
 
 /* Hibern8 state  */
@@ -565,6 +566,7 @@ struct debugfs_files {
     struct dentry *dump_inter_desc;
     struct dentry *dump_power_desc;
     struct dentry *dump_string_desc;
+    struct dentry *dump_health_desc;
 #endif
 	bool is_sys_suspended;
 };
@@ -706,6 +708,7 @@ struct ufs_stats {
  * @is_urgent_bkops_lvl_checked: keeps track if the urgent bkops level for
  *  device is known or not.
  * @scsi_block_reqs_cnt: reference counting for scsi block requests
+ * @do_full_init: recovery from Line-Reset on Hibern8
  */
 struct ufs_hba {
 	void __iomem *mmio_base;
@@ -912,6 +915,10 @@ struct ufs_hba {
 
 	int scsi_block_reqs_cnt;
 
+	int			latency_hist_enabled;
+	struct io_latency_state io_lat_s;
+	bool do_full_init;
+
 #ifdef CONFIG_UFS_LGE_CARD_RESET
 	void*	card_reset_info;
 #endif
@@ -1081,6 +1088,7 @@ int ufshcd_read_config_desc(struct ufs_hba *hba, u8 *buf, u32 size);
 int ufshcd_read_unit_desc(struct ufs_hba *hba, int u_index, u8 *buf, u32 size);
 int ufshcd_read_inter_desc(struct ufs_hba *hba, u8 *buf, u32 size);
 int ufshcd_read_power_desc(struct ufs_hba *hba, u8 *buf, u32 size);
+int ufshcd_read_health_desc(struct ufs_hba *hba, u8 *buf, u32 size);
 #endif
 
 static inline bool ufshcd_is_hs_mode(struct ufs_pa_layer_attr *pwr_info)

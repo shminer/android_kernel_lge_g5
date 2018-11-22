@@ -67,7 +67,11 @@ int display_panel_type;
 
 #ifdef CONFIG_LGE_PM_LGE_POWER_CLASS_BOARD_REVISION
 #else
-#if defined(CONFIG_MACH_MSM8996_ELSA)
+#if defined(CONFIG_MACH_MSM8996_LUCYE)
+char *rev_str[] = {"evb1", "evb2", "evb3", "rev_0", "rev_01", "rev_02", "rev_03", "rev_04",
+	"rev_a", "rev_b", "rev_c", "rev_d", "rev_10", "rev_11", "rev_12", "rev_13", "rev_14", "rev_15", "rev_16",
+	"reserved"};
+#elif defined(CONFIG_MACH_MSM8996_ELSA) || defined(CONFIG_MACH_MSM8996_ANNA)
 char *rev_str[] = {"evb1", "evb2", "evb3", "rev_0", "rev_01", "rev_02", "rev_a", "rev_b",
 	"rev_c", "rev_d", "rev_e", "rev_f", "rev_10", "rev_11", "rev_12", "rev_13",
 	"reserved"};
@@ -217,7 +221,7 @@ int lge_get_panel(void)
 }
 #endif
 
-#ifdef CONFIG_LGE_EARJACK_DEBUGGER
+#if defined(CONFIG_LGE_EARJACK_DEBUGGER) || defined(CONFIG_LGE_USB_DEBUGGER)
 /* s_uart_console_status bits format
  * ------higher than bit4 are not used
  * bit5...: not used
@@ -360,7 +364,7 @@ int get_factory_cable(void)
 
 	return res;
 }
-
+EXPORT_SYMBOL(get_factory_cable);
 struct lge_android_usb_platform_data lge_android_usb_pdata = {
 	.vendor_id = 0x1004,
 	.factory_pid = 0x6000,
@@ -418,11 +422,14 @@ arch_initcall(lge_add_qfprom_devices);
 
 #ifdef CONFIG_LGE_USB_G_LAF
 static enum lge_laf_mode_type lge_laf_mode = LGE_LAF_MODE_NORMAL;
+static enum lge_laf_mode_type lge_laf_mid = LGE_LAF_MODE_NORMAL;
 
 int __init lge_laf_mode_init(char *s)
 {
 	if (strcmp(s, "") && strcmp(s, "MID"))
 		lge_laf_mode = LGE_LAF_MODE_LAF;
+	if (!strcmp(s, "MID"))
+		lge_laf_mid = LGE_LAF_MODE_MID;
 
 	return 1;
 }
@@ -431,6 +438,11 @@ __setup("androidboot.laf=", lge_laf_mode_init);
 enum lge_laf_mode_type lge_get_laf_mode(void)
 {
 	return lge_laf_mode;
+}
+
+enum lge_laf_mode_type lge_get_laf_mid(void)
+{
+	return lge_laf_mid;
 }
 #endif
 
@@ -562,3 +574,49 @@ enum lge_alice_friends lge_get_alice_friends(void)
 	return lge_alice_friends;
 }
 #endif
+
+static int android_fota = 0;
+
+int lge_get_fota_mode(void)
+{
+	return android_fota;
+}
+
+int __init lge_android_fota(char *s)
+{
+	if(!strncmp(s,"true",strlen("true")) == 0)
+		android_fota = 1;
+	else
+		android_fota = 0;
+
+	return 1;
+}
+__setup("androidboot.fota=", lge_android_fota);
+
+static int boot_recovery = 0;
+
+int lge_get_boot_partition_recovery(void)
+{
+	return boot_recovery;
+}
+
+static char lge_boot_partition_str[16] = "none";
+
+char* lge_get_boot_partition(void)
+{
+	return lge_boot_partition_str;
+}
+
+int __init lge_boot_partition(char *s)
+{
+	strncpy(lge_boot_partition_str, s, 15);
+	lge_boot_partition_str[15] = '\0'; /* null character added */
+
+	if(!strncmp(lge_boot_partition_str, "recovery", strlen("recovery")))
+		boot_recovery = 1; /* recovery boot mode */
+	else
+		boot_recovery = 0; /* other    boot mode */
+
+	return 1;
+}
+__setup("lge.boot.partition=", lge_boot_partition);

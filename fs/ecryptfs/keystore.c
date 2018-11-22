@@ -26,6 +26,7 @@
  */
 
 #include <linux/string.h>
+#include <linux/syscalls.h>
 #include <linux/pagemap.h>
 #include <linux/key.h>
 #include <linux/random.h>
@@ -1125,7 +1126,7 @@ out:
 	return rc;
 }
 
-static int
+int
 ecryptfs_get_auth_tok_sig(char **sig, struct ecryptfs_auth_tok *auth_tok)
 {
 	int rc = 0;
@@ -1915,6 +1916,51 @@ out_integrity:
 					"(Tag 11 not allowed by itself)\n");
 			rc = -EIO;
 			goto out_wipe_list;
+			break;
+#ifdef CONFIG_SDP
+		case ECRYPTFS_SDP_PACKET_TYPE:
+			rc = sdp_parse_sdp_header(crypt_stat,
+						(unsigned char *)&src[i],
+						&auth_tok_list, &new_auth_tok,
+						&packet_size, max_packet_size);
+			if (rc) {
+				SDP_LOGE("Error parsing SDP header\n");
+				rc = -EIO;
+				goto out_wipe_list;
+			}
+			i += packet_size;
+
+#ifdef CONFIG_CRYPTO_CCMODE
+#ifdef CONFIG_CRYPTO_DEV_KEY_INTEGRITY_CHECK
+			packet_size = 0;
+			cc_flag = get_cc_mode_state();
+
+			if ((cc_flag & FLAG_CC_MODE) == FLAG_CC_MODE) {
+				if (src[(i)++] != ECRYPTFS_TAG_90_PACKET_TYPE) {
+					printk(KERN_ERR "First byte != 0x%.2x; invalid packet\n", ECRYPTFS_TAG_90_PACKET_TYPE);
+					i--;
+					goto out_integrity2;
+				}
+
+				rc = ecryptfs_parse_packet_length(&src[(i)], &body_size,  &length_size);
+
+				if (rc) {
+					printk(KERN_WARNING "Error parsing packet length; rc = [%d]\n", rc);
+					goto out_integrity2;
+				}
+
+				i += length_size;
+				memcpy(crypt_stat->key_hash, &src[i], SHA256_HASH_SIZE);
+				i+=body_size;
+				create_file = 1;
+			}
+
+out_integrity2:
+#endif
+#endif
+			crypt_stat->flags |= ECRYPTFS_ENCRYPTED;
+			break;
+#endif
 		default:
 			ecryptfs_printk(KERN_DEBUG, "No packet at offset [%zd] "
 					"of the file header; hex value of "
@@ -1972,11 +2018,20 @@ found_matching_auth_tok:
 	if (candidate_auth_tok->token_type == ECRYPTFS_PRIVATE_KEY) {
 		memcpy(&(candidate_auth_tok->token.private_key),
 		       &(matching_auth_tok->token.private_key),
-		       sizeof(struct ecryptfs_private_key));
+		       sizeof(struct ecryptfs_private_key) + matching_auth_tok->token.private_key.data_len);
 		up_write(&(auth_tok_key->sem));
 		key_put(auth_tok_key);
+
+#ifdef CONFIG_SDP
+		if (crypt_stat->flags & ECRYPTFS_SDP_ENABLED) {
+			rc = sdp_decrypt_session_key(candidate_auth_tok, crypt_stat);
+		} else {
+#endif // CONFIG_SDP
 		rc = decrypt_pki_encrypted_session_key(candidate_auth_tok,
 						       crypt_stat);
+#ifdef CONFIG_SDP
+		}
+#endif //CONFIG_SDP
 	} else if (candidate_auth_tok->token_type == ECRYPTFS_PASSWORD) {
 		memcpy(&(candidate_auth_tok->token.password),
 		       &(matching_auth_tok->token.password),
@@ -1990,6 +2045,7 @@ found_matching_auth_tok:
 		key_put(auth_tok_key);
 		rc = -EINVAL;
 	}
+
 	if (rc) {
 		struct ecryptfs_auth_tok_list_item *auth_tok_list_item_tmp;
 
@@ -2013,12 +2069,14 @@ found_matching_auth_tok:
 		}
 		BUG();
 	}
+
 	rc = ecryptfs_compute_root_iv(crypt_stat);
 	if (rc) {
 		ecryptfs_printk(KERN_ERR, "Error computing "
 				"the root IV\n");
 		goto out_wipe_list;
 	}
+
 	rc = ecryptfs_init_crypt_ctx(crypt_stat);
 	if (rc) {
 		ecryptfs_printk(KERN_ERR, "Error initializing crypto "
@@ -2038,9 +2096,18 @@ found_matching_auth_tok:
 			rc = -EINVAL;
 			goto out_wipe_list;
 		}
-
+#ifdef CONFIG_SDP
+		if (crypt_stat->flags & ECRYPTFS_SDP_ENABLED) {
+			SDP_LOGI("crypto_hash_setkey for SDP\n");
+			crypto_hash_setkey(desc.tfm, candidate_auth_tok->token.private_key.signature, crypt_stat->key_size);
+		} else {
+			SDP_LOGI("crypto_hash_setkey for non-SDP\n");
+			crypto_hash_setkey(desc.tfm, candidate_auth_tok->token.password.session_key_encryption_key, crypt_stat->key_size);
+		}
+#else
+		printk(KERN_INFO "crypto_hash_setkey for non-SDP\n");
 		crypto_hash_setkey(desc.tfm, candidate_auth_tok->token.password.session_key_encryption_key, crypt_stat->key_size);
-
+#endif // CONFIG_SDP
 		rc = crypto_hash_init(&desc);
 		if (rc) {
 			printk(KERN_INFO "failed at crypto_hash_init\n");
@@ -2596,13 +2663,13 @@ ecryptfs_generate_key_packet_set(char *dest_base,
 				rc = ecryptfs_write_packet_length(&dest_base[(*len)], max_packet_size, &packet_size_length);
 				if (rc) {
 					printk(KERN_ERR "%s: Error generating tag 90 packet "
-		    	   "header; cannot generate packet length; rc = [%d]\n",
-		      		 __func__, rc);
+					"header; cannot generate packet length; rc = [%d]\n",
+					__func__, rc);
 					goto out_free;
 				}
 				(*len) += packet_size_length;
 
-                desc.tfm = crypto_alloc_hash("hmac(sha256)", 0, 0);
+				desc.tfm = crypto_alloc_hash("hmac(sha256)", 0, 0);
 				if (IS_ERR(desc.tfm)) {
 					printk(KERN_ERR "failed to allocate tfm %ld\n",
 					PTR_ERR(desc.tfm));
@@ -2635,11 +2702,24 @@ ecryptfs_generate_key_packet_set(char *dest_base,
 				crypto_free_hash(desc.tfm);
 
 				memcpy(&dest_base[(*len)], hmac, SHA256_DIGEST_SIZE);
-    			(*len) += SHA256_DIGEST_SIZE;
+				(*len) += SHA256_DIGEST_SIZE;
 			}
 #endif
 #endif
 		} else if (auth_tok->token_type == ECRYPTFS_PRIVATE_KEY) {
+#ifdef CONFIG_SDP
+			if (crypt_stat->flags & ECRYPTFS_SDP_ENABLED) {
+				rc = sdp_write_sdp_header(dest_base + (*len), &max,
+						auth_tok_key, auth_tok,
+						crypt_stat, key_rec, &written);
+				SDP_LOGD(":%d, written:%zu\n", __LINE__, written);
+				if (rc) {
+					SDP_LOGE("Error writing SDP header\n");
+					goto out_free;
+				}
+			} else {
+				SDP_LOGI("::%d::Not SDP file\n", __LINE__);
+#endif
 			rc = write_tag_1_packet(dest_base + (*len), &max,
 						auth_tok_key, auth_tok,
 						crypt_stat, key_rec, &written);
@@ -2648,7 +2728,74 @@ ecryptfs_generate_key_packet_set(char *dest_base,
 						"writing tag 1 packet\n");
 				goto out_free;
 			}
+#ifdef CONFIG_SDP
+			}
+#endif
 			(*len) += written;
+#ifdef CONFIG_CRYPTO_CCMODE
+#ifdef CONFIG_CRYPTO_DEV_KEY_INTEGRITY_CHECK
+			cc_flag = get_cc_mode_state();
+			if ((cc_flag & FLAG_CC_MODE) == FLAG_CC_MODE) {
+			    max_packet_size = (1                         /* Tag 90 identifier */
+									+ 3                       /* Max Tag 20 packet size */
+									+ SHA256_DIGEST_SIZE);      /* Hash size */
+
+				dest_base[(*len)++] = ECRYPTFS_TAG_90_PACKET_TYPE;
+				rc = ecryptfs_write_packet_length(&dest_base[(*len)], max_packet_size, &packet_size_length);
+				if (rc) {
+					printk(KERN_ERR "%s: Error generating tag 90 packet "
+					"header; cannot generate packet length; rc = [%d]\n",
+					__func__, rc);
+					goto out_free;
+				}
+				(*len) += packet_size_length;
+
+                desc.tfm = crypto_alloc_hash("hmac(sha256)", 0, 0);
+				if (IS_ERR(desc.tfm)) {
+					printk(KERN_ERR "failed to allocate tfm %ld\n",
+					PTR_ERR(desc.tfm));
+					goto out_free;
+				}
+#ifdef CONFIG_SDP
+				if (crypt_stat->flags & ECRYPTFS_SDP_ENABLED) {
+					SDP_LOGI("crypto_hash_setkey for SDP\n");
+					crypto_hash_setkey(desc.tfm, auth_tok->token.private_key.signature, crypt_stat->key_size);
+				} else {
+					SDP_LOGI("crypto_hash_setkey for non-SDP\n");
+					crypto_hash_setkey(desc.tfm, auth_tok->token.password.session_key_encryption_key, crypt_stat->key_size);
+				}
+#else
+				printk(KERN_INFO "crypto_hash_setkey for non-SDP\n");
+				crypto_hash_setkey(desc.tfm, auth_tok->token.password.session_key_encryption_key, crypt_stat->key_size);
+#endif // CONFIG_SDP
+				err = crypto_hash_init(&desc);
+				if (err) {
+					printk(KERN_INFO "failed at crypto_hash_init\n");
+					goto out_free;
+				}
+
+				sg_init_one(&sg, crypt_stat->key, crypt_stat->key_size);
+				err = crypto_hash_update(&desc, &sg, crypt_stat->key_size);
+				if (err) {
+					printk(KERN_INFO "failed at crypto_hash_update\n");
+					crypto_free_hash(desc.tfm);
+					goto out_free;
+				}
+
+				err = crypto_hash_final(&desc, hmac);
+				if (err) {
+					printk(KERN_INFO "failed at crypto_hash_final\n");
+					crypto_free_hash(desc.tfm);
+					goto out_free;
+				}
+
+				crypto_free_hash(desc.tfm);
+
+				memcpy(&dest_base[(*len)], hmac, SHA256_DIGEST_SIZE);
+				(*len) += SHA256_DIGEST_SIZE;
+			}
+#endif
+#endif
 		} else {
 			up_write(&(auth_tok_key->sem));
 			key_put(auth_tok_key);

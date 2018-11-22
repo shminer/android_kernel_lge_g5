@@ -1,4 +1,4 @@
-/* Copyright (c) 2012-2016, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2012-2017, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -259,16 +259,12 @@ static int pil_msa_wait_for_mba_ready(struct q6v5_data *drv)
 	ret = readl_poll_timeout(drv->rmb_base + RMB_MBA_STATUS, status,
 				status != 0, POLL_INTERVAL_US, val);
 	if (ret) {
-        dev_err(dev, "MBA boot timed out\n");
-        modem_log_rmb_regs(drv->rmb_base);
-        subsystem_restart("modem");
+		dev_err(dev, "MBA boot timed out\n");
 		return ret;
 	}
 	if (status != STATUS_XPU_UNLOCKED &&
 	    status != STATUS_XPU_UNLOCKED_SCRIBBLED) {
 		dev_err(dev, "MBA returned unexpected status %d\n", status);
-        modem_log_rmb_regs(drv->rmb_base);
-        subsystem_restart("modem");
 		return -EINVAL;
 	}
 
@@ -540,14 +536,14 @@ int pil_mss_reset_load_mba(struct pil_desc *pil)
 {
 	struct q6v5_data *drv = container_of(pil, struct q6v5_data, desc);
 	struct modem_data *md = dev_get_drvdata(pil->dev);
-	const struct firmware *fw, *dp_fw;
+	const struct firmware *fw, *dp_fw = NULL;
 	char fw_name_legacy[10] = "mba.b00";
 	char fw_name[10] = "mba.mbn";
 	char *dp_name = "msadp";
 	char *fw_name_p;
 	void *mba_dp_virt;
 	dma_addr_t mba_dp_phys, mba_dp_phys_end;
-	int ret, count;
+	int ret;
 	const u8 *data;
 	struct device *dma_dev = md->mba_mem_dev_fixed ?: &md->mba_mem_dev;
 
@@ -556,7 +552,6 @@ int pil_mss_reset_load_mba(struct pil_desc *pil)
 	if (ret) {
 		dev_err(pil->dev, "Failed to locate %s\n",
 						fw_name_p);
-		subsystem_restart("modem");
 		return ret;
 	}
 
@@ -564,7 +559,6 @@ int pil_mss_reset_load_mba(struct pil_desc *pil)
 	if (!data) {
 		dev_err(pil->dev, "MBA data is NULL\n");
 		ret = -ENOMEM;
-		subsystem_restart("modem");
 		goto err_invalid_fw;
 	}
 
@@ -586,6 +580,7 @@ int pil_mss_reset_load_mba(struct pil_desc *pil)
 		}
 		drv->dp_size = dp_fw->size;
 		drv->mba_dp_size += drv->dp_size;
+		drv->mba_dp_size = ALIGN(drv->mba_dp_size, SZ_4K);
 	}
 
 	mba_dp_virt = dma_alloc_attrs(dma_dev, drv->mba_dp_size, &mba_dp_phys,
@@ -594,8 +589,7 @@ int pil_mss_reset_load_mba(struct pil_desc *pil)
 		dev_err(pil->dev, "%s MBA metadata buffer allocation %zx bytes failed\n",
 				 __func__, drv->mba_dp_size);
 		ret = -ENOMEM;
-		subsystem_restart("modem");
-        goto err_invalid_fw;
+		goto err_invalid_fw;
 	}
 
 	/* Make sure there are no mappings in PKMAP and fixmap */
@@ -610,16 +604,15 @@ int pil_mss_reset_load_mba(struct pil_desc *pil)
 			&mba_dp_phys, &mba_dp_phys_end, drv->mba_dp_size);
 
 	/* Load the MBA image into memory */
-	count = fw->size;
-
-	if (count > SZ_1M) {
+	if (fw->size <= SZ_1M) {
+		/* Ensures memcpy is done for max 1MB fw size */
+		memcpy(mba_dp_virt, data, fw->size);
+	} else {
 		dev_err(pil->dev, "%s fw image loading into memory is failed due to fw size overflow\n",
 			__func__);
-		ret = -EINVAL;
-		goto err_mba_data;
+		 ret = -EINVAL;
+		 goto err_mba_data;
 	}
-
-	memcpy(mba_dp_virt, data, count);
 	/* Ensure memcpy of the MBA memory is done before loading the DP */
 	wmb();
 
@@ -642,8 +635,6 @@ int pil_mss_reset_load_mba(struct pil_desc *pil)
 	ret = pil_mss_reset(pil);
 	if (ret) {
 		dev_err(pil->dev, "MBA boot failed.\n");
-		modem_log_rmb_regs(drv->rmb_base);
-		subsystem_restart("modem");
 		goto err_mss_reset;
 	}
 
@@ -669,7 +660,7 @@ err_invalid_fw:
 }
 
 static int pil_msa_auth_modem_mdt(struct pil_desc *pil, const u8 *metadata,
-					size_t size)
+		size_t size, phys_addr_t phy_addr, size_t phy_sz)
 {
 	struct modem_data *drv = dev_get_drvdata(pil->dev);
 	void *mdata_virt;
@@ -691,7 +682,6 @@ static int pil_msa_auth_modem_mdt(struct pil_desc *pil, const u8 *metadata,
 		dev_err(pil->dev, "%s MBA metadata buffer allocation %zx bytes failed\n",
 			 __func__, size);
 		ret = -ENOMEM;
-		subsystem_restart("modem");
 		goto fail;
 	}
 	memcpy(mdata_virt, metadata, size);
@@ -699,6 +689,19 @@ static int pil_msa_auth_modem_mdt(struct pil_desc *pil, const u8 *metadata,
 	wmb();
 
 	if (pil->subsys_vmid > 0) {
+		/**
+		  * In case of modem ssr, we need to assign memory back to linux.
+		  * This is not true after cold boot since linux already owns
+		  * it. Also for secure boot devices, modem memory has to be
+		  * released after MBA is booted
+		  */
+		if (pil->modem_ssr) {
+			ret = pil_assign_mem_to_linux(pil, phy_addr, phy_sz);
+			if (ret)
+				dev_err(pil->dev,
+					"Failed to assign to linux, ret- %d\n",
+					ret);
+		}
 		ret = pil_assign_mem_to_subsys(pil, mdata_phys,
 							ALIGN(size, SZ_4K));
 		if (ret) {
@@ -720,13 +723,9 @@ static int pil_msa_auth_modem_mdt(struct pil_desc *pil, const u8 *metadata,
 			POLL_INTERVAL_US, val);
 	if (ret) {
 		dev_err(pil->dev, "MBA authentication of headers timed out\n");
-		modem_log_rmb_regs(drv->rmb_base);
-		subsystem_restart("modem");
 	} else if (status < 0) {
 		dev_err(pil->dev, "MBA returned error %d for headers\n",
 				status);
-		modem_log_rmb_regs(drv->rmb_base);
-		subsystem_restart("modem");
 		ret = -EINVAL;
 	}
 
@@ -755,7 +754,8 @@ fail:
 }
 
 static int pil_msa_mss_reset_mba_load_auth_mdt(struct pil_desc *pil,
-				  const u8 *metadata, size_t size)
+		const u8 *metadata, size_t size,
+		phys_addr_t modem_reg, size_t sz_modem_reg)
 {
 	int ret;
 	dev_info(pil->dev, "pil : mss reset and load mba\n");
@@ -764,7 +764,8 @@ static int pil_msa_mss_reset_mba_load_auth_mdt(struct pil_desc *pil,
 		return ret;
 
 	dev_info(pil->dev, "pil : msa auth modem.mdt.\n");
-	return pil_msa_auth_modem_mdt(pil, metadata, size);
+	return pil_msa_auth_modem_mdt(pil, metadata, size,
+			modem_reg, sz_modem_reg);
 }
 
 static int pil_msa_mba_verify_blob(struct pil_desc *pil, phys_addr_t phy_addr,
@@ -807,12 +808,8 @@ static int pil_msa_mba_auth(struct pil_desc *pil)
 		status == STATUS_AUTH_COMPLETE || status < 0, 50, val);
 	if (ret) {
 		dev_err(pil->dev, "MBA authentication of image timed out\n");
-		modem_log_rmb_regs(drv->rmb_base);
-		subsystem_restart("modem");
 	} else if (status < 0) {
 		dev_err(pil->dev, "MBA returned error %d for image\n", status);
-		modem_log_rmb_regs(drv->rmb_base);
-		subsystem_restart("modem");
 		ret = -EINVAL;
 	}
 

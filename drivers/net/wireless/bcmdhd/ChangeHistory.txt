@@ -1,4 +1,35 @@
 BCM43XX DHD 1.78 for N OS Release Note.
+
+DHD 1.78.18 - 2018.03.30
+Security Patch
+ - CS4757701: CVE-2017-13292. fix overflow in DHD CFG80211 wl_get_assoc_ies when handling assoc_info iovar results
+
+DHD 1.78.17 - 2017.12.28
+Security Patch
+ - CS4158886: CVE-2017-13221. fix buffer overrun in DHD wls_parse_batching_cmd
+              CVE-2017-13213. fix buffer overrun in DHD wl_cfgvendor_set_bssid_blacklist
+              NOTE: CVE-2017-13213 requires HAL change also. HAL updated is mandatory to apply CVE-2017-13213 in DHD
+
+DHD 1.78.16 - 2017.11.23
+Security Patch
+ - CS4002429: CVE-2017-13161. fix buffer overrun in DHD wl_parse_ssid_list_tlv
+
+DHD 1.78.15 - 2017.10.20
+Security Patch
+ - CS3640500: CVE-2017-0824 remove sd_devreg IOVARs to prevent out of bound write via debug oriented IOVARs
+			  CVE-2017-0825 adding event length check in dhd_dbg_msgtrace_log_parser
+
+DHD 1.78.14 - 2017.09.15
+Security Patch
+ - CS3457008: CVE-2017-0791. adding event length check in wl_notify_rx_mgmt_frame
+              CVE-2017-0792. adding event length check in dhd_rtt_event_handler
+			  CVE-2017-0788. adding boundary check in dhd_handle_hotlist_scan_evt
+			  CVE-2017-0790. adding gscan_result bound check in dhd_process_full_gscan_result
+			  CVE-2017-0787. adding boundary check in dhd_pno_process_epno_result function
+			  CVE-2017-0786. adding escan_result boundary check in wl_escan_handler
+			  CVE-2017-0789. remove significant wifi change feature
+			  CVE-2017-0789. Removing obsolete SWC feature to prevent heap overflows
+
 DHD 1.78.13 - 2017.06.22
 Security Patch
  - CS3040954 Adding boundary check in wl_cfg80211_mgmt_tx(CVE-2017-0706 )

@@ -644,6 +644,7 @@ struct fg_chip {
 	bool			charge_done;
 	bool			resume_soc_lowered;
 	bool			vbat_low_irq_enabled;
+	bool			full_soc_irq_enabled;
 	bool			charge_full;
 	bool			hold_soc_while_full;
 	bool			input_present;
@@ -1577,8 +1578,11 @@ static void fg_enable_irqs(struct fg_chip *chip, bool enable)
 		enable_irq(chip->soc_irq[DELTA_SOC].irq);
 		enable_irq_wake(chip->soc_irq[DELTA_SOC].irq);
 		enable_irq(chip->soc_irq[FULL_SOC].irq);
-		enable_irq_wake(chip->soc_irq[FULL_SOC].irq);
-		enable_irq(chip->batt_irq[BATT_MISSING].irq);
+		if (!chip->full_soc_irq_enabled) {
+			enable_irq_wake(chip->soc_irq[FULL_SOC].irq);
+			enable_irq(chip->batt_irq[BATT_MISSING].irq);
+			chip->full_soc_irq_enabled = true;
+		}
 		if (!chip->vbat_low_irq_enabled) {
 			enable_irq(chip->batt_irq[VBATT_LOW].irq);
 			enable_irq_wake(chip->batt_irq[VBATT_LOW].irq);
@@ -1592,8 +1596,11 @@ static void fg_enable_irqs(struct fg_chip *chip, bool enable)
 	} else {
 		disable_irq_wake(chip->soc_irq[DELTA_SOC].irq);
 		disable_irq_nosync(chip->soc_irq[DELTA_SOC].irq);
-		disable_irq_wake(chip->soc_irq[FULL_SOC].irq);
-		disable_irq_nosync(chip->soc_irq[FULL_SOC].irq);
+		if (chip->full_soc_irq_enabled) {
+			disable_irq_wake(chip->soc_irq[FULL_SOC].irq);
+			disable_irq_nosync(chip->soc_irq[FULL_SOC].irq);
+			chip->full_soc_irq_enabled = false;
+		}
 		disable_irq(chip->batt_irq[BATT_MISSING].irq);
 		if (chip->vbat_low_irq_enabled) {
 			disable_irq_wake(chip->batt_irq[VBATT_LOW].irq);
@@ -2952,7 +2959,7 @@ out:
 	return rc;
 }
 
-#define SANITY_CHECK_PERIOD_MS	5000
+#define SANITY_CHECK_PERIOD_MS	10000
 static void check_sanity_work(struct work_struct *work)
 {
 	struct fg_chip *chip = container_of(work,
@@ -3990,6 +3997,28 @@ static int fg_get_cc_soc(struct fg_chip *chip, int *cc_soc)
 	return 0;
 }
 
+static int fg_get_current_cc(struct fg_chip *chip)
+{
+	int cc_soc, rc;
+	int64_t current_capacity;
+
+	if (!(chip->wa_flag & USE_CC_SOC_REG))
+		return chip->learning_data.cc_uah;
+
+	if (!chip->learning_data.learned_cc_uah)
+		return -EINVAL;
+
+	rc = fg_get_cc_soc(chip, &cc_soc);
+	if (rc < 0) {
+		pr_err("Failed to get cc_soc, rc=%d\n", rc);
+		return rc;
+	}
+
+	current_capacity = cc_soc * chip->learning_data.learned_cc_uah;
+	do_div(current_capacity, FULL_PERCENT_28BIT);
+	return current_capacity;
+}
+
 #define BATT_MISSING_STS BIT(6)
 static bool is_battery_missing(struct fg_chip *chip)
 {
@@ -4502,6 +4531,13 @@ static void status_change_work(struct work_struct *work)
 			enable_irq_wake(chip->batt_irq[VBATT_LOW].irq);
 			chip->vbat_low_irq_enabled = true;
 		}
+
+		if (!chip->full_soc_irq_enabled) {
+			enable_irq(chip->soc_irq[FULL_SOC].irq);
+			enable_irq_wake(chip->soc_irq[FULL_SOC].irq);
+			chip->full_soc_irq_enabled = true;
+		}
+
 		if (!!(chip->wa_flag & PULSE_REQUEST_WA) && capacity == 100)
 			fg_configure_soc(chip);
 	} else if (chip->status == POWER_SUPPLY_STATUS_DISCHARGING) {
@@ -4510,6 +4546,12 @@ static void status_change_work(struct work_struct *work)
 			disable_irq_wake(chip->batt_irq[VBATT_LOW].irq);
 			disable_irq_nosync(chip->batt_irq[VBATT_LOW].irq);
 			chip->vbat_low_irq_enabled = false;
+		}
+
+		if (chip->full_soc_irq_enabled) {
+			disable_irq_wake(chip->soc_irq[FULL_SOC].irq);
+			disable_irq_nosync(chip->soc_irq[FULL_SOC].irq);
+			chip->full_soc_irq_enabled = false;
 		}
 	}
 	fg_cap_learning_check(chip);
@@ -4963,6 +5005,7 @@ static enum power_supply_property fg_power_props[] = {
 	POWER_SUPPLY_PROP_VOLTAGE_NOW,
 	POWER_SUPPLY_PROP_VOLTAGE_OCV,
 	POWER_SUPPLY_PROP_VOLTAGE_MAX_DESIGN,
+	POWER_SUPPLY_PROP_CHARGE_COUNTER,
 	POWER_SUPPLY_PROP_CHARGE_NOW,
 	POWER_SUPPLY_PROP_CHARGE_NOW_RAW,
 	POWER_SUPPLY_PROP_CHARGE_NOW_ERROR,
@@ -5073,6 +5116,9 @@ static int fg_power_get_property(struct power_supply *psy,
 		break;
 	case POWER_SUPPLY_PROP_CHARGE_NOW_RAW:
 		val->intval = get_sram_prop_now(chip, FG_DATA_CC_CHARGE);
+		break;
+	case POWER_SUPPLY_PROP_CHARGE_COUNTER:
+		val->intval = fg_get_current_cc(chip);
 		break;
 	case POWER_SUPPLY_PROP_HI_POWER:
 		val->intval = !!chip->bcl_lpm_disabled;
@@ -8029,7 +8075,6 @@ static int fg_init_irqs(struct fg_chip *chip)
 			}
 
 			enable_irq_wake(chip->soc_irq[DELTA_SOC].irq);
-			enable_irq_wake(chip->soc_irq[FULL_SOC].irq);
 			if (!chip->use_vbat_low_empty_soc)
 				enable_irq_wake(chip->soc_irq[EMPTY_SOC].irq);
 			break;

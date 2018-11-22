@@ -12,7 +12,7 @@
  *  4) Handling FM Interrupt packet and taking appropriate action.
  *
  *  Copyright (C) 2009 Texas Instruments
- *  Copyright (C) 2009-2014 Broadcom Corporation
+ *  Copyright (C) 2009-2017 Broadcom Corporation
  *
  *  This program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License version 2 as
@@ -49,60 +49,101 @@
 #include "../include/v4l2_target.h"
 #include "../include/v4l2_logs.h"
 
-#ifndef V4L2_FM_DEBUG
-#define V4L2_FM_DEBUG TRUE
-#endif
-
-#define V4L2_DEBUG_FM_OPCODE TRUE
-
 /* set this module parameter to enable debug info */
 int fm_dbg_param = 0;
 
-#if V4L2_FM_DEBUG
-#define V4L2_FM_DRV_DBG(flag, fmt, arg...) \
-        do { \
-            if (fm_dbg_param & flag) \
-                printk(KERN_DEBUG "(v4l2fmdrv):%s  "fmt"\n" , \
-                                           __func__,## arg); \
-        } while(0)
-#else
-#define V4L2_FM_DRV_DBG(flag, fmt, arg...)
-#endif
-#define V4L2_FM_DRV_ERR(fmt, arg...)  printk(KERN_ERR "(v4l2fmdrv):%s  "fmt"\n" , \
-                                           __func__,## arg)
+/* Region info */
+struct region_info region_configs[] = {
+     /* Europe */
+    {
+     .low_bound = FM_GET_FREQ(8750),    /* 87.5 MHz */
+     .high_bound = FM_GET_FREQ(10800),    /* 108 MHz */
+     .deemphasis = FM_DEEMPHA_50U,
+     .scan_step = 100,
+     .fm_band = 0,
+     },
 
+    /* Japan */
+    {
+     .low_bound = FM_GET_FREQ(7600),    /* 76 MHz */
+     .high_bound = FM_GET_FREQ(9500),    /* 95 MHz */
+     .deemphasis = FM_DEEMPHA_50U,
+     .scan_step = 100,
+     .fm_band = 1,
+     },
+
+     /* North America */
+     {
+      .low_bound = FM_GET_FREQ(8750),    /* 87.5 MHz */
+      .high_bound = FM_GET_FREQ(10800),    /* 108 MHz */
+      .deemphasis = FM_DEEMPHA_75U,
+      .scan_step = 200,
+      },
+
+     /* Russia-Ext */
+    {
+     .low_bound = FM_GET_FREQ(6580),    /* 65.8 MHz */
+     .high_bound = FM_GET_FREQ(10800),    /* 108 MHz */
+     .deemphasis = FM_DEEMPHA_75U,
+     .scan_step = 100,
+    },
+
+    /* China Region */
+    {
+     .low_bound = FM_GET_FREQ(7600),    /* 76 MHz */
+     .high_bound = FM_GET_FREQ(10800),    /* 108 MHz */
+     .deemphasis = FM_DEEMPHA_75U,
+     .scan_step = 100,
+     },
+};
 
 /*******************************************************************************
 **  Static Variables
 *******************************************************************************/
-   static char *pty_str[]= {"None", "News", "Current Affairs",
-                         "Information","Sport", "Education",
-                         "Drama", "Culture","Science",
-                         "Varied Speech", "Pop Music",
-                         "Rock Music","Easy Listening",
-                         "Light Classic Music", "Serious Classics",
-                         "other Music","Weather", "Finance",
-                         "Childrens Progs","Social Affairs",
-                         "Religion", "Phone In", "Travel",
-                         "Leisure & Hobby","Jazz", "Country",
-                         "National Music","Oldies","Folk",
-                         "Documentary", "Alarm Test", "Alarm"};
-   static __u32 pi_code_b = 1;
-   static __u32 pty =2;
-   static __u32 tp =3;
-   static __u32 ta =4;
-   static __u32 ms_code =5;
-   static char rds_psn[8];
-   static char rds_txt[65];
-   static __u8 rds_tupple[3];
-   struct ct
-   {
-      __u32 day;
-      __u32 hour;
-      __u32 minute;
-      __u32 second;
-   };
-   static struct ct current_ct;
+/* Program Type */
+static char *pty_str[]= {"None", "News", "Current Affairs",
+                     "Information","Sport", "Education",
+                     "Drama", "Culture","Science",
+                     "Varied Speech", "Pop Music",
+                     "Rock Music","Easy Listening",
+                     "Light Classic Music", "Serious Classics",
+                     "other Music","Weather", "Finance",
+                     "Childrens Progs","Social Affairs",
+                     "Religion", "Phone In", "Travel",
+                     "Leisure & Hobby","Jazz", "Country",
+                     "National Music","Oldies","Folk",
+                     "Documentary", "Alarm Test", "Alarm"};
+
+/*These are the RDS elements that we are intested to parse*/
+/*Each variable represents one RDS element*/
+/*pi_code_b   -Program Identification code*/
+static __u32 pi_code_b = 1;
+/*pty  --Program Type, Actually an integer value is transmitted and*/
+/*if we pass the value to pty_str, we get the appropriate string*/
+static __u32 pty =2;
+/*tp*/
+static __u32 tp =3;
+/*ta */
+static __u32 ta =4;
+/*ms_code, a bit represneting Music or Speech*/
+static __u32 ms_code =5;
+/*rds_psn is the Program name in string format, max length is 8 bytes*/
+static char rds_psn[8];
+/*rds_txt is RDS test message, this could be custom message*/
+static char rds_txt[65];
+/*holds the 3 byte RDS tuple data*/
+static __u8 rds_tupple[3];
+
+/*CT is time and date information*/
+struct ct
+{
+    __u32 day;
+    __u32 hour;
+    __u32 minute;
+    __u32 second;
+};
+/*Global to store the CT information after parsing it from RDS stream*/
+static struct ct current_ct;
 
 /* Band selection */
 static unsigned char default_radio_region;    /* US */
@@ -203,12 +244,12 @@ void fmc_update_region_info(struct fmdrv_ops *fmdev,
 * FM common sub-module will schedule this tasklet whenever it receives
 * FM packet from ST driver.
 */
-#if TASKLET_SUPPORT
+#ifdef TASKLET_SUPPORT
 static void __recv_tasklet(unsigned long arg)
 {
     struct fmdrv_ops *fmdev;
     fmdev = (struct fmdrv_ops *)arg;
-#else if WORKER_QUEUE
+#else
 static void fm_receive_data_ldisc(struct work_struct *w)
 {
     struct fmdrv_ops *fmdev = container_of(w, struct fmdrv_ops,rx_workqueue);
@@ -277,12 +318,10 @@ static void fm_receive_data_ldisc(struct work_struct *w)
             {
                 V4L2_FM_DRV_DBG(V4L2_DBG_RX,"(fmdrv) : VSE interrupt handler case for 0x%x", \
                                     cmd_complete_hdr->fm_opcode);
-
                 if (fmdev->response_skb_vse != NULL)
                     pr_err("(fmdrv): Response SKB ptr not NULL");
                 spin_lock_irqsave(&fmdev->resp_skb_lock, flags);
                 fmdev->response_skb_vse = skb;
-
                 spin_unlock_irqrestore(&fmdev->resp_skb_lock, flags);
                 /* Parse the interrupt flags in 0x12 */
                 if(cmd_complete_hdr->fm_opcode == FM_REG_FM_RDS_FLAG)
@@ -311,9 +350,9 @@ static void fm_receive_data_ldisc(struct work_struct *w)
             pr_err("Unhandled packet SKB(%p),purging", skb);
         }
         if (!skb_queue_empty(&fmdev->tx_q))
-#if TASKLET_SUPPORT
+#ifdef TASKLET_SUPPORT
         tasklet_schedule(&fmdev->tx_task);
-#else if WORKER_QUEUE
+#else
         queue_work(fmdev->tx_wq,&fmdev->tx_workqueue);
 #endif
     }
@@ -322,12 +361,12 @@ static void fm_receive_data_ldisc(struct work_struct *w)
 /*
 * FM send tasklet: is scheduled when
 * FM packet has to be sent to chip */
-#if TASKLET_SUPPORT
+#ifdef TASKLET_SUPPORT
 static void __send_tasklet(unsigned long arg)
 {
     struct fmdrv_ops *fmdev;
     fmdev = (struct fmdrv_ops *)arg;
-#else if WORKER_QUEUE
+#else
 static void fm_send_data_ldisc(struct work_struct *w)
 {
     struct fmdrv_ops *fmdev =container_of(w, struct fmdrv_ops,tx_workqueue);
@@ -335,12 +374,7 @@ static void fm_send_data_ldisc(struct work_struct *w)
     //struct fmdrv_ops *fmdev;
     struct sk_buff *skb;
     int len;
-    char* p_cb;
-    int i;
 
-    //V4L2_FM_DRV_DBG("In __send_tasklet");
-
-    //fmdev = (struct fmdrv_ops *)arg;
     /* Send queued FM TX packets */
     if (atomic_read(&fmdev->tx_cnt))
     {
@@ -386,17 +420,8 @@ static int __fm_send_cmd(struct fmdrv_ops *fmdev, unsigned char fmreg_index,
     struct sk_buff *skb;
     struct fm_cmd_msg_hdr *cmd_hdr;
     int size;
-    int i;
-    char *p_cb;
-
-    //V4L2_FM_DRV_DBG("In __fm_send_cmd");
-
-#if V4L2_DEBUG_FM_OPCODE
-    printk(KERN_DEBUG "(fmdrv)__fm_send_cmd fmreg_index : %d\n", fmreg_index);
-#endif
 
     size = FM_CMD_MSG_HDR_SIZE + ((payload == NULL) ? 0 : payload_len);
-
     skb = alloc_skb(size, GFP_ATOMIC);
     if (!skb)
     {
@@ -406,12 +431,8 @@ static int __fm_send_cmd(struct fmdrv_ops *fmdev, unsigned char fmreg_index,
 
     /* Fill command header info */
     cmd_hdr =(struct fm_cmd_msg_hdr *)skb_put(skb, FM_CMD_MSG_HDR_SIZE);
-//BRCM CSP[978768] : FM radio does not work
-// org
-//    cmd_hdr->header = FM_PKT_LOGICAL_CHAN_NUMBER;    /* 0x08 */
-// new
-    cmd_hdr->header = HCI_COMMAND; /* 0x01 */
-//BRCM CSP[978768]
+
+    cmd_hdr->header = HCI_COMMAND;    /* 0x01 */
     /* 3 (cmd, len, fm_opcode,rd_wr) */
     cmd_hdr->cmd = hci_opcode_pack(HCI_GRP_VENDOR_SPECIFIC, FM_2048_OP_CODE);
 
@@ -431,9 +452,9 @@ static int __fm_send_cmd(struct fmdrv_ops *fmdev, unsigned char fmreg_index,
 //    print skb->cb to check pck_type and completion.
 
     skb_queue_tail(&fmdev->tx_q, skb);
-#if TASKLET_SUPPORT
+#ifdef TASKLET_SUPPORT
      tasklet_schedule(&fmdev->tx_task);
-#else if WORKER_QUEUE
+#else
      queue_work(fmdev->tx_wq,&fmdev->tx_workqueue);
 #endif
     return 0;
@@ -447,15 +468,7 @@ static int __fm_send_vsc_hci_cmd(struct fmdrv_ops *fmdev,__u16 ocf_value,
     struct sk_buff *skb;
     struct fm_cmd_msg_hdr *cmd_hdr;
     int size;
-    int i;
-    char *p_cb;
     unsigned char *ch  = (unsigned char*)payload;
-
-    //V4L2_FM_DRV_DBG("In __fm_send_cmd");
-
-#if V4L2_DEBUG_FM_OPCODE
-    printk(KERN_DEBUG "(fmdrv) __fm_send_vsc_hci_cmd ocf_value: %d\n", ocf_value);
-#endif
 
     size = FM_VSC_HCI_CMD_MSG_HDR_SIZE + ((payload == NULL) ? 0 : payload_len);
     skb = alloc_skb(size, GFP_ATOMIC);
@@ -466,7 +479,8 @@ static int __fm_send_vsc_hci_cmd(struct fmdrv_ops *fmdev,__u16 ocf_value,
     }
 
     /* Fill command header info */
-    cmd_hdr =(struct fm_vsc_hci_cmd_msg_hdr *)skb_put(skb, FM_VSC_HCI_CMD_MSG_HDR_SIZE);
+    cmd_hdr =(struct fm_cmd_msg_hdr *)
+                skb_put(skb, FM_VSC_HCI_CMD_MSG_HDR_SIZE);
 
     cmd_hdr->header = HCI_COMMAND;    /* 0x01 */
     /* 3 (cmd, len, fm_opcode,rd_wr) */
@@ -480,9 +494,9 @@ static int __fm_send_vsc_hci_cmd(struct fmdrv_ops *fmdev,__u16 ocf_value,
     fm_cb(skb)->completion = wait_completion;
 
     skb_queue_tail(&fmdev->tx_q, skb);
-#if TASKLET_SUPPORT
+#ifdef TASKLET_SUPPORT
     tasklet_schedule(&fmdev->tx_task);
-#else if WORKER_QUEUE
+#else
     queue_work(fmdev->tx_wq,&fmdev->tx_workqueue);
 #endif
     return 0;
@@ -510,14 +524,14 @@ int fmc_send_cmd(struct fmdrv_ops *fmdev, unsigned char fmreg_index,
         ret = __fm_send_vsc_hci_cmd(fmdev, VSC_HCI_WRITE_PCM_PINS_OCF, payload,
                             payload_len, wait_completion);
         if (ret < 0)
-           return ret;
+            return ret;
     }
     else
     {
         ret = __fm_send_cmd(fmdev, fmreg_index, payload, payload_len, type,
                             wait_completion);
         if (ret < 0)
-           return ret;
+            return ret;
     }
 
     timeleft = wait_for_completion_timeout(wait_completion, FM_DRV_TX_TIMEOUT);
@@ -583,7 +597,6 @@ int parse_inrpt_flags(struct fmdrv_ops *fmdev)
     spin_lock_irqsave(&fmdev->resp_skb_lock, flags);
     skb = fmdev->response_skb_vse;
     fmdev->response_skb_vse = NULL;
-
     spin_unlock_irqrestore(&fmdev->resp_skb_lock, flags);
 
     memcpy(&response, &skb->data[FM_EVT_MSG_HDR_SIZE + FM_CMD_COMPLETE_HDR_SIZE], 2);
@@ -635,7 +648,8 @@ int parse_inrpt_flags(struct fmdrv_ops *fmdev)
             }
         }
     }
-    else if(fm_rds_flag & I2C_MASK_RDS_FIFO_WLINE_BIT)
+    else if((fm_rds_flag & (I2C_MASK_RDS_FIFO_WLINE_BIT|I2C_MASK_SYNC_LOST_BIT))
+            == I2C_MASK_RDS_FIFO_WLINE_BIT)
     {
         V4L2_FM_DRV_DBG(V4L2_DBG_TX, "(fmdrv) Detected WLINE interrupt; Reading RDS.");
         read_rds_data(fmdev);
@@ -646,14 +660,16 @@ int parse_inrpt_flags(struct fmdrv_ops *fmdev)
 
 void get_rds_element_value(int ioctl_num, char __user *ioctl_value)
 {
-   __u8 *value;
-   char temp[10];
-   int i;
+/* Even though the values that are returned from this function are global to this file */
+/* There is no need to lock  Since this is just a read operation */
+/* And we don't maitain the history of any of these values, we just return the */
+/* Current value irrespective of it's previous value */
    __u8 *current_ct_buf;
-   char *buf = "12345678";
    current_ct_buf = (__u8 *)&current_ct;
+
    if((ioctl_num > 9) || (ioctl_num <= 0))
-       return NULL;
+       return;
+
    switch(ioctl_num)
    {
       case GET_PI_CODE:
@@ -662,54 +678,67 @@ void get_rds_element_value(int ioctl_num, char __user *ioctl_value)
             V4L2_FM_DRV_ERR("(rds) Failed to copy PI code");
          }
          return;
+
       case GET_TP_CODE:
         if(copy_to_user(ioctl_value, (char *)&tp, 4))
         {
            V4L2_FM_DRV_ERR("(rds) Failed to copy TP code");
         }
         return;
+
       case GET_PTY_CODE:
         if(copy_to_user(ioctl_value, (char *)&pty, 4))
         {
            V4L2_FM_DRV_ERR("(rds) Failed to copy PTY code");
         }
         return;
+
       case GET_TA_CODE:
         if(copy_to_user(ioctl_value, (char *)&ta, 4))
         {
            V4L2_FM_DRV_ERR("(rds) Failed to copy TA code");
         }
         return;
+
       case GET_MS_CODE:
          if(copy_to_user(ioctl_value, (char *)&ms_code, 4))
          {
             V4L2_FM_DRV_ERR("(rds) Failed to copy MS code");
          }
          return;
+
       case GET_PS_CODE:
          if(copy_to_user(ioctl_value, rds_psn, strlen(rds_psn)+ 1))
          {
             V4L2_FM_DRV_ERR("(rds) Failed to copy PS code");
          }
          return;
+
       case GET_RT_MSG:
          if(copy_to_user(ioctl_value, rds_txt, strlen(rds_txt) + 1))
          {
             V4L2_FM_DRV_ERR("(rds) Failed to copy RT Message");
          }
          return;
+
       case GET_CT_DATA:
           if(copy_to_user(ioctl_value, (char *)current_ct_buf, 16))
           {
              V4L2_FM_DRV_ERR("(rds) Failed to copy CT data");
           }
           return;
+
       case GET_TMC_CHANNEL:
          *(__u32 *)ioctl_value = 4;
          return;
    }
 }
-void parse_rds_tupple()
+
+/* Each RDS packet is 104bytes = 4*16 bits + 40 bits (10bits error code for each 16bits data)*/
+/* Each RDS packet is devided into 4 blocks of 16bits*/
+/* when we receive RDS packet it is devided into 4 * 3Byts tuples, */
+/*2 bytes of information and 1byte of meta data */
+void parse_rds_tupple(void)
 {
    int version =0;
    __u8 byte1, byte2;
@@ -718,11 +747,14 @@ void parse_rds_tupple()
    __u32 tmp1;
    __u32 tmp2;
    __u8 offset = 0;
+
    byte1 = rds_tupple[1];
    byte2 = rds_tupple[0];
+/*tempbuf[2] has meta data */
    switch ((rds_tupple[2]& 0x07)) {
       case 0: /* Block A */
          break;
+
       case 1: /* Block B */
         V4L2_FM_DRV_DBG(V4L2_DBG_RX, "block B - group=%d%c tp=%d pty=%d spare=%d\n",
         (byte1 >> 4) & 0x0f,
@@ -738,17 +770,21 @@ void parse_rds_tupple()
          ms_code = (byte2 >> 3)& 0x1;
          tp = (byte1 & (1 << 2));
          break;
+
       case 2: /* Block C */
          blkc_byte1 = byte1;
          blkc_byte2 = byte2;
          break;
+
       case 3 : /* Block D */
+         /* Parsing the PI code, PI code will be present in all the Groups in Block-c*/
          version = (group & 0x01);
          if(version) {
             pi_code_b |= (blkc_byte1 << 8) & 0xFF;
             pi_code_b |= (blkc_byte2 << 16) & 0xFFFF;
          }
          switch (group) {
+             /*There are 32 Groups in total but we are only interested in the following Groups*/
             case 0: /* Group 0A */
                rds_psn[2*(spare & 0x03)+0] = byte1;
                rds_psn[2*(spare & 0x03)+1] = byte2;
@@ -762,13 +798,18 @@ void parse_rds_tupple()
                rds_txt[4*(spare & 0x0f)+1] = blkc_byte2;
                rds_txt[4*(spare & 0x0f)+2] = byte1;
                rds_txt[4*(spare & 0x0f)+3] = byte2;
+            /* Display radio text once we get 16 characters */
+            /*        if ((spare & 0x0f) == 0x0f)*/
                 if (spare > 16)
                 {
                     V4L2_FM_DRV_DBG(V4L2_DBG_RX, "Radio Text: %s\n",rds_txt);
                 }
                 break;
+               /* Parsing  CT information*/
                case 8: /*Group 4A*/
+                 /* b0-b14@day = b0-b7@bc_1 + b1-b7@bc_2 */
                  tmp1 = (__u32)((blkc_byte1 << 8) | blkc_byte2);
+                 /* b15,b16@day = b0,b1@bb_2 */
                  tmp2 = (__u32)(blkb_byte2 & 0x03);
                  current_ct.day = (tmp2 << 15) | (tmp1 >> 1);
                  tmp1 = (__u32)(blkc_byte2 & 0x01);/* b4@hour = LSB of bc_2 */
@@ -787,6 +828,7 @@ void parse_rds_tupple()
               V4L2_FM_DRV_DBG(V4L2_DBG_RX, "unknown block [%d]\n",rds_tupple[2]);
          }
 }
+
 /* Helper function to parse the RDS data
 * in FM_REG_FM_RDS_DATA (0x80).
 * Called locally by fmdrv_main.c
@@ -805,7 +847,6 @@ int parse_rds_data(struct fmdrv_ops *fmdev)
     spin_lock_irqsave(&fmdev->resp_skb_lock, flags);
     skb = fmdev->response_skb_vse;
     fmdev->response_skb_vse = NULL;
-    
     spin_unlock_irqrestore(&fmdev->resp_skb_lock, flags);
     skb_pull(skb, (sizeof(struct fm_event_msg_hdr) + sizeof(struct fm_cmd_complete_hdr)));
     rds_data = skb->data;
@@ -868,8 +909,11 @@ int parse_rds_data(struct fmdrv_ops *fmdev)
         rds_tupple[0] = rds_data[2]; /* LSB of V4L2 spec block */
         rds_tupple[1] = rds_data[1]; /* MSB of V4L2 spec block */
         parse_rds_tupple();
-        memcpy(&fmdev->rx.rds.cbuffer[fmdev->rx.rds.wr_index], &rds_tupple, FM_RDS_TUPLE_LENGTH);
-        fmdev->rx.rds.wr_index = (fmdev->rx.rds.wr_index + FM_RDS_TUPLE_LENGTH) % fmdev->rx.rds.buf_size;
+        memcpy(&fmdev->rx.rds.cbuffer[fmdev->rx.rds.wr_index], &rds_tupple,
+               FM_RDS_TUPLE_LENGTH);
+        fmdev->rx.rds.wr_index =
+            (fmdev->rx.rds.wr_index +
+             FM_RDS_TUPLE_LENGTH) % fmdev->rx.rds.buf_size;
 
         /* Check for overflow & start over */
         if (fmdev->rx.rds.wr_index == fmdev->rx.rds.rd_index) {
@@ -893,7 +937,7 @@ int parse_rds_data(struct fmdrv_ops *fmdev)
     }
     spin_unlock_irqrestore(&fmdev->rds_cbuff_lock, flags);
 
-    /* Set Tuner RDS capability bit as RDS data has been detected */
+     /* Set Tuner RDS capability bit as RDS data has been detected */
     fmdev->device_info.rxsubchans |= V4L2_TUNER_SUB_RDS;
 
     /* Wakeup read queue */
@@ -1012,12 +1056,29 @@ int fmc_transfer_rds_from_cbuff(struct fmdrv_ops *fmdev, struct file *file,
 int fmc_set_frequency(struct fmdrv_ops *fmdev, unsigned int freq_to_set)
 {
     int ret;
+    int curr_mute_mode;
 
     V4L2_FM_DRV_DBG(V4L2_DBG_TX, "In %s, frequency to set %d", __func__, freq_to_set);
 
     switch (fmdev->curr_fmmode) {
         case FM_MODE_RX:
+            curr_mute_mode = fmdev->rx.curr_mute_mode;
+
+            if(curr_mute_mode == FM_MUTE_OFF)
+            {
+                V4L2_FM_DRV_DBG(V4L2_DBG_RX, "%s, Audio Mute before tune frequency", __func__);
+                fm_rx_set_mute_mode(fmdev, FM_MUTE_ON);
+            }
+
             ret = fm_rx_set_frequency(fmdev, freq_to_set);
+            if(ret != 0)
+                V4L2_FM_DRV_ERR("Unable to set frequency. ret = %d", ret);
+
+            if(curr_mute_mode == FM_MUTE_OFF)
+            {
+                V4L2_FM_DRV_DBG(V4L2_DBG_RX, "%s, Audio Unmute after tune frequency", __func__);
+                fm_rx_set_mute_mode(fmdev, FM_MUTE_OFF);
+            }
             break;
 
         case FM_MODE_TX:
@@ -1054,24 +1115,23 @@ int fmc_get_frequency(struct fmdrv_ops *fmdev, unsigned int *cur_tuned_frq)
 int fmc_seek_station(struct fmdrv_ops *fmdev, unsigned char direction_upward,
                     unsigned char wrap_around)
 {
-// BRCM LOCAL[CSP#1024953] : FM Radio Search time
-//org
-    //return fm_rx_seek_station(fmdev, direction_upward, wrap_around);
-//new
     int curr_mute_mode, ret;
 
     curr_mute_mode = fmdev->rx.curr_mute_mode;
 
     if(curr_mute_mode == FM_MUTE_OFF)
+    {
         fm_rx_set_mute_mode(fmdev, FM_MUTE_ON);
+    }
 
     ret = fm_rx_seek_station(fmdev, direction_upward, wrap_around);
 
     if(curr_mute_mode == FM_MUTE_OFF)
+    {
         fm_rx_set_mute_mode(fmdev, FM_MUTE_OFF);
+    }
 
     return ret;
-// BRCM LOCAL[CSP#1024953]
 }
 
 /* Returns current band index (0-Europe/US; 1-Japan) */
@@ -1126,6 +1186,26 @@ int fmc_set_audio_mode(struct fmdrv_ops *fmdev, unsigned char audio_mode)
     return ret;
 }
 
+/* Gets the audio mode */
+int fmc_get_audio_mode(struct fmdrv_ops *fmdev, unsigned char *audio_mode)
+{
+    int ret;
+
+    switch (fmdev->curr_fmmode) {
+        case FM_MODE_RX:
+            ret = fm_rx_get_audio_mode(fmdev, audio_mode);
+            break;
+
+        case FM_MODE_TX:
+            /* Currently FM TX is not supported */
+            V4L2_FM_DRV_ERR("Currently FM TX is not supported");
+
+        default:
+            ret = -EINVAL;
+    }
+    return ret;
+}
+
 /* Sets the scan step */
 int fmc_set_scan_step(struct fmdrv_ops *fmdev, unsigned char scan_step)
 {
@@ -1151,7 +1231,6 @@ int fmc_set_scan_step(struct fmdrv_ops *fmdev, unsigned char scan_step)
 */
 void fmc_reset_rds_cache(struct fmdrv_ops *fmdev)
 {
-    //fmdev->rx.rds.rds_flag = FM_RDS_DISABLE;
     fmdev->rx.rds.wr_index = 0;
     fmdev->rx.rds.rd_index = 0;
     fmdev->device_info.rxsubchans &= ~V4L2_TUNER_SUB_RDS;
@@ -1268,15 +1347,10 @@ int fmc_enable (struct fmdrv_ops *fmdev, unsigned char opt)
         return ret;
     }
     fmdev->rx.fm_func_mask = opt;
-// BRCM LOCAL[CSP#990808] : After BT On and FM Radio Off, sleep current is high
-//org
-    /* wait for 50 ms before sending any more commands */
-    //mdelay (50);
-//new
-    /* should wait for a while after sending FM enable command. */
+
+    /* wait for 300 ms before sending any more commands */
     mdelay (V4L2_FM_ENABLE_DELAY);
-    V4L2_FM_DRV_ERR("(fmdrv): FM delay time for enable command : %d ms", V4L2_FM_ENABLE_DELAY);
-// BRCM LOCAL[CSP#990808]
+
     /* wrire rds control */
     rdbs_en_dis = (opt & FM_RBDS_BIT) ?
             FM_RDBS_ENABLE : FM_RDBS_DISABLE;
@@ -1309,10 +1383,7 @@ int fmc_enable (struct fmdrv_ops *fmdev, unsigned char opt)
 
     ret = fm_rx_set_audio_ctrl(fmdev, aud_ctrl);
 
-//BRCM_LOCAL [CSP#1014809] : Can't adjust scan level through the threshold value
-    //fmdev->rx.curr_rssi = DEF_V4L2_FM_SIGNAL_STRENGTH;
     fmdev->rx.curr_rssi_threshold = DEF_V4L2_FM_SIGNAL_STRENGTH;
-//BRCM_LOCAL [CSP#1014809]
 
     /* Set world region */
     V4L2_FM_DRV_DBG(V4L2_DBG_TX,"(fmdrv): FM Set world region option : %d", DEF_V4L2_FM_WORLD_REGION);
@@ -1365,10 +1436,6 @@ int fmc_get_mode(struct fmdrv_ops *fmdev, unsigned char *fmmode)
 static long fm_st_receive(void *arg, struct sk_buff *skb)
 {
     struct fmdrv_ops *fmdev;
-#if V4L2_FM_DEBUG
-    int len;
-#endif
-    __u8 pkt_type = 0x08;
 
     fmdev = (struct fmdrv_ops *)arg;
 
@@ -1381,12 +1448,11 @@ static long fm_st_receive(void *arg, struct sk_buff *skb)
         return -EINVAL;
     }
 
-    memcpy(skb_push(skb, 1), &pkt_type, 1);
     skb_queue_tail(&fmdev->rx_q, skb);
 
-#if TASKLET_SUPPORT
+#ifdef TASKLET_SUPPORT
     tasklet_schedule(&fmdev->rx_task);
-#else if WORKER_QUEUE
+#else
     queue_work(fmdev->rx_wq,&fmdev->rx_workqueue);
 #endif
     return 0;
@@ -1432,20 +1498,21 @@ int fmc_prepare(struct fmdrv_ops *fmdev)
         ret = brcm_sh_ldisc_unregister(PROTO_SH_FM);
         if (ret < 0)
             V4L2_FM_DRV_ERR("(fmdrv): brcm_sh_ldisc_unregister failed %d", ret);
-            ret = -EAGAIN;
-            return ret;
+        ret = -EAGAIN;
+        return ret;
     }
 
     spin_lock_init(&fmdev->resp_skb_lock);
+    spin_lock_init(&fmdev->rds_cbuff_lock);
     mutex_init(&fmdev->wait_completion_lock);
     /* Initialize TX queue and TX tasklet */
     skb_queue_head_init(&fmdev->tx_q);
     /* Initialize RX Queue and RX tasklet */
     skb_queue_head_init(&fmdev->rx_q);
-#if TASKLET_SUPPORT
+#ifdef TASKLET_SUPPORT
     tasklet_init(&fmdev->tx_task, __send_tasklet, (unsigned long)fmdev);
     tasklet_init(&fmdev->rx_task, __recv_tasklet, (unsigned long)fmdev);
-#else if WORKER_QUEUE
+#else
 INIT_WORK(&fmdev->tx_workqueue,fm_send_data_ldisc);
 INIT_WORK(&fmdev->rx_workqueue,fm_receive_data_ldisc);
 #endif
@@ -1474,10 +1541,8 @@ INIT_WORK(&fmdev->rx_workqueue,fm_receive_data_ldisc);
     fmdev->device_info.rxsubchans = V4L2_TUNER_SUB_MONO | V4L2_TUNER_SUB_STEREO;
     fmdev->device_info.tuner_capability =V4L2_TUNER_CAP_STEREO | V4L2_TUNER_CAP_LOW | V4L2_TUNER_CAP_RDS;
 
-//BRCM_LOCAL [CSP#1011785] : FM radio Kernel crash
     fmdev->rx.abort_flag = FALSE;
     fmdev->rx.seek_pending = FALSE;
-//BRCM_LOCAL [CSP#1011785]
 
     /* RDS initialization */
     fmc_reset_rds_cache(fmdev);
@@ -1508,14 +1573,13 @@ int fmc_release(struct fmdrv_ops *fmdev)
 
     /* Sevice pending read */
     wake_up_interruptible(&fmdev->rx.rds.read_queue);
-#if TASKLET_SUPPORT
+#ifdef TASKLET_SUPPORT
     tasklet_kill(&fmdev->tx_task);
     tasklet_kill(&fmdev->rx_task);
-#else if WORKER_QUEUE
-
-#endif
+#else
     skb_queue_purge(&fmdev->tx_q);
     skb_queue_purge(&fmdev->rx_q);
+#endif
 
     fmdev->response_completion = NULL;
     fmdev->rx.curr_freq = 0;
@@ -1531,6 +1595,8 @@ static int __init fm_drv_init(void)
 {
     struct fmdrv_ops *fmdev = NULL;
     int ret = -ENOMEM;
+/*This is an initialization of CT variable. To perform unit testing*/
+/*Even if you remove this initilization functionality won't be effected*/
     current_ct.day = 1;
     current_ct.hour = 2;
     current_ct.minute = 3;
@@ -1559,7 +1625,7 @@ static int __init fm_drv_init(void)
         kfree(fmdev);
         return ret;
     }
-#if WORKER_QUEUE
+#ifndef TASKLET_SUPPORT
     fmdev->tx_wq= create_workqueue("fm_drv_tx");
     if (!fmdev->tx_wq) {
         V4L2_FM_DRV_ERR("%s(): Unable to create workqueue fm_drv_tx\n", __func__);
@@ -1584,11 +1650,11 @@ static void __exit fm_drv_exit(void)
 
     fmdev = fm_v4l2_deinit_video_device();
     if (fmdev != NULL) {
-#if WORKER_QUEUE
-    destroy_workqueue(fmdev->tx_wq);
-    destroy_workqueue(fmdev->rx_wq);
+#ifndef TASKLET_SUPPORT
+        destroy_workqueue(fmdev->tx_wq);
+        destroy_workqueue(fmdev->rx_wq);
 #endif
-    kfree(fmdev);
+        kfree(fmdev);
     }
 }
 

@@ -31,21 +31,12 @@
 #include <sound/q6core.h>
 #include <sound/pcm_params.h>
 #include <sound/info.h>
-#include "device_event.h"
+#include <device_event.h>
 #include "qdsp6v2/msm-pcm-routing-v2.h"
 #include "../codecs/wcd9xxx-common.h"
 #include "../codecs/wcd9330.h"
 #include "../codecs/wcd9335.h"
 #include "../codecs/wsa881x.h"
-
-#ifdef CONFIG_SND_SOC_ES9018
-#ifdef CONFIG_LGE_PM_LGE_POWER_CLASS_BOARD_REVISION
-#include <soc/qcom/lge/power/lge_board_revision.h>
-#include <soc/qcom/lge/power/lge_power_class.h>
-#else
-#include <soc/qcom/lge/board_lge.h>
-#endif
-#endif
 
 #define DRV_NAME "msm8996-asoc-snd"
 
@@ -72,9 +63,11 @@
 static int slim0_rx_sample_rate = SAMPLING_RATE_48KHZ;
 static int slim0_tx_sample_rate = SAMPLING_RATE_48KHZ;
 static int slim1_tx_sample_rate = SAMPLING_RATE_48KHZ;
+static int slim3_tx_sample_rate = SAMPLING_RATE_48KHZ;
 static int slim0_rx_bit_format = SNDRV_PCM_FORMAT_S16_LE;
 static int slim0_tx_bit_format = SNDRV_PCM_FORMAT_S16_LE;
 static int slim1_tx_bit_format = SNDRV_PCM_FORMAT_S16_LE;
+static int slim3_tx_bit_format = SNDRV_PCM_FORMAT_S16_LE;
 static int hdmi_rx_bit_format = SNDRV_PCM_FORMAT_S16_LE;
 static int msm8996_auxpcm_rate = SAMPLING_RATE_8KHZ;
 static int slim5_rx_sample_rate = SAMPLING_RATE_48KHZ;
@@ -88,6 +81,7 @@ static int msm8996_spk_control = 1;
 static int msm_slim_0_rx_ch = 1;
 static int msm_slim_0_tx_ch = 1;
 static int msm_slim_1_tx_ch = 1;
+static int msm_slim_3_tx_ch = 1;
 static int msm_slim_5_rx_ch = 1;
 static int msm_slim_6_rx_ch = 1;
 static int msm_hifi_control;
@@ -100,6 +94,10 @@ static int msm_tert_mi2s_tx_ch = 2;
 #ifdef CONFIG_SND_USE_QUAT_MI2S
 static int msm_quat_mi2s_tx_ch = 2;
 #endif
+#if defined(CONFIG_SND_SOC_ES9218P)
+bool enable_es9218p = false;
+#endif
+
 
 static bool codec_reg_done;
 
@@ -130,6 +128,12 @@ static const char *const proxy_rx_ch_text[] = {"One", "Two", "Three", "Four",
 
 static char const *hdmi_rx_sample_rate_text[] = {"KHZ_48", "KHZ_96",
 					"KHZ_192"};
+
+#ifdef CONFIG_SND_USE_SKU_INFO
+#define NATION_REG1 131
+#define NATION_REG2 132
+static char const *sku_value_text[] = {"LowLow", "LowHigh", "HighLow", "HighHigh"};
+#endif
 
 static const char *const auxpcm_rate_text[] = {"8000", "16000"};
 static const struct soc_enum msm8996_auxpcm_enum[] = {
@@ -173,7 +177,6 @@ struct msm8996_asoc_mach_data {
 };
 
 #ifdef CONFIG_SND_USE_SEC_MI2S
-
 static struct afe_clk_set sec_mi2s_clk = {
 	AFE_API_VERSION_I2S_CONFIG,
 	Q6AFE_LPASS_CLK_ID_SEC_MI2S_IBIT,
@@ -909,9 +912,6 @@ static int slim0_rx_sample_rate_put(struct snd_kcontrol *kcontrol,
 	default:
 		slim0_rx_sample_rate = SAMPLING_RATE_48KHZ;
 	}
-#ifdef CONFIG_SND_USE_SEC_MI2S
-	sec_mi2s_sample_rate = slim0_rx_sample_rate;
-#endif
 	pr_debug("%s: slim0_rx_sample_rate = %d\n", __func__,
 		 slim0_rx_sample_rate);
 
@@ -1103,9 +1103,6 @@ static int slim0_rx_bit_format_put(struct snd_kcontrol *kcontrol,
 		slim0_rx_bit_format = SNDRV_PCM_FORMAT_S16_LE;
 		break;
 	}
-#ifdef CONFIG_SND_USE_SEC_MI2S
-	sec_mi2s_bit_format = slim0_rx_bit_format;
-#endif
 	return 0;
 }
 
@@ -1198,6 +1195,24 @@ static int msm_slim_1_tx_ch_put(struct snd_kcontrol *kcontrol,
 	return 1;
 }
 
+static int msm_slim_3_tx_ch_get(struct snd_kcontrol *kcontrol,
+	struct snd_ctl_elem_value *ucontrol)
+{
+	pr_debug("%s: msm_slim_3_tx_ch  = %d\n", __func__,
+		 msm_slim_3_tx_ch);
+	ucontrol->value.integer.value[0] = msm_slim_3_tx_ch - 1;
+	return 0;
+}
+
+static int msm_slim_3_tx_ch_put(struct snd_kcontrol *kcontrol,
+	struct snd_ctl_elem_value *ucontrol)
+{
+	msm_slim_3_tx_ch = ucontrol->value.integer.value[0] + 1;
+
+	pr_debug("%s: msm_slim_3_tx_ch = %d\n", __func__, msm_slim_3_tx_ch);
+	return 1;
+}
+
 static int msm_vi_feed_tx_ch_get(struct snd_kcontrol *kcontrol,
 	struct snd_ctl_elem_value *ucontrol)
 {
@@ -1215,6 +1230,31 @@ static int msm_vi_feed_tx_ch_put(struct snd_kcontrol *kcontrol,
 	pr_debug("%s: msm_vi_feed_tx_ch = %d\n", __func__, msm_vi_feed_tx_ch);
 	return 1;
 }
+
+#ifdef CONFIG_SND_USE_SKU_INFO
+static int sku_value_get(struct snd_kcontrol *kcontrol,
+	struct snd_ctl_elem_value *ucontrol)
+{
+	int gpio1, gpio2;
+	int sku_value;
+
+	gpio1 = gpio_get_value(NATION_REG1);
+	gpio2 = gpio_get_value(NATION_REG2);
+
+	sku_value = gpio2 + ((1 << gpio1) & 0x2);
+	ucontrol->value.integer.value[0] = sku_value;
+	pr_info("%s: sku_value = %ld, gpio1 = %d, gpio2 = %d\n", __func__,
+		 ucontrol->value.integer.value[0], gpio1, gpio2);
+	return 0;
+}
+
+static int sku_value_put(struct snd_kcontrol *kcontrol,
+	struct snd_ctl_elem_value *ucontrol)
+{
+	pr_debug("%s: \n", __func__);
+	return 1;
+}
+#endif
 
 static int hdmi_rx_bit_format_get(struct snd_kcontrol *kcontrol,
 				  struct snd_ctl_elem_value *ucontrol)
@@ -1846,6 +1886,22 @@ static int msm_slim_1_tx_be_hw_params_fixup(struct snd_soc_pcm_runtime *rtd,
 	return 0;
 }
 
+static int msm_slim_3_tx_be_hw_params_fixup(struct snd_soc_pcm_runtime *rtd,
+					    struct snd_pcm_hw_params *params)
+{
+	struct snd_interval *rate = hw_param_interval(params,
+					SNDRV_PCM_HW_PARAM_RATE);
+	struct snd_interval *channels = hw_param_interval(params,
+					SNDRV_PCM_HW_PARAM_CHANNELS);
+
+	pr_debug("%s()\n", __func__);
+	param_set_mask(params, SNDRV_PCM_HW_PARAM_FORMAT, slim3_tx_bit_format);
+	rate->min = rate->max = slim3_tx_sample_rate;
+	channels->min = channels->max = msm_slim_3_tx_ch;
+
+	return 0;
+}
+
 static int msm_slim_4_tx_be_hw_params_fixup(struct snd_soc_pcm_runtime *rtd,
 					    struct snd_pcm_hw_params *params)
 {
@@ -1926,6 +1982,9 @@ static const struct soc_enum msm_snd_enum[] = {
 	SOC_ENUM_SINGLE_EXT(ARRAY_SIZE(slim6_rx_bit_format_text),
 			    slim6_rx_bit_format_text),
 	SOC_ENUM_SINGLE_EXT(2, slim6_rx_ch_text),
+#ifdef CONFIG_SND_USE_SKU_INFO
+	SOC_ENUM_SINGLE_EXT(4, sku_value_text),
+#endif
 };
 
 static const struct snd_kcontrol_new msm_snd_controls[] = {
@@ -1941,6 +2000,8 @@ static const struct snd_kcontrol_new msm_snd_controls[] = {
 			msm_slim_0_tx_ch_get, msm_slim_0_tx_ch_put),
 	SOC_ENUM_EXT("SLIM_1_TX Channels", msm_snd_enum[2],
 			msm_slim_1_tx_ch_get, msm_slim_1_tx_ch_put),
+	SOC_ENUM_EXT("SLIM_3_TX Channels", msm_snd_enum[2],
+			msm_slim_3_tx_ch_get, msm_slim_3_tx_ch_put),
 	SOC_ENUM_EXT("AUX PCM SampleRate", msm8996_auxpcm_enum[0],
 			msm8996_auxpcm_rate_get,
 			msm8996_auxpcm_rate_put),
@@ -1972,6 +2033,10 @@ static const struct snd_kcontrol_new msm_snd_controls[] = {
 			msm8996_hifi_put),
 	SOC_ENUM_EXT("VI_FEED_TX Channels", msm_snd_enum[12],
 			msm_vi_feed_tx_ch_get, msm_vi_feed_tx_ch_put),
+#ifdef CONFIG_SND_USE_SKU_INFO
+	SOC_ENUM_EXT("SKU Value", msm_snd_enum[16],
+			sku_value_get, sku_value_put),
+#endif
 };
 
 static bool msm8996_swap_gnd_mic(struct snd_soc_codec *codec)
@@ -2290,6 +2355,13 @@ static int msm_audrx_init(struct snd_soc_pcm_runtime *rtd)
 		}
 	}
 	/* Start mbhc */
+#if defined(CONFIG_SND_SOC_ES9218P)
+	if(enable_es9218p) {
+		wcd_mbhc_cfg.moist_cfg.m_vref_ctl = V_OFF;
+		wcd_mbhc_cfg.moist_cfg.m_iref_ctl = I_OFF;
+		pr_info("%s : set moist_cfg installed es9218p chip : m_vref_ctl %d, m_iref_ctl %d",__func__,wcd_mbhc_cfg.moist_cfg.m_vref_ctl,wcd_mbhc_cfg.moist_cfg.m_iref_ctl);
+	}
+#endif
 	tasha_mbhc_zdet_gpio_ctrl(msm8996_config_hph_en0_gpio, rtd->codec);
 	mbhc_calibration = def_tasha_mbhc_cal();
 	if (mbhc_calibration) {
@@ -2361,8 +2433,13 @@ static void *def_tasha_mbhc_cal(void)
 	}
 
 #define S(X, Y) ((WCD_MBHC_CAL_PLUG_TYPE_PTR(tasha_wcd_cal)->X) = (Y))
-#ifdef CONFIG_SND_SOC_ES9018
+#if defined(CONFIG_SND_SOC_ES9018)
 	S(v_hs_max, 2800);
+#elif defined(CONFIG_SND_SOC_ES9218P)
+	if(enable_es9218p){
+		S(v_hs_max, 2800);
+		pr_info("%s: set v_hs_max as 2800 installed es9218p chip\n", __func__);
+	}
 #else
 	S(v_hs_max, 1500);
 #endif
@@ -2462,7 +2539,7 @@ static int msm_snd_hw_params(struct snd_pcm_substream *substream,
 			 * Since Rx is fed as reference for EC, the config of
 			 * this DAI is based on that of the Rx path.
 			 */
-			user_set_tx_ch = msm_slim_0_rx_ch;
+			user_set_tx_ch = msm_slim_3_tx_ch;
 		else if (dai_link->be_id == MSM_BACKEND_DAI_SLIMBUS_4_TX)
 			user_set_tx_ch = msm_vi_feed_tx_ch;
 		else
@@ -3636,11 +3713,11 @@ static struct snd_soc_dai_link msm8996_tasha_be_dai_links[] = {
 		.cpu_dai_name = "msm-dai-q6-dev.16391",
 		.platform_name = "msm-pcm-routing",
 		.codec_name = "tasha_codec",
-		.codec_dai_name = "tasha_tx1",
+		.codec_dai_name = "tasha_tx3",
 		.no_pcm = 1,
 		.dpcm_capture = 1,
 		.be_id = MSM_BACKEND_DAI_SLIMBUS_3_TX,
-		.be_hw_params_fixup = msm_slim_0_tx_be_hw_params_fixup,
+		.be_hw_params_fixup = msm_slim_3_tx_be_hw_params_fixup,
 		.ops = &msm8996_be_ops,
 		.ignore_suspend = 1,
 	},
@@ -3841,7 +3918,7 @@ static struct snd_soc_dai_link msm8996_lge_dai_links[] = {
 		.be_id = MSM_FRONTEND_DAI_MULTIMEDIA2,
 	},
 #endif	/* CONFIG_SND_LGE_DSDP_DUAL_AUDIO */
-#ifdef CONFIG_SND_USE_SEC_MI2S
+#ifdef CONFIG_SND_SOC_ES9018
 	{
 		.name = LPASS_BE_SEC_MI2S_RX,
 		.stream_name = "Secondary MI2S Playback",
@@ -3875,7 +3952,7 @@ static struct snd_soc_dai_link msm8996_lge_dai_links[] = {
 		.ignore_pmdown_time = 1,
 		.be_id = MSM_FRONTEND_DAI_MULTIMEDIA2,
 	},
-#endif /* CONFIG_SND_USE_SEC_MI2S */
+#endif /* CONFIG_SND_SOC_ES9018 */
 #ifdef CONFIG_SND_USE_TERT_MI2S
 	{
 		.name = LPASS_BE_TERT_MI2S_RX,
@@ -3911,6 +3988,21 @@ static struct snd_soc_dai_link msm8996_lge_dai_links[] = {
 		.be_id = MSM_FRONTEND_DAI_MULTIMEDIA2,
 	},
 #endif /* CONFIG_SND_USE_TERT_MI2S */
+	{
+        .name = "SLIMBUS_3 Hostless Capture",
+        .stream_name = "SLIMBUS3_HOSTLESS Capture",
+        .cpu_dai_name = "SLIMBUS3_HOSTLESS",
+        .platform_name = "msm-pcm-hostless",
+        .dynamic = 1,
+        .dpcm_capture = 1,
+        .trigger = {SND_SOC_DPCM_TRIGGER_POST,
+                SND_SOC_DPCM_TRIGGER_POST},
+        .no_host_mode = SND_SOC_DAI_LINK_NO_HOST,
+        .ignore_suspend = 1,
+        .ignore_pmdown_time = 1,
+        .codec_dai_name = "snd-soc-dummy-dai",
+        .codec_name = "snd-soc-dummy",
+	},
 
 };
 
@@ -3934,6 +4026,24 @@ static struct snd_soc_dai_link msm8996_dummy_dai_link[] = {
 		.be_id = MSM_FRONTEND_DAI_MULTIMEDIA2,
 	},
 };
+#if defined(CONFIG_SND_USE_SEC_MI2S) && defined(CONFIG_SND_SOC_ES9218P)
+static struct snd_soc_dai_link msm8996_sec_mi2s_dai_link[] = {
+	{
+		.name = LPASS_BE_SEC_MI2S_RX,
+		.stream_name = "Secondary MI2S Playback",
+		.cpu_dai_name = "msm-dai-q6-mi2s.1",
+		.platform_name = "msm-pcm-routing",
+		.codec_name = "es9218-codec.6-0048",
+		.codec_dai_name = "es9218-hifi",
+		.no_pcm = 1,
+		.dpcm_playback = 1,
+		.be_id = MSM_BACKEND_DAI_SECONDARY_MI2S_RX,
+		.be_hw_params_fixup = msm_be_sec_mi2s_hw_params_fixup,
+		.ops = &msm8996_sec_mi2s_be_ops,
+		.ignore_suspend = 1,
+	},
+};
+#endif
 #endif	/* CONFIG_SND_DISABLE_DUMMY_DAI */
 
 static struct snd_soc_dai_link msm8996_tasha_dai_links[
@@ -4151,12 +4261,6 @@ static struct snd_soc_card *populate_snd_card_dailinks(struct device *dev)
 	struct snd_soc_dai_link *dailink;
 	int len_1, len_2, len_3, len_4;
 	const struct of_device_id *match;
-#ifdef CONFIG_LGE_PM_LGE_POWER_CLASS_BOARD_REVISION
-	union lge_power_propval lge_val = {0,};
-	struct lge_power *lge_hw_rev_lpc = NULL;
-	int rc;
-	int hw_rev = HW_REV_EVB1;
-#endif
 
 	match = of_match_node(msm8996_asoc_machine_of_match, dev->of_node);
 	if (!match) {
@@ -4216,28 +4320,27 @@ static struct snd_soc_card *populate_snd_card_dailinks(struct device *dev)
 			}
 			card->num_links = LGE_DAI_LINK_ID_BASE;
 		}
-#ifdef CONFIG_SND_SOC_ES9018
-#ifdef CONFIG_LGE_PM_LGE_POWER_CLASS_BOARD_REVISION
-		lge_hw_rev_lpc = lge_power_get_by_name("lge_hw_rev");
-		if (lge_hw_rev_lpc) {
-			rc = lge_hw_rev_lpc->get_property(lge_hw_rev_lpc,
-					LGE_POWER_PROP_HW_REV, &lge_val);
-			hw_rev = lge_val.intval;
-		} else {
-			pr_err("[SOUND] Failed to get hw_rev property\n");
-			hw_rev = HW_REV_EVB1;
-		}
-		if (hw_rev <= HW_REV_0_1) {
-#else
-        if (lge_get_board_revno() <= HW_REV_0_1) {
-#endif
-            if (!strcmp(msm8996_lge_dai_links[3].codec_name, "es9018-codec.6-0048"))
-                msm8996_lge_dai_links[3].codec_name = "es9018-codec.3-0048";
-        }
-#endif
 		memcpy(msm8996_tasha_dai_links + card->num_links,
 			   msm8996_lge_dai_links, sizeof(msm8996_lge_dai_links));
-		card->num_links += ARRAY_SIZE(msm8996_lge_dai_links);
+		card->num_links += ARRAY_SIZE(msm8996_lge_dai_links);		
+//set SEC_MI2S dai if ESS DAC DTSI is enabled
+#ifdef CONFIG_SND_SOC_ES9218P
+		if(of_property_read_bool(dev->of_node, "lge,es9218p-codec")) { //check ESS DAC DTSI is enabled
+			int i;
+			dev_info(dev, "%s(): register mi2s dai for es9218p codec\n",__func__);
+			enable_es9218p = true;
+			for(i = LGE_DAI_LINK_ID_BASE; i < card->num_links;i++)
+			{
+				struct snd_soc_dai_link *link = msm8996_tasha_dai_links + i;
+				if(strstr(msm8996_tasha_dai_links[i].name,"Dummy DAI") != 0)
+				{
+					dev_info(dev, "%s(): change DUMMY DAI[%d] to msm8996_sec_mi2s_dai_link\n",__func__,i);
+					memcpy(link, msm8996_sec_mi2s_dai_link, sizeof(msm8996_sec_mi2s_dai_link));
+					break;
+				}
+			}
+		}
+#endif
 	}
 #endif	/* CONFIG_SND_DISABLE_DUMMY_DAI */
 

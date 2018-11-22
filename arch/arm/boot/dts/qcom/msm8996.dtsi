@@ -1,4 +1,4 @@
-/* Copyright (c) 2014-2016, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2014-2018, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -21,7 +21,7 @@
 	interrupt-parent = <&intc>;
 
 	chosen {
-		bootargs = "sched_enable_hmp=1 sched_enable_power_aware=1";
+		bootargs = "sched_enable_hmp=1 sched_enable_power_aware=1 app_setting.use_32bit_app_setting=1 kpti=1";
 	};
 
 	aliases {
@@ -40,6 +40,10 @@
 		i2c8 = &i2c_8;
 		i2c12 = &i2c_12;
 		spi0 = &spi_0;
+		mhi_rmnet0 = &mhi_rmnet_0;
+		mhi_rmnet1 = &mhi_rmnet_1;
+		mhi_uci0 = &mhi_uci_0;
+		mhi0 = &mhi_0;
 	};
 
 	psci {
@@ -154,6 +158,34 @@
 
 	soc: soc { };
 
+	firmware: firmware {
+		android {
+			compatible = "android,firmware";
+			fstab {
+				compatible = "android,fstab";
+				/* do not use at O OS upgrade
+				vendor {
+					compatible = "android,vendor";
+					dev = "/dev/block/platform/soc/7464900.sdhci/by-name/vendor";
+					type = "ext4";
+					mnt_flags = "ro,barrier=1,discard";
+					fsmgr_flags = "wait";
+					status = "disabled";
+				 };
+				*/
+				 system {
+					compatible = "android,system";
+					dev = "/dev/block/platform/soc/624000.ufshc/by-name/system";
+					type = "ext4";
+					mnt_flags = "ro,noatime,barrier=1,discard";
+					fsmgr_flags = "wait,verify";
+					status = "ok";
+				};
+
+			};
+		};
+	};
+
 	reserved-memory {
 		#address-cells = <2>;
 		#size-cells = <2>;
@@ -218,8 +250,18 @@
 	};
 };
 
+/* move to here before clock_cpu
+	It affects  the order of probing driver
+*/
+&soc {
+	qcom,glink-smem-native-xprt-rpm@68000 {
+	};
+};
+
+
 #include "msm8996-ion.dtsi"
 #include "msm8996-mdss.dtsi"
+#include "msm8996-sde.dtsi"
 #include "msm8996-mdss-pll.dtsi"
 #include "msm8996-smp2p.dtsi"
 #include "msm8996-ipcrouter.dtsi"
@@ -673,6 +715,33 @@
 			< 1497600 >,
 			< 1593600 >;
 	};
+/* move to here before clock_cpu
+	It affects  the order of probing driver
+*/
+	rpm_bus: qcom,rpm-smd {
+	};
+	clock_gcc: qcom,gcc@300000 {
+	};
+	qcom,spm@9A10000 {
+	};
+	spmi_bus: qcom,spmi@400f000 {
+	};
+	apc0_pwrcl_mem_acc_vreg: apc0-pwrcl-mem-acc-regulator {
+	};
+	apc1_perfcl_mem_acc_vreg: apc1-perfcl-mem-acc-regulator {
+	};
+	apcc_l3_mem_acc_vreg: apcc-l3-mem-acc-regulator {
+	};
+	gfx_mem_acc_vreg: regulator@007af004 {
+	};
+	kryo0_vreg: regulator@99a2000 {
+	};
+	kryo1_vreg: regulator@99d2000 {
+	};
+	apcc_cpr: cpr3-ctrl@99e8000 {
+	};
+	qcom,smem@86000000 {
+	};
 
 	clock_cpu: qcom,cpu-clock-8996@ {
 		compatible = "qcom,cpu-clock-8996";
@@ -779,6 +848,14 @@
 			 <&mdss_dsi1_pll clk_dsi1pll_byte_clk_mux>,
 			<&mdss_hdmi_pll clk_hdmi_vco_clk>;
 		#clock-cells = <1>;
+	};
+
+/* move to here before clock_gpu
+	It affects  the order of probing driver
+*/
+	gfx_cpr: cpr3-ctrl@838000 {
+	};
+	msm_gpu: qcom,kgsl-3d0@b00000 {
 	};
 
 	clock_gpu: qcom,gpucc@8c0000 {
@@ -1348,7 +1425,7 @@
 
 		iommus = <&anoc0_smmu>;
 
-		qcom,ep-wakeirq;
+		qcom,boot-option = <0x1>;
 
 		linux,pci-domain = <0>;
 
@@ -1499,7 +1576,7 @@
 
 		iommus = <&anoc0_smmu>;
 
-		qcom,ep-wakeirq;
+		qcom,boot-option = <0x1>;
 
 		qcom,ep-latency = <10>;
 
@@ -1650,9 +1727,10 @@
 
 		iommus = <&anoc0_smmu>;
 
-		qcom,ep-wakeirq;
+		qcom,boot-option = <0x1>;
 
 		qcom,ep-latency = <10>;
+		qcom,wr-halt-size = <0xa>;
 
 		linux,pci-domain = <2>;
 
@@ -1692,8 +1770,57 @@
 					 <0>, <0>, <0>, <0>, <0>, <0>, <0>;
 	};
 
-	mhi: qcom,mhi {
+	mhi_0: mhi: qcom,mhi@0 {
 		compatible = "qcom,mhi";
+		qcom,mhi-address-window = <0x0 0x80000000 0x1 0xffffffff>;
+		qcom,pci-dev_id = <0x0302>;
+		qcom,pci-domain = <2>;
+		qcom,pci-bus = <1>;
+		qcom,pci-slot = <0>;
+	};
+
+	mhi_rmnet_0: qcom,mhi-rmnet@0 {
+		compatible = "qcom,mhi-rmnet";
+		cell-index = <0>;
+		qcom,mhi = <&mhi_0>;
+		qcom,mhi-rx-channel = <101>;
+		qcom,mhi-tx-channel = <100>;
+		qcom,mhi-mru = <8000>;
+		status = "disabled";
+	};
+
+	mhi_rmnet_1: qcom,mhi-rmnet@1 {
+		compatible = "qcom,mhi-rmnet";
+		cell-index = <1>;
+		qcom,mhi = <&mhi_0>;
+		qcom,mhi-rx-channel = <102>;
+		qcom,mhi-mru = <0x4000>;
+		status = "disabled";
+	};
+
+	mhi_uci_0: qcom,mhi-uci@0 {
+		compatible = "qcom,mhi-uci";
+		qcom,mhi-uci-channels = <0 0xffff>,
+					<1 0x1000>,
+					<2 0xffff>,
+					<3 0xffff>,
+					<10 0xffff>,
+					<11 0x1000>,
+					<14 0xffff>,
+					<15 0x1000>,
+					<16 0xffff>,
+					<17 0x1000>,
+					<18 0xffff>,
+					<19 0x1000>,
+					<22 0xffff>,
+					<23 0x1000>,
+					<24 0xffff>,
+					<25 0x1000>,
+					<32 0xffff>,
+					<33 0x1000>;
+		qcom,mhi-uci-ctrlchan = <18>;
+		qcom,mhi = <&mhi_0>;
+		status = "disabled";
 	};
 
         qcom,ipc-spinlock@740000 {
@@ -1900,10 +2027,11 @@
 		vbus_dwc3-supply = <&smbcharger_charger_otg>;
 		qcom,usb-dbm = <&dbm_1p5>;
 		qcom,msm-bus,name = "usb3";
-		qcom,msm-bus,num-cases = <2>;
+		qcom,msm-bus,num-cases = <3>;
 		qcom,msm-bus,num-paths = <1>;
 		qcom,msm-bus,vectors-KBps =
 					<61 512 0 0>,
+					<61 512 240000 800000>,
 					<61 512 240000 800000>;
 
 		qcom,dwc-usb3-msm-tx-fifo-size = <21288>;
@@ -1931,6 +2059,7 @@
 			snps,nominal-elastic-buffer;
 			snps,is-utmi-l1-suspend;
 			snps,hird-threshold = /bits/ 8 <0x0>;
+			qcom,usb-core-id = <0>;
 		};
 
 		qcom,usbbam@6b04000 {
@@ -2011,10 +2140,11 @@
 		interrupt-names = "hs_phy_irq", "pwr_event_irq";
 
 		qcom,msm-bus,name = "usb-hs";
-		qcom,msm-bus,num-cases = <2>;
+		qcom,msm-bus,num-cases = <3>;
 		qcom,msm-bus,num-paths = <1>;
 		qcom,msm-bus,vectors-KBps =
 					<87 512 0 0>,
+					<87 512 60000 960000>,
 					<87 512 60000 960000>;
 
 		clocks = <&clock_gcc clk_gcc_usb20_master_clk>,
@@ -2037,6 +2167,7 @@
 			snps,nominal-elastic-buffer;
 			snps,is-utmi-l1-suspend;
 			snps,hird-threshold = /bits/ 8 <0x0>;
+			qcom,usb-core-id = <1>;
 		};
 	};
 
@@ -2044,16 +2175,22 @@
 		compatible = "qcom,android-usb";
 		reg = <0x066bf0c8 0xc8>;
 		qcom,pm-qos-latency = <41 91 801>;
+		qcom,usb-core-id = <0>;
+	};
+
+	android_usb1: android_usb1 {
+		compatible = "qcom,android-usb";
+		qcom,pm-qos-latency = <41 91 801>;
+		qcom,usb-core-id = <1>;
+		status = "disabled";
 	};
 
 	qusb_phy0: qusb@7411000 {
 		compatible = "qcom,qusb2phy";
 		reg = <0x07411000 0x180>,
-			<0x06af8800 0x400>,
 			<0x0007024c 0x4>,
 			<0x00388018 0x4>;
 		reg-names = "qusb_phy_base",
-			"qscratch_base",
 			"tune2_efuse_addr",
 			"ref_clk_addr";
 		vdd-supply = <&pm8994_s2_corner>;
@@ -2085,11 +2222,9 @@
 	qusb_phy1: qusb@7412000 {
 		compatible = "qcom,qusb2phy";
 		reg = <0x07412000 0x180>,
-			<0x076f8800 0x400>,
 			<0x0007024c 0x4>,
 			<0x00388014 0x4>;
 		reg-names = "qusb_phy_base",
-			"qscratch_base",
 			"tune2_efuse_addr",
 			"ref_clk_addr";
 		vdd-supply = <&pm8994_s2_corner>;
@@ -2125,7 +2260,7 @@
 		reg-names = "qmp_phy_base",
 			    "vls_clamp_reg";
 		vdd-supply = <&pm8994_l28>;
-		vdda18-supply = <&pm8994_l12>;
+		core-supply = <&pm8994_l12>;
 		qcom,vdd-voltage-level = <0 925000 925000>;
 		qcom,vbus-valid-override;
 
@@ -2460,6 +2595,8 @@
 		qcom,use-sw-aes-xts-algo;
 		qcom,use-sw-aes-ccm-algo;
 		qcom,use-sw-ahash-algo;
+		qcom,use-sw-hmac-algo;
+		qcom,use-sw-aead-algo;
 	};
 
 	qcom_cedev: qcedev@660000 {
@@ -2837,8 +2974,8 @@
 	qcom,msm-core@70000 {
 		compatible = "qcom,apss-core-ea";
 		reg = <0x70000 0x1000>;
-		qcom,low-hyst-temp = <10>;
-		qcom,high-hyst-temp = <5>;
+		qcom,low-hyst-temp = <100>;
+		qcom,high-hyst-temp = <100>;
 		qcom,polling-interval = <50>;
 
 		ea0: ea0 {
@@ -3254,6 +3391,57 @@
 		};
 	};
 
+	qcom,msm-dai-tdm-sec-tx {
+		compatible = "qcom,msm-dai-tdm";
+		qcom,msm-cpudai-tdm-group-id = <37137>;
+		qcom,msm-cpudai-tdm-group-num-ports = <4>;
+		qcom,msm-cpudai-tdm-group-port-id = <36881 36883 36885 36887>;
+		qcom,msm-cpudai-tdm-clk-rate = <0>;
+		dai_sec_tdm_tx_0: qcom,msm-dai-q6-tdm-sec-tx-0 {
+			compatible = "qcom,msm-dai-q6-tdm";
+			qcom,msm-cpudai-tdm-dev-id = <36881>;
+			qcom,msm-cpudai-tdm-sync-mode = <1>;
+			qcom,msm-cpudai-tdm-sync-src = <0>;
+			qcom,msm-cpudai-tdm-data-out = <0>;
+			qcom,msm-cpudai-tdm-invert-sync = <0>;
+			qcom,msm-cpudai-tdm-data-delay = <0>;
+			qcom,msm-cpudai-tdm-data-align = <0>;
+		};
+
+		dai_sec_tdm_tx_1: qcom,msm-dai-q6-tdm-sec-tx-1 {
+			compatible = "qcom,msm-dai-q6-tdm";
+			qcom,msm-cpudai-tdm-dev-id = <36883>;
+			qcom,msm-cpudai-tdm-sync-mode = <1>;
+			qcom,msm-cpudai-tdm-sync-src = <0>;
+			qcom,msm-cpudai-tdm-data-out = <0>;
+			qcom,msm-cpudai-tdm-invert-sync = <0>;
+			qcom,msm-cpudai-tdm-data-delay = <0>;
+			qcom,msm-cpudai-tdm-data-align = <0>;
+		};
+
+		dai_sec_tdm_tx_2: qcom,msm-dai-q6-tdm-sec-tx-2 {
+			compatible = "qcom,msm-dai-q6-tdm";
+			qcom,msm-cpudai-tdm-dev-id = <36885>;
+			qcom,msm-cpudai-tdm-sync-mode = <1>;
+			qcom,msm-cpudai-tdm-sync-src = <0>;
+			qcom,msm-cpudai-tdm-data-out = <0>;
+			qcom,msm-cpudai-tdm-invert-sync = <0>;
+			qcom,msm-cpudai-tdm-data-delay = <0>;
+			qcom,msm-cpudai-tdm-data-align = <0>;
+		};
+
+		dai_sec_tdm_tx_3: qcom,msm-dai-q6-tdm-sec-tx-3 {
+			compatible = "qcom,msm-dai-q6-tdm";
+			qcom,msm-cpudai-tdm-dev-id = <36887>;
+			qcom,msm-cpudai-tdm-sync-mode = <1>;
+			qcom,msm-cpudai-tdm-sync-src = <0>;
+			qcom,msm-cpudai-tdm-data-out = <0>;
+			qcom,msm-cpudai-tdm-invert-sync = <0>;
+			qcom,msm-cpudai-tdm-data-delay = <0>;
+			qcom,msm-cpudai-tdm-data-align = <0>;
+		};
+	};
+
 	qcom,msm-dai-tdm-tert-rx {
 		compatible = "qcom,msm-dai-tdm";
 		qcom,msm-cpudai-tdm-group-id = <37152>;
@@ -3473,6 +3661,11 @@
 
 	qcom,msm-adsprpc-mem {
 		compatible = "qcom,msm-adsprpc-mem-region";
+		memory-region = <&adsp_mem>;
+	};
+
+	qcom,msm-mdsprpc-mem {
+		compatible = "qcom,msm-mdsprpc-mem-region";
 		memory-region = <&adsp_mem>;
 	};
 
@@ -3765,6 +3958,14 @@
 		clock-names = "gpu_clk";
 		clocks = <&clock_gpu clk_gpu_gx_gfx3d_clk>;
 	};
+
+	pps {
+		compatible = "pps-gpio";
+		pinctrl-names = "default";
+		pinctrl-0 = <&pinctrl_pps>;
+		gpios = <&tlmm 128 0>;
+		status = "okay";
+	};
 };
 
 &gdsc_venus {
@@ -3931,3 +4132,12 @@
 #include "msm8996-pm.dtsi"
 #include "msm-arm-smmu-8996.dtsi"
 #include "msm8996-vidc.dtsi"
+
+//[B]fix build error at Pre_ES4 migration
+/delete-node/ &spi_12;
+&soc {
+/delete-node/ pps;
+};
+
+
+//[E]fix build error

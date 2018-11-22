@@ -126,7 +126,7 @@ static ssize_t lcd_backlight_ctrl_store(struct device *dev,
 static ssize_t lcd_store(struct device *dev, struct device_attribute *attr,
 		const char *buf, size_t count)
 {
-	int tun_lcd_t[128];
+	unsigned int tun_lcd_t[128];
 	if (!count)
 		return -EINVAL;
 	memset(tun_lcd_t,0,128*sizeof(int));
@@ -158,7 +158,7 @@ static ssize_t lcd_store(struct device *dev, struct device_attribute *attr,
 static ssize_t lcd_show(struct device *dev, struct device_attribute *attr,
 		char *buf)
 {
-	int tun_lcd_t[128];
+	unsigned int tun_lcd_t[128];
 	int i;
 	pr_info("%s:cmd_num=%d\n",__func__,cmd_num);
 	lcd_pdata->get_values(tun_lcd_t);
@@ -179,7 +179,7 @@ static ssize_t lcd_ctrl_store(struct device *dev,
 	if(!count)
 		return reg_num= 0;
 
-	sscanf(buf, "%x", &reg_num);
+	sscanf(buf, "%d", &reg_num);
 	pr_info("reg_num=%x\n",reg_num);
    return count;
 }

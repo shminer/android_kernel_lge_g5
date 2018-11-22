@@ -131,7 +131,7 @@ int xfrm_output_resume(struct sk_buff *skb, int err)
 
 #ifdef CONFIG_XFRM_FRAG_ESP_BEFORE_TUNNEL_ENC
         if (skb->protocol == htons(ETH_P_IPV6) ||
-                (skb->protocol == htons(ETH_P_IP) && ip_hdr(skb) != NULL && ip_hdr(skb)->protocol == IPPROTO_UDP)) {
+                (skb->protocol == htons(ETH_P_IP) && skb->sk != NULL && skb->sk->sk_protocol != IPPROTO_TCP)) {
             struct sock *sk = skb->sk;
             if (skb_dst(skb)->next != NULL && skb_dst(skb)->next->xfrm != NULL) {
                 if (!(skb_dst(skb)->next->xfrm->outer_mode->flags & XFRM_MODE_FLAG_TUNNEL)) {

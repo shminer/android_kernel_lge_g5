@@ -133,7 +133,7 @@ static ssize_t                              \
 lgeusb_ ## field ## _store(struct device *dev, struct device_attribute *attr, \
 		const char *buf, size_t size)                   \
 {                                   \
-	int value;                              \
+	unsigned int value;                              \
 	struct lgeusb_dev *usbdev = _lgeusb_dev; \
 	if (sscanf(buf, format_string, &value) == 1) {          \
 		usbdev->field = value;              \
@@ -475,6 +475,9 @@ int user_diag_enable = DIAG_DISABLE;
 typedef struct {
 	int hw_rev;
 	char model_name[10];
+#ifdef CONFIG_MACH_MSM8996_LUCYE
+	char sw_version[64];
+#endif
 	// LGE_ONE_BINARY ???
 	char diag_enable;
 } lge_hw_smem_id0_type;

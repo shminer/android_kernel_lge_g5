@@ -220,7 +220,8 @@ static ssize_t pn547_dev_read(struct file *filp, char __user *buf,
 
     if (ret == -ERESTARTSYS) {
         //pr_err("%s: pass wait_event_interruptible by signal. Skip!\n", __func__); // for debug
-        return -0xFF;
+        //return -0xFF;
+        return -ERESTARTSYS;
     }
     else {
         //pr_err("%s: pass wait_event_interruptible by condition (%d)\n", __func__, gpio_get_value(pn547_dev->irq_gpio)); // for debug

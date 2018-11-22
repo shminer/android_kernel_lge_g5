@@ -18,10 +18,10 @@
 #ifndef __LGE_POWER_SYSFS_H_
 #define __LGE_POWER_SYSFS_H_
 
-#ifdef CONFIG_MACH_MSM8996_ELSA
-#define PWR_SYSFS_GROUPS_NUM 10
+#if defined (CONFIG_MACH_MSM8996_ELSA) || defined (CONFIG_MACH_MSM8996_LUCYE) || defined (CONFIG_MACH_MSM8996_ANNA)
+#define PWR_SYSFS_GROUPS_NUM 11
 #else
-#define PWR_SYSFS_GROUPS_NUM 9
+#define PWR_SYSFS_GROUPS_NUM 10
 #endif
 #define PWR_SYSFS_MANDATORY_MAX_NUM 5
 
@@ -44,25 +44,26 @@ const char *group_names[PWR_SYSFS_GROUPS_NUM] = {
 	"battery",
 	"charger",
 	"lcd",
-#ifdef CONFIG_MACH_MSM8996_ELSA
+#if defined (CONFIG_MACH_MSM8996_ELSA) || defined (CONFIG_MACH_MSM8996_LUCYE) || defined (CONFIG_MACH_MSM8996_ANNA)
 	"lcd_ex",
 #endif
 	"key_led",
 	"cpu",
 	"gpu",
 	"platform",
-	"testmode"
+	"testmode",
+	"psfeature"
 };
 
 /* Set sysfs node for non-using DT */
-#ifdef CONFIG_MACH_MSM8996_ELSA
+#if defined (CONFIG_MACH_MSM8996_ELSA) || defined (CONFIG_MACH_MSM8996_LUCYE) || defined (CONFIG_MACH_MSM8996_ANNA)
 #define PWR_SYSFS_PATH_NUM 54
 #else
 #define PWR_SYSFS_PATH_NUM 51
 #endif
 const char *default_pwr_sysfs_path[PWR_SYSFS_PATH_NUM][3] = {
 	/* ADC/MPP */
-#ifdef CONFIG_MACH_MSM8996_ELSA
+#if defined (CONFIG_MACH_MSM8996_ELSA) || defined (CONFIG_MACH_MSM8996_LUCYE) || defined (CONFIG_MACH_MSM8996_ANNA)
 	{"adc", "thermal", "/sys/class/thermal/"},
 	{"adc", "xo_therm", "/sys/class/hwmon/hwmon1/device/xo_therm"},
 	{"adc", "batt_therm", "/sys/class/power_supply/battery/temp"},
@@ -86,7 +87,7 @@ const char *default_pwr_sysfs_path[PWR_SYSFS_PATH_NUM][3] = {
 	{"adc", "usb_id", "/sys/class/hwmon/hwmon0/device/usb_id_lv"},
 #endif
 	/* Battery */
-#ifdef CONFIG_MACH_MSM8996_ELSA
+#if defined (CONFIG_MACH_MSM8996_ELSA) || defined (CONFIG_MACH_MSM8996_LUCYE) || defined (CONFIG_MACH_MSM8996_ANNA)
 	{"battery", "capacity", "/sys/class/power_supply/battery/capacity"},
 	{"battery", "health", "/sys/class/power_supply/battery/health"},
 	{"battery", "present", "/sys/class/power_supply/battery/present"},
@@ -106,7 +107,7 @@ const char *default_pwr_sysfs_path[PWR_SYSFS_PATH_NUM][3] = {
 	{"battery", "voltage_now", "/sys/class/power_supply/battery/voltage_now"},
 #endif
 	/* Charger */
-#ifdef CONFIG_MACH_MSM8996_ELSA
+#if defined (CONFIG_MACH_MSM8996_ELSA) || defined (CONFIG_MACH_MSM8996_LUCYE) || defined (CONFIG_MACH_MSM8996_ANNA)
 	{"charger", "ac_online", "/sys/class/power_supply/dc/present"},
 	{"charger", "usb_online", "/sys/class/power_supply/usb/online"},
 	{"charger", "present", "/sys/class/power_supply/usb/present"},
@@ -141,7 +142,7 @@ const char *default_pwr_sysfs_path[PWR_SYSFS_PATH_NUM][3] = {
 	/* LCD Backlight */
 	{"lcd", "brightness", "/sys/class/leds/lcd-backlight/brightness"},
 	{"lcd", "max_brightness", "/sys/class/leds/lcd-backlight/max_brightness"},
-#ifdef CONFIG_MACH_MSM8996_ELSA
+#if defined (CONFIG_MACH_MSM8996_ELSA) || defined (CONFIG_MACH_MSM8996_LUCYE) || defined (CONFIG_MACH_MSM8996_ANNA)
 	{"lcd_ex", "brightness", "/sys/class/leds/lcd-backlight-ex/brightness"},
 	{"lcd_ex", "max_brightness", "/sys/class/leds/lcd-backlight-ex/max_brightness"},
 #endif

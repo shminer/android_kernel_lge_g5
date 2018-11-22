@@ -13,7 +13,7 @@
  * for more details.
 
 
- *  Copyright (C) 2009-2014 Broadcom Corporation
+ *  Copyright (C) 2009-2017 Broadcom Corporation
  */
 
 
@@ -52,56 +52,17 @@
 #include "brcm_hci_uart.h"
 #include "../include/v4l2_target.h"
 #include "../include/fm.h"
+#include "../include/ant.h"
 #include "../include/v4l2_logs.h"
 
-static int brcm_open(struct hci_uart *hu);
-static int brcm_flush(struct hci_uart *hu);
-static int brcm_close(struct hci_uart *hu);
-static int brcm_enqueue(struct hci_uart *hu, struct sk_buff *skb);
-static int brcm_recv_int(struct hci_uart *hu, void *data, int count);
-static int brcm_recv(struct hci_uart *hu, void *data, int count);
-static struct sk_buff *brcm_dequeue(struct hci_uart *hu);
-static const struct hci_uart_proto brcmp = {
-    .id      = HCI_UART_BRCM,
-    .open    = brcm_open,
-    .close   = brcm_close,
-    .recv    = brcm_recv,
-    .recv_int= brcm_recv_int,
-    .enqueue = brcm_enqueue,
-    .dequeue = brcm_dequeue,
-    .flush   = brcm_flush,
-};
 
 /*****************************************************************************
 **  Constants & Macros for dynamic logging
 *****************************************************************************/
-#ifndef BTLDISC_DEBUG
-#define BTLDISC_DEBUG TRUE
-#endif
-
-/* set this module parameter to enable debug info */
-extern int ldisc_dbg_param;
-
-#if (BTLDISC_DEBUG)
-#define BRCM_HCI_DBG(flag, fmt, arg...) \
-            do { \
-                if (ldisc_dbg_param & flag) \
-                    printk(KERN_DEBUG "(brcmhci):%s:%d  "fmt"\n" , \
-                                               __func__, __LINE__, ## arg); \
-            } while(0)
-#else
-#define BRCM_HCI_DBG(flag,fmt, arg...)
-#endif
-
-#define BRCM_HCI_ERR(fmt, arg...)  printk(KERN_ERR "(brcmhci):%s:%d  "fmt"\n" , \
-                                           __func__, __LINE__,## arg)
-
-
-#if V4L2_SNOOP_ENABLE
-/* parameter to enable HCI snooping */
-extern int ldisc_snoop_enable_param;
-#endif
-
+extern struct sock *nl_sk_hcisnoop;
+//BT_S : [CONBT-4509][CSP#1128901] Add the synchronized operation for cmd_rcvd
+extern struct mutex cmd_credit;
+//BT_E : [CONBT-4509][CSP#1128901] Add the synchronized operation for cmd_rcvd
 
 /*****************************************************************************
 **  Constants & Macros
@@ -120,6 +81,7 @@ extern int ldisc_snoop_enable_param;
 #define HCIBRCM_W4_SCO_HDR     3
 #define HCIBRCM_W4_DATA        4
 #define FMBRCM_W4_EVENT_HDR    5
+#define ANTBRCM_W4_EVENT_HDR   6
 
 #define TIMER_PERIOD 100    /* 100 ms */
 #define HOST_CONTROLLER_IDLE_TSH 4000  /* 4 s */
@@ -127,15 +89,6 @@ extern int ldisc_snoop_enable_param;
 #define RESP_BUFF_SIZE 30
 
 #define BT_WAKE  22
-
-
-/* Message event ID passed from Host/Controller lib to stack */
-#define MSG_HC_TO_STACK_HCI_ERR        0x1300 /* eq. BT_EVT_TO_BTU_HCIT_ERR */
-#define MSG_HC_TO_STACK_HCI_ACL        0x1100 /* eq. BT_EVT_TO_BTU_HCI_ACL */
-#define MSG_HC_TO_STACK_HCI_SCO        0x1200 /* eq. BT_EVT_TO_BTU_HCI_SCO */
-#define MSG_HC_TO_STACK_HCI_EVT        0x1000 /* eq. BT_EVT_TO_BTU_HCI_EVT */
-#define MSG_HC_TO_FM_HCI_EVT           0x3000 /* Response code for FM HCI event */
-#define MSG_HC_TO_STACK_L2C_SEG_XMIT   0x1900 /*eq. BT_EVT_TO_BTU_L2C_SEG_XMIT*/
 
 #undef CONFIG_SERIAL_MSM_HS
 
@@ -145,6 +98,26 @@ enum hcibrcm_states_e {
     HCIBRCM_ASLEEP_TO_AWAKE,
     HCIBRCM_AWAKE,
     HCIBRCM_AWAKE_TO_ASLEEP
+};
+
+/* Function forward declarations */
+static int brcm_open(struct hci_uart *hu);
+static int brcm_close(struct hci_uart *hu);
+static int brcm_recv(struct hci_uart *hu, void *data, int count);
+static int brcm_recv_int(struct hci_uart *hu, void *data, int count);
+static int brcm_enqueue(struct hci_uart *hu, struct sk_buff *skb);
+static struct sk_buff *brcm_dequeue(struct hci_uart *hu);
+static int brcm_flush(struct hci_uart *hu);
+
+struct hci_uart_proto brcmp = {
+    .id      = HCI_UART_BRCM,
+    .open    = brcm_open,
+    .close   = brcm_close,
+    .recv    = brcm_recv,
+    .recv_int= brcm_recv_int,
+    .enqueue = brcm_enqueue,
+    .dequeue = brcm_dequeue,
+    .flush   = brcm_flush,
 };
 
 
@@ -209,6 +182,12 @@ void brcm_hci_process_frametype( register int frame_type,
     case HCI_SCODATA_PKT:
         hci_hdr->event = MSG_HC_TO_STACK_HCI_SCO;
         break;
+    case FM_CH8_PKT:
+        hci_hdr->event = MSG_HC_TO_FM_HCI_EVT;
+        break;
+    case ANT_PKT:
+        hci_hdr->event = MSG_HC_TO_ANT_HCI_EVT;
+        break;
     default:
         BRCM_HCI_DBG(V4L2_DBG_RX, "%s received frame_type UNKNOWN", __func__);
         hci_hdr->event = MSG_HC_TO_STACK_HCI_ERR;
@@ -261,7 +240,7 @@ static int brcm_open(struct hci_uart *hu)
     hu->priv = brcm;
 
     BRCM_HCI_DBG(V4L2_DBG_INIT, "hu %p", hu);
-    BRCM_HCI_DBG(V4L2_DBG_INIT, "sizeof(hu->hdr_data) = %d", sizeof(hu->hdr_data));
+    BRCM_HCI_DBG(V4L2_DBG_INIT, "sizeof(hu->hdr_data) = %zu", sizeof(hu->hdr_data));
     return 0;
 }
 
@@ -277,6 +256,12 @@ static int brcm_open(struct hci_uart *hu)
 static int brcm_flush(struct hci_uart *hu)
 {
     struct brcm_struct *brcm = hu->priv;
+
+    if (brcm == NULL)
+    {
+        BRCM_HCI_ERR("hu->priv is NULL");
+        return -EINVAL;
+    }
 
     BRCM_HCI_DBG(V4L2_DBG_INIT, "hu %p", hu);
 
@@ -300,6 +285,12 @@ static int brcm_flush(struct hci_uart *hu)
 static int brcm_close(struct hci_uart *hu)
 {
     struct brcm_struct *brcm = hu->priv;
+
+    if (brcm == NULL)
+    {
+        BRCM_HCI_ERR("hu->priv is NULL");
+        return -EINVAL;
+    }
 
     BRCM_HCI_DBG(V4L2_DBG_INIT, "hu %p", hu);
 
@@ -336,6 +327,13 @@ static int brcm_enqueue(struct hci_uart *hu, struct sk_buff *skb)
 {
     struct brcm_struct *brcm = hu->priv;
     unsigned long lock_flags;
+
+    if (brcm == NULL)
+    {
+        BRCM_HCI_ERR("hu->priv is NULL");
+        return -EINVAL;
+    }
+
     BRCM_HCI_DBG(V4L2_DBG_TX, "hu %p skb %p", hu, skb);
 
     spin_lock_irqsave(&hu->lock, lock_flags);
@@ -343,6 +341,7 @@ static int brcm_enqueue(struct hci_uart *hu, struct sk_buff *skb)
     spin_unlock_irqrestore(&hu->lock, lock_flags);
     return 0;
 }
+
 /*****************************************************************************
 **
 ** Function - brcm_recv_int()
@@ -358,15 +357,19 @@ static int brcm_recv_int(struct hci_uart *hu, void *data, int count)
     ptr = (char *)data;
 
     BRCM_HCI_DBG(V4L2_DBG_RX, "%s hu = %p hu->cmd_rcvd = %p count =%d",__func__,hu,
-                                                         hu->cmd_rcvd, count);
+                                                         &hu->cmd_rcvd, count);
 
     if (ptr!= NULL && (count>2) && ptr[0]==0x04 && ptr[1]==0x0E) {
         BRCM_HCI_DBG(V4L2_DBG_RX, "brcm_recv_int, sending cmd_rcvd");
         memcpy(hu->priv->resp_buffer, ptr,
                    (count<RESP_BUFF_SIZE)?count:RESP_BUFF_SIZE);
-        complete_all(&hu->cmd_rcvd);
+//BT_S : [CONBT-4509][CSP#1128901] Add the synchronized operation for cmd_rcvd
+        if(mutex_is_locked(&cmd_credit)) {
+            complete_all(&hu->cmd_rcvd);
+        }
+//BT_E : [CONBT-4509][CSP#1128901] Add the synchronized operation for cmd_rcvd
 #if V4L2_SNOOP_ENABLE
-        if(ldisc_snoop_enable_param != 0)
+        if(nl_sk_hcisnoop)
         {
             /* forward to hcisnoop */
             BRCM_HCI_DBG(V4L2_DBG_RX, "capturing internal command response");
@@ -401,6 +404,12 @@ static int brcm_recv(struct hci_uart *hu, void *data, int count)
     static enum proto_type protoid = PROTO_SH_MAX;
     received_bytes = 0;
 
+    if (brcm == NULL)
+    {
+        BRCM_HCI_ERR("hu->priv is NULL");
+        return -EINVAL;
+    }
+
     BRCM_HCI_DBG(V4L2_DBG_RX, "hu %p count %d rx_state %ld rx_count %ld", hu,
                        count, brcm->rx_state, brcm->rx_count);
 
@@ -411,7 +420,7 @@ static int brcm_recv(struct hci_uart *hu, void *data, int count)
             memcpy(skb_put(brcm->rx_skb, len), ptr, len);
             brcm->rx_count -= len; count -= len; ptr += len;
             received_bytes += len;
-            BRCM_HCI_DBG(V4L2_DBG_RX, "brcm_recv received_bytes= %d\n", \
+            BRCM_HCI_DBG(V4L2_DBG_RX, "brcm_recv received_bytes= %d", \
                                                                 received_bytes);
             if (brcm->rx_count)
                 continue;
@@ -425,13 +434,17 @@ static int brcm_recv(struct hci_uart *hu, void *data, int count)
                     if (unlikely(brcm->rx_skb->data[0]==0x04
                         && brcm->rx_skb->data[4]==0x09
                         && brcm->rx_skb->data[5]==0x10 )) {
-                        brcm->resp_buffer[0] = brcm->rx_skb->cb;
+                        brcm->resp_buffer[0] = brcm->rx_skb->cb[0];
                         memcpy(brcm->resp_buffer, brcm->rx_skb->data,
                                                            RESP_BUFF_SIZE);
                     }
-                    complete_all(&hu->cmd_rcvd);
+//BT_S : [CONBT-4509][CSP#1128901] Add the synchronized operation for cmd_rcvd
+                    if(mutex_is_locked(&cmd_credit)) {
+                        complete_all(&hu->cmd_rcvd);
+                    }
+//BT_E : [CONBT-4509][CSP#1128901] Add the synchronized operation for cmd_rcvd
 #if V4L2_SNOOP_ENABLE
-                    if(ldisc_snoop_enable_param != 0)
+                    if(nl_sk_hcisnoop)
                     {
                         /* forward internal command response to hcisnoop */
                         type = sh_ldisc_cb(brcm->rx_skb)->pkt_type;
@@ -455,53 +468,48 @@ static int brcm_recv(struct hci_uart *hu, void *data, int count)
                     /*In normal case all the HCI events gets routed to BT protocol driver*/
                     /*But in this case opcode FC61 sent by FM driver hence the response*/
                     /* has to go to FM driver so modifying the  type and protoid*/
-//BRCM CSP[978768] : FM radio does not work
-// org
-//                    if (unlikely(brcm->rx_skb->data[0]==0x0e
-//                        && brcm->rx_skb->data[3]==0x61
-//                        && brcm->rx_skb->data[4]==0xFC ))
-// new
-                    if ((brcm->rx_skb->data[0]==0x0e
+                    if (hu->is_registered[PROTO_SH_FM]  && ((brcm->rx_skb->data[0]==0x0e
                         && (brcm->rx_skb->data[3]==0x61 || brcm->rx_skb->data[3]==0x15)
                         && brcm->rx_skb->data[4]==0xFC ) ||
                         (brcm->rx_skb->data[0]==0xFF
-                        && brcm->rx_skb->data[2]==0x08))
-//BRCM CSP[978768]
+                        && brcm->rx_skb->data[2]==0x08)))
                     {
                         type = FM_CH8_PKT;
                         sh_ldisc_cb(brcm->rx_skb)->pkt_type = type;
                         protoid = PROTO_SH_FM;
                     }
+#ifdef V4L2_ANT
+                    else if (unlikely(brcm->rx_skb->data[0]==0x0e
+                        && brcm->rx_skb->data[3]==0xec
+                        && brcm->rx_skb->data[4]==0xFC ))
+                    {
+                        type = ANT_PKT;
+                        sh_ldisc_cb(brcm->rx_skb)->pkt_type = type;
+                        protoid = PROTO_SH_ANT;
+                        BRCM_HCI_DBG(V4L2_DBG_RX, "brcm_recv ANT cmd complete evt");
+                    }
+                    else if (unlikely(brcm->rx_skb->data[0]==0xff
+                        && brcm->rx_skb->data[2]==0x2d ))
+                    {
+                        type = ANT_PKT;
+                        sh_ldisc_cb(brcm->rx_skb)->pkt_type = type;
+                        protoid = PROTO_SH_ANT;
+                        BRCM_HCI_DBG(V4L2_DBG_RX, "brcm_recv ANT evt");
+                    }
+#endif
                     else
                     {
                         type = sh_ldisc_cb(brcm->rx_skb)->pkt_type;
                         BRCM_HCI_DBG(V4L2_DBG_RX, "brcm_recv type 0x%x",type);
                     }
-                    /* For BT packet */
-                    if(type == HCI_EVENT_PKT || type == HCI_ACLDATA_PKT ||
-                                                        type == HCI_SCODATA_PKT)
-                    {
-                        /* Add header to frame only in case of BT packet */
-                        brcm_hci_process_frametype(type,hu,brcm->rx_skb,
-                                                                received_bytes);
 
-                    }
 #if V4L2_SNOOP_ENABLE
-                    else { /* For FM packet */
-                        BRCM_HCI_DBG(V4L2_DBG_RX,"for snoop, response event received, type:%d", type);
-                        if(ldisc_snoop_enable_param != 0)
-                        {
-                            /* Add header for sending pkt to snoop. Remove header
-                                                   before sending to fmdrv */
-                            type = sh_ldisc_cb(brcm->rx_skb)->pkt_type;
-                            hci_hdr = hu->hdr_data;
-                            hci_hdr->offset = 0;
-                            hci_hdr->layer_specific = 0;
-                            hci_hdr->len = brcm->rx_skb->len;
-                            hci_hdr->event = MSG_HC_TO_FM_HCI_EVT;
-                            memcpy(skb_push(brcm->rx_skb, sizeof(hc_bt_hdr)),
-                                hci_hdr, sizeof(hc_bt_hdr) );
-                        }
+                    if(nl_sk_hcisnoop)
+                    {
+                        /* Add header for sending pkt to snoop. Remove header
+                                               before sending to each driver */
+                        brcm_hci_process_frametype(type,hu,brcm->rx_skb,
+                                                                    received_bytes);
                     }
 #endif
                     BRCM_HCI_DBG(V4L2_DBG_RX, "routing frame to registered "\
@@ -515,7 +523,7 @@ static int brcm_recv(struct hci_uart *hu, void *data, int count)
 
             case HCIBRCM_W4_EVENT_HDR:
                 eh = hci_event_hdr(brcm->rx_skb);
-                BRCM_HCI_DBG(V4L2_DBG_RX, "EVT header");
+                BRCM_HCI_DBG(V4L2_DBG_RX, "EVT header: plen %d", eh->plen);
                 brcm_check_data_len(brcm, hu, protoid, eh->plen);
                 continue;
 
@@ -541,7 +549,7 @@ static int brcm_recv(struct hci_uart *hu, void *data, int count)
 
             }
         }
-        BRCM_HCI_DBG(V4L2_DBG_RX, "*ptr =0x%0x",*ptr);
+        BRCM_HCI_DBG(V4L2_DBG_RX, "*ptr =%d",*ptr);
 
         /* HCIBRCM_W4_PACKET_TYPE */
         switch (*ptr) {
@@ -552,7 +560,6 @@ static int brcm_recv(struct hci_uart *hu, void *data, int count)
             type = HCI_EVENT_PKT;
             protoid = PROTO_SH_BT;
             break;
-
         case HCI_ACLDATA_PKT:
             BRCM_HCI_DBG(V4L2_DBG_RX, "ACL packet");
             brcm->rx_state = HCIBRCM_W4_ACL_HDR;
@@ -560,7 +567,6 @@ static int brcm_recv(struct hci_uart *hu, void *data, int count)
             type = HCI_ACLDATA_PKT;
             protoid = PROTO_SH_BT;
             break;
-
         case HCI_SCODATA_PKT:
             BRCM_HCI_DBG(V4L2_DBG_RX, "SCO packet");
             brcm->rx_state = HCIBRCM_W4_SCO_HDR;
@@ -568,7 +574,6 @@ static int brcm_recv(struct hci_uart *hu, void *data, int count)
             type = HCI_SCODATA_PKT;
             protoid = PROTO_SH_BT;
             break;
-
         /* Channel 8(FM) packet */
         case FM_CH8_PKT:
             BRCM_HCI_DBG(V4L2_DBG_RX,"FM CH8 packet");
@@ -577,7 +582,6 @@ static int brcm_recv(struct hci_uart *hu, void *data, int count)
             brcm->rx_count = FM_EVENT_HDR_SIZE;
             protoid = PROTO_SH_FM;
             break;
-
         default:
             BRCM_HCI_DBG(V4L2_DBG_RX, "Unknown HCI packet type %2.2x",\
                                                                    (__u8)*ptr);
@@ -593,6 +597,9 @@ static int brcm_recv(struct hci_uart *hu, void *data, int count)
         {
             case PROTO_SH_BT:
             case PROTO_SH_FM:
+#ifdef V4L2_ANT
+            case PROTO_SH_ANT:
+#endif
                 /* Allocate new packet to hold received data */
                 brcm->rx_skb = alloc_skb(HCI_MAX_FRAME_SIZE, GFP_ATOMIC);
                 if(brcm->rx_skb)
@@ -629,12 +636,11 @@ static int brcm_recv(struct hci_uart *hu, void *data, int count)
 *****************************************************************************/
 static struct sk_buff *brcm_dequeue(struct hci_uart *hu)
 {
-
     struct brcm_struct *brcm = hu->priv;
 
     if (brcm == NULL)
     {
-        printk(KERN_DEBUG "(brcmhci)brcm_dequeue - hu->priv is NULL\n");
+        BRCM_HCI_ERR("hu->priv is NULL");
         return NULL;
     }
 

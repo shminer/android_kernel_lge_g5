@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2013-2015 TRUSTONIC LIMITED
+ * Copyright (c) 2013-2017 TRUSTONIC LIMITED
  * All Rights Reserved.
  *
  * This program is free software; you can redistribute it and/or
@@ -18,6 +18,11 @@
 #include <linux/cpu.h>
 #include <linux/moduleparam.h>
 #include <linux/debugfs.h>
+#include <linux/sched.h>	/* local_clock */
+#include <linux/version.h>
+#if KERNEL_VERSION(4, 11, 0) <= LINUX_VERSION_CODE
+#include <linux/sched/clock.h>	/* local_clock */
+#endif
 #include <linux/uaccess.h>
 
 #include "public/mc_user.h"
@@ -212,20 +217,20 @@ static void mc_cpu_offline(int cpu)
 	int i;
 
 	if (active_cpu != cpu) {
-		mc_dev_devel("not active CPU, no action taken\n");
+		mc_dev_devel("not active CPU, no action taken");
 		return;
 	}
 
 	/* Chose the first online CPU and switch! */
 	for_each_online_cpu(i) {
 		if (cpu != i) {
-			mc_dev_devel("CPU %d is dying, switching to %d\n",
-				     cpu, i);
+			mc_dev_info("CPU %d is dying, switching to %d",
+				    cpu, i);
 			mc_switch_core(i);
 			break;
 		}
 
-		mc_dev_devel("Skipping CPU %d\n", cpu);
+		mc_dev_devel("Skipping CPU %d", cpu);
 	}
 }
 
@@ -237,12 +242,12 @@ static int mobicore_cpu_callback(struct notifier_block *nfb,
 	switch (action) {
 	case CPU_DOWN_PREPARE:
 	case CPU_DOWN_PREPARE_FROZEN:
-		mc_dev_info("Cpu %d is going to die\n", cpu);
+		mc_dev_devel("Cpu %d is going to die", cpu);
 		mc_cpu_offline(cpu);
 		break;
 	case CPU_DEAD:
 	case CPU_DEAD_FROZEN:
-		mc_dev_info("Cpu %d is dead\n", cpu);
+		mc_dev_devel("Cpu %d is dead", cpu);
 		break;
 	}
 	return NOTIFY_OK;
@@ -263,13 +268,13 @@ static cpumask_t mc_exec_core_switch(union mc_fc_generic *mc_fc_generic)
 	mc_fc_generic->as_in.param[0] = cpu_id[mc_fc_generic->as_in.param[0]];
 
 	if (_smc(mc_fc_generic) != 0 || mc_fc_generic->as_out.ret != 0) {
-		mc_dev_devel("CoreSwap failed %d -> %d (cpu %d still active)\n",
+		mc_dev_devel("CoreSwap failed %d -> %d (cpu %d still active)",
 			     raw_smp_processor_id(),
 			     mc_fc_generic->as_in.param[0],
 			     raw_smp_processor_id());
 	} else {
 		active_cpu = new_cpu;
-		mc_dev_devel("CoreSwap ok %d -> %d\n",
+		mc_dev_devel("CoreSwap ok %d -> %d",
 			     raw_smp_processor_id(), active_cpu);
 	}
 	cpumask_clear(&cpu);
@@ -287,10 +292,10 @@ static ssize_t debug_coreswitch_write(struct file *file,
 	if (buffer_len < 1)
 		return -EINVAL;
 
-	if (kstrtouint_from_user(buffer, buffer_len, 0, &new_cpu))
+	if (kstrtoint_from_user(buffer, buffer_len, 0, &new_cpu))
 		return -EINVAL;
 
-	mc_dev_devel("Set active cpu to %d\n", new_cpu);
+	mc_dev_devel("Set active cpu to %d", new_cpu);
 	mc_switch_core(new_cpu);
 	return buffer_len;
 }
@@ -324,7 +329,7 @@ static void fastcall_work_func(struct work_struct *work)
 #ifdef MC_FASTCALL_WORKER_THREAD
 		cpumask_t new_msk = mc_exec_core_switch(mc_fc_generic);
 
-		set_cpus_allowed(fastcall_thread, new_msk);
+		set_cpus_allowed_ptr(fastcall_thread, &new_msk);
 #else
 		mc_exec_core_switch(mc_fc_generic);
 #endif
@@ -343,11 +348,19 @@ static bool mc_fastcall(void *data)
 		.data = data,
 	};
 
+#if KERNEL_VERSION(4, 9, 0) <= LINUX_VERSION_CODE
+	if (!kthread_queue_work(&fastcall_worker, &fc_work.work))
+		return false;
+
+	/* If work is queued or executing, wait for it to finish execution */
+	kthread_flush_work(&fc_work.work);
+#else
 	if (!queue_kthread_work(&fastcall_worker, &fc_work.work))
 		return false;
 
 	/* If work is queued or executing, wait for it to finish execution */
 	flush_kthread_work(&fc_work.work);
+#endif
 #else
 	struct fastcall_work fc_work = {
 		.data = data,
@@ -364,6 +377,9 @@ static bool mc_fastcall(void *data)
 
 int mc_fastcall_init(void)
 {
+#ifdef MC_FASTCALL_WORKER_THREAD
+	cpumask_t new_msk = CPU_MASK_CPU0;
+#endif
 	int ret = mc_clock_init();
 
 	if (ret)
@@ -371,16 +387,16 @@ int mc_fastcall_init(void)
 
 #ifdef MC_FASTCALL_WORKER_THREAD
 	fastcall_thread = kthread_create(kthread_worker_fn, &fastcall_worker,
-					 "mc_fastcall");
+					 "tee_fastcall");
 	if (IS_ERR(fastcall_thread)) {
 		ret = PTR_ERR(fastcall_thread);
 		fastcall_thread = NULL;
-		mc_dev_err("cannot create fastcall wq: %d\n", ret);
+		mc_dev_err("cannot create fastcall wq: %d", ret);
 		return ret;
 	}
 
 	/* this thread MUST run on CPU 0 at startup */
-	set_cpus_allowed(fastcall_thread, CPU_MASK_CPU0);
+	set_cpus_allowed_ptr(fastcall_thread, &new_msk);
 
 	wake_up_process(fastcall_thread);
 #ifdef TBASE_CORE_SWITCHER
@@ -443,11 +459,11 @@ int mc_fc_init(uintptr_t base_pa, ptrdiff_t off, size_t q_len, size_t buf_len)
 	    (u32)(((base_high & 0xFFFF) << 16) | (q_len & 0xFFFF));
 	/* mcp buffer start/length [16:16] [start, length] */
 	fc_init.as_in.mcp_info = (u32)((off << 16) | (buf_len & 0xFFFF));
-	mc_dev_devel("cmd=%d, base=0x%08x,nq_info=0x%08x, mcp_info=0x%08x\n",
+	mc_dev_devel("cmd=%d, base=0x%08x,nq_info=0x%08x, mcp_info=0x%08x",
 		     fc_init.as_in.cmd, fc_init.as_in.base,
 		     fc_init.as_in.nq_info, fc_init.as_in.mcp_info);
 	mc_fastcall(&fc_init.as_generic);
-	mc_dev_devel("out cmd=0x%08x, ret=0x%08x\n", fc_init.as_out.resp,
+	mc_dev_devel("out cmd=0x%08x, ret=0x%08x", fc_init.as_out.resp,
 		     fc_init.as_out.ret);
 	if (fc_init.as_out.flags & MC_FC_INIT_FLAG_LPAE)
 		g_ctx.f_lpae = true;
@@ -472,7 +488,7 @@ int mc_fc_info(u32 ext_info_id, u32 *state, u32 *ext_info)
 		if (ext_info)
 			*ext_info = 0;
 
-		mc_dev_err("code %d for idx %d\n", ret, ext_info_id);
+		mc_dev_err("code %d for idx %d", ret, ext_info_id);
 	} else {
 		if (state)
 			*state = fc_info.as_out.state;
@@ -509,7 +525,7 @@ int mc_fc_nsiq(void)
 	mc_fastcall(&fc);
 	ret = convert_fc_ret(fc.as_out.ret);
 	if (ret)
-		mc_dev_err("failed: %d\n", ret);
+		mc_dev_err("failed: %d", ret);
 
 	return ret;
 }
@@ -524,7 +540,7 @@ int mc_fc_yield(void)
 	mc_fastcall(&fc);
 	ret = convert_fc_ret(fc.as_out.ret);
 	if (ret)
-		mc_dev_err("failed: %d\n", ret);
+		mc_dev_err("failed: %d", ret);
 
 	return ret;
 }
@@ -590,13 +606,13 @@ int mc_switch_core(int cpu)
 	else
 		fc_switch_core.as_in.core_id = 0;
 
-	mc_dev_devel("<- cmd=0x%08x, core_id=0x%08x\n",
+	mc_dev_devel("<- cmd=0x%08x, core_id=0x%08x",
 		     fc_switch_core.as_in.cmd, fc_switch_core.as_in.core_id);
-	mc_dev_devel("<- cpu=0x%08x, active_cpu=0x%08x\n",
+	mc_dev_devel("<- cpu=0x%08x, active_cpu=0x%08x",
 		     cpu, active_cpu);
 	mc_fastcall(&fc_switch_core.as_generic);
 	ret = convert_fc_ret(fc_switch_core.as_out.ret);
-	mc_dev_devel("exit with %d/0x%08X\n", ret, ret);
+	mc_dev_devel("exit with %d/0x%08X", ret, ret);
 	return ret;
 }
 #endif

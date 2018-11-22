@@ -728,6 +728,8 @@ extern int dhd_os_wake_lock(dhd_pub_t *pub);
 extern int dhd_os_wake_unlock(dhd_pub_t *pub);
 extern int dhd_event_wake_lock(dhd_pub_t *pub);
 extern int dhd_event_wake_unlock(dhd_pub_t *pub);
+extern void dhd_txfl_wake_lock_timeout(dhd_pub_t *pub, int val);
+extern void dhd_txfl_wake_unlock(dhd_pub_t *pub);
 extern int dhd_os_wake_lock_waive(dhd_pub_t *pub);
 extern int dhd_os_wake_lock_restore(dhd_pub_t *pub);
 extern int dhd_os_wake_lock_timeout(dhd_pub_t *pub);
@@ -793,6 +795,18 @@ inline static void MUTEX_UNLOCK_SOFTAP_SET(dhd_pub_t * dhdp)
 			__FUNCTION__, __LINE__); \
 	dhd_event_wake_unlock(pub); \
 	} while (0)
+#define DHD_TXFL_WAKE_LOCK_TIMEOUT(pub, val) \
+	do { \
+		printf("call txfl wake_lock_timeout[%d]: %s %d\n", \
+			val, __FUNCTION__, __LINE__); \
+		dhd_txfl_wake_lock_timeout(pub, val); \
+	} while (0)
+#define DHD_TXFL_WAKE_UNLOCK(pub) \
+	do { \
+		printf("call txfl wake_unlock: %s %d\n", \
+			__FUNCTION__, __LINE__); \
+		dhd_txfl_wake_unlock(pub); \
+	} while (0)
 #define DHD_OS_WAKE_LOCK_TIMEOUT(pub) \
 	do { \
 		printf("call wake_lock_timeout: %s %d\n", \
@@ -846,7 +860,8 @@ inline static void MUTEX_UNLOCK_SOFTAP_SET(dhd_pub_t * dhdp)
 #define DHD_OS_WAKE_UNLOCK(pub)		dhd_os_wake_unlock(pub)
 #define DHD_EVENT_WAKE_LOCK(pub)			dhd_event_wake_lock(pub)
 #define DHD_EVENT_WAKE_UNLOCK(pub)		dhd_event_wake_unlock(pub)
-
+#define DHD_TXFL_WAKE_LOCK_TIMEOUT(pub, val)	dhd_txfl_wake_lock_timeout(pub, val)
+#define DHD_TXFL_WAKE_UNLOCK(pub)		dhd_txfl_wake_unlock(pub)
 #define DHD_OS_WAKE_LOCK_TIMEOUT(pub)		dhd_os_wake_lock_timeout(pub)
 #define DHD_OS_WAKE_LOCK_RX_TIMEOUT_ENABLE(pub, val) \
 	dhd_os_wake_lock_rx_timeout_enable(pub, val)
@@ -893,6 +908,7 @@ inline static void MUTEX_UNLOCK_SOFTAP_SET(dhd_pub_t * dhdp)
 #define DHD_PACKET_TIMEOUT_MS	500
 #define DHD_EVENT_TIMEOUT_MS	1500
 #define SCAN_WAKE_LOCK_TIMEOUT	10000
+#define MAX_TX_TIMEOUT	500
 
 /* Enum for IOCTL recieved status */
 typedef enum dhd_ioctl_recieved_status

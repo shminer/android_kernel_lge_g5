@@ -275,11 +275,11 @@ loop:
 	goto loop;
 
 end_loop:
-	write_unlock(&journal->j_state_lock);
 	del_timer_sync(&journal->j_commit_timer);
 	journal->j_task = NULL;
 	wake_up(&journal->j_wait_done_commit);
 	jbd_debug(1, "Journal thread exiting.\n");
+	write_unlock(&journal->j_state_lock);
 	return 0;
 }
 
@@ -817,7 +817,7 @@ int jbd2_journal_bmap(journal_t *journal, unsigned long blocknr,
 struct buffer_head *jbd2_journal_get_descriptor_buffer(journal_t *journal)
 {
 	struct buffer_head *bh;
-	unsigned long long blocknr;
+	unsigned long long blocknr = 0;
 	int err;
 
 	err = jbd2_journal_next_log_block(journal, &blocknr);

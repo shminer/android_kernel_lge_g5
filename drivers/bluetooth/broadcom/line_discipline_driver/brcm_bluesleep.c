@@ -13,7 +13,7 @@
  * for more details.
 
 
- *  Copyright (C) 2009-2014 Broadcom Corporation
+ *  Copyright (C) 2009-2017 Broadcom Corporation
  */
 
 
@@ -28,6 +28,11 @@
 *******************************************************************************/
 #include "../include/brcm_ldisc_sh.h"
 
+#ifdef LPM_BLUESLEEP
+    extern void bluetooth_pm_outgoing_data(void);
+    extern int bluetooth_pm_sleep_start(void);
+    extern void bluetooth_pm_sleep_stop(void);
+#endif
 
 /**
  * Handles proper timer action when outgoing data is delivered to the
@@ -78,15 +83,3 @@ void brcm_btsleep_stop(enum sleep_type type)
 //BT_E : fix wrong lpm_param issue, [END]
 #endif
 }
-
-
-
-
-
-
-
-
-
-
-
-

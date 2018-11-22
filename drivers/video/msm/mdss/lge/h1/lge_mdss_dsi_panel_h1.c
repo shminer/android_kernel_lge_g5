@@ -154,7 +154,7 @@ int mdss_dsi_panel_reset(struct mdss_panel_data *pdata, int enable)
 		}
 
 		if (gpio_is_valid(ctrl_pdata->mode_gpio)) {
-			bool out;
+			bool out = false;
 
 			if (pinfo->mode_gpio_state == MODE_GPIO_HIGH)
 				out = true;
@@ -195,6 +195,7 @@ exit:
 
 extern void mdss_dsi_panel_cmds_send(struct mdss_dsi_ctrl_pdata *ctrl,
 		struct dsi_panel_cmds *pcmds, u32 flags);
+extern void lge_force_mdss_dsi_panel_cmd_read(char cmd0, int cnt, char* ret_buf);
 
 #if IS_ENABLED(CONFIG_LGE_DISPLAY_OVERRIDE_MDSS_DSI_PANEL_ON)
 int change_vcom_cmds_for_VNL(struct mdss_dsi_ctrl_pdata *ctrl, int restore)
@@ -410,3 +411,18 @@ end:
 	return 0;
 }
 #endif
+
+extern int lge_is_valid_U2_FTRIM_reg(void);
+ssize_t mdss_fb_is_valid(struct device *dev,
+		struct device_attribute *attr, char *buf)
+{
+	int ret = 0;
+	int is_valid = lge_is_valid_U2_FTRIM_reg();
+	if (is_valid < 0)
+		ret = is_valid; //read error
+	else
+		ret = scnprintf(buf, PAGE_SIZE, "DDIC validation is %d\n",
+				is_valid);
+
+	return ret;
+}

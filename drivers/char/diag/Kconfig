@@ -36,7 +36,7 @@ menu "LGE DM APP Support"
 
 config LGE_DM_APP
 	bool "LGE DM APP Support"
-	default n
+	default y
 	depends on MACH_LGE
 	help
 	 LGE DM APP Support

@@ -130,7 +130,7 @@ static int crypto_sec_rng_get_bytes(u8 *data, unsigned int len)
 
 	err = crypto_rng_get_bytes(crypto_sec_rng, data, len);
 
-#ifdef CONFIG_CRYPTO_DEV_HWCRYPTO_FOR_SDCARD
+#if defined(CONFIG_CRYPTO_DEV_HWCRYPTO_FOR_SDCARD) || defined(CONFIG_LGCRYPTO_FIPS_ENABLE)
 	if (err) {
 		ecryptfs_printk(KERN_ERR, "Error getting random bytes in SEC mode (err=%d)\n", err);
 		ecryptfs_printk(KERN_ERR, " [CCAudit] Error getting random bytes in SEC mode (err=%d)\n", err);
@@ -140,7 +140,7 @@ static int crypto_sec_rng_get_bytes(u8 *data, unsigned int len)
 		ecryptfs_printk(KERN_ERR, "Error getting random bytes in SEC mode (err=%d, len=%d)\n", err, len);
 		ecryptfs_printk(KERN_ERR, " [CCAudit] Error getting random bytes in SEC mode (err=%d, len=%d)\n", err, len);
 	}
-#endif //CONFIG_CRYPTO_DEV_HWCRYPTO_FOR_SDCARD
+#endif //CONFIG_CRYPTO_DEV_HWCRYPTO_FOR_SDCARD || CONFIG_LGCRYPTO_FIPS_ENABLE
 
 out:
 	return err;
@@ -222,10 +222,10 @@ static int ecryptfs_calculate_sha256_qct_hw(char *dst,
 
     mutex_lock(&crypt_stat->cs_hash_tfm_mutex);
     sg_init_one(&sg, (u8 *)src, len);
-	tfm = crypto_alloc_ahash("qcom-sha256", 0, 0);
+    tfm = crypto_alloc_ahash("qcom-sha256", 0, 0);
     if (IS_ERR(tfm)) {
-       	pr_err("failed to load transform %ld\n", PTR_ERR(tfm));
-	    mutex_unlock(&crypt_stat->cs_hash_tfm_mutex);
+        pr_err("failed to load transform %ld\n", PTR_ERR(tfm));
+        mutex_unlock(&crypt_stat->cs_hash_tfm_mutex);
         return -1;
     }
 
@@ -238,7 +238,7 @@ static int ecryptfs_calculate_sha256_qct_hw(char *dst,
        	goto out;
    	}
 
-   	ahash_request_set_callback(req, CRYPTO_TFM_REQ_MAY_BACKLOG, hash_complete, &result);
+    ahash_request_set_callback(req, CRYPTO_TFM_REQ_MAY_BACKLOG, hash_complete, &result);
 
     ahash_request_set_crypt(req, &sg, dst, len);
 
@@ -1113,6 +1113,11 @@ static void ecryptfs_copy_mount_wide_flags_to_inode_flags(
 			 & ECRYPTFS_GLOBAL_ENCFN_USE_FEK)
 			crypt_stat->flags |= ECRYPTFS_ENCFN_USE_FEK;
 	}
+#ifdef CONFIG_SDP
+	if (mount_crypt_stat->flags & ECRYPTFS_SDP_MOUNT) {
+		crypt_stat->flags |= ECRYPTFS_SDP_ENABLED;
+	}
+#endif //CONFIG_SDP
 }
 
 static int ecryptfs_copy_mount_wide_sigs_to_inode_sigs(
@@ -1163,6 +1168,9 @@ static void ecryptfs_set_default_crypt_stat_vals(
 	crypt_stat->flags &= ~(ECRYPTFS_KEY_VALID);
 	crypt_stat->file_version = ECRYPTFS_FILE_VERSION;
 	crypt_stat->mount_crypt_stat = mount_crypt_stat;
+#ifdef CONFIG_SDP
+	crypt_stat->storage_id = -1;
+#endif
 }
 
 /**
@@ -1262,7 +1270,13 @@ static struct ecryptfs_flag_map_elem ecryptfs_flag_map[] = {
 	{0x00000001, ECRYPTFS_ENABLE_HMAC},
 	{0x00000002, ECRYPTFS_ENCRYPTED},
 	{0x00000004, ECRYPTFS_METADATA_IN_XATTR},
+#ifdef CONFIG_SDP
+	{0x00000008, ECRYPTFS_ENCRYPT_FILENAMES},
+	{0x00100000, ECRYPTFS_SDP_ENABLED},
+	{0x00200000, ECRYPTFS_SDP_SENSITIVE},
+#else
 	{0x00000008, ECRYPTFS_ENCRYPT_FILENAMES}
+#endif
 };
 
 /**
@@ -1837,6 +1851,13 @@ int ecryptfs_read_metadata(struct dentry *ecryptfs_dentry)
 		rc = ecryptfs_read_headers_virt(page_virt, crypt_stat,
 						ecryptfs_dentry,
 						ECRYPTFS_VALIDATE_HEADER_SIZE);
+#ifdef CONFIG_SDP
+	if (rc && crypt_stat->flags & ECRYPTFS_SDP_SENSITIVE) {
+		SDP_LOGE(" [CCAudit] %s: SDP meata data is not saved into xattr\n",
+		       __func__);
+		goto out;
+	}
+#endif
 	if (rc) {
 		/* metadata is not in the file header, so try xattrs */
 		memset(page_virt, 0, PAGE_CACHE_SIZE);

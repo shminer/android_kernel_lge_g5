@@ -34,7 +34,7 @@
 #include <linux/pinctrl/consumer.h>
 #include <linux/syscore_ops.h>
 
-#if defined(CONFIG_MACH_MSM8996_ELSA) && defined(CONFIG_LGE_HANDLE_PANIC)
+#if defined(CONFIG_LGE_HANDLE_PANIC)
 #include <soc/qcom/lge/lge_handle_panic.h>
 #endif
 
@@ -212,7 +212,7 @@ static ssize_t gpio_keys_attr_show_helper(struct gpio_keys_drvdata *ddata,
 	return ret;
 }
 
-#if defined(CONFIG_MACH_MSM8996_ELSA)
+#if defined(CONFIG_MACH_MSM8996_ELSA) || defined(CONFIG_MACH_MSM8996_ANNA)
 static ssize_t virtual_hallic_state_show(struct device *dev, struct device_attribute *attr, char *buf){
   return sprintf(buf, "%d\n", hallic_sdev.state);
 }
@@ -346,7 +346,7 @@ static DEVICE_ATTR(disabled_switches, S_IWUSR | S_IRUGO,
 		   gpio_keys_show_disabled_switches,
 		   gpio_keys_store_disabled_switches);
 
-#if defined(CONFIG_MACH_MSM8996_ELSA)
+#if defined(CONFIG_MACH_MSM8996_ELSA) || defined(CONFIG_MACH_MSM8996_ANNA)
 static DEVICE_ATTR(virtual_hallic_state, S_IRUGO | S_IWUSR | S_IWGRP,
        virtual_hallic_state_show,
        virtual_hallic_state_store);
@@ -357,7 +357,7 @@ static struct attribute *gpio_keys_attrs[] = {
 	&dev_attr_switches.attr,
 	&dev_attr_disabled_keys.attr,
 	&dev_attr_disabled_switches.attr,
-#if defined(CONFIG_MACH_MSM8996_ELSA)
+#if defined(CONFIG_MACH_MSM8996_ELSA) || defined(CONFIG_MACH_MSM8996_ANNA)
 	&dev_attr_virtual_hallic_state.attr,
 #endif
 	NULL,
@@ -384,9 +384,8 @@ static void gpio_keys_gpio_report_event(struct gpio_button_data *bdata)
 
 		pr_err("%s: code(%d) state(%d)\n", __func__, button->code, !!state);
 
-#if defined(CONFIG_MACH_MSM8996_ELSA) && defined(CONFIG_LGE_HANDLE_PANIC)
-		if(state)
-			lge_gen_key_panic(button->code);
+#if defined(CONFIG_LGE_HANDLE_PANIC)
+			lge_gen_key_panic(button->code, state);
 #endif
 
 #ifdef CONFIG_LGE_HALL_IC

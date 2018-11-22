@@ -1,4 +1,4 @@
-/* Copyright (c) 2010-2016, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2010-2017, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -483,8 +483,10 @@ static ssize_t hdmi_edid_sysfs_wta_res_info(struct device *dev,
 	struct device_attribute *attr, const char *buf, size_t count)
 {
 	int rc, page_id;
+	u32 i = 0, j, page;
 	ssize_t ret = strnlen(buf, PAGE_SIZE);
 	struct hdmi_edid_ctrl *edid_ctrl = hdmi_edid_get_ctrl(dev);
+	struct msm_hdmi_mode_timing_info info = {0};
 
 	if (!edid_ctrl) {
 		DEV_ERR("%s: invalid input\n", __func__);
@@ -497,7 +499,22 @@ static ssize_t hdmi_edid_sysfs_wta_res_info(struct device *dev,
 		return rc;
 	}
 
-	edid_ctrl->page_id = page_id;
+	if (page_id > MSM_HDMI_INIT_RES_PAGE) {
+		page = MSM_HDMI_INIT_RES_PAGE;
+		while (page < page_id) {
+			j = 1;
+			while (sizeof(info) * j < PAGE_SIZE) {
+				i++;
+				j++;
+			}
+			page++;
+		}
+	}
+
+	if (i < HDMI_VFRMT_MAX)
+		edid_ctrl->page_id = page_id;
+	else
+		DEV_ERR("%s: invalid page id\n", __func__);
 
 	DEV_DBG("%s: %d\n", __func__, edid_ctrl->page_id);
 	return ret;
@@ -1561,22 +1578,38 @@ u32 limit_supported_video_format(u32 video_format)
 				video_format = HDMI_VFRMT_1280x720p60_16_9;
 			break;
 		case 0x0a:
-			if ((video_format = HDMI_VFRMT_1920x1080p60_16_9) ||
+			if ((video_format == HDMI_VFRMT_1920x1080p60_16_9) ||
 				(video_format == HDMI_VFRMT_1920x1080p100_64_27) ||
 				(video_format == HDMI_VFRMT_1920x1080p120_64_27) ||
 				((video_format >= HDMI_VFRMT_1680x720p100_64_27) &&
 				 (video_format <= HDMI_VFRMT_3840x2160p60_64_27)))
-				video_format = HDMI_VFRMT_1920x1080p30_16_9;
+				video_format = HDMI_VFRMT_1920x1080p60_16_9;
 
 			else if ((video_format >= HDMI_EVFRMT_3840x2160p30_16_9) &&
 				(video_format <= HDMI_VFRMT_2560x1600p60_16_9))
-				video_format = HDMI_VFRMT_1920x1080p30_16_9;
+				video_format = HDMI_VFRMT_1920x1080p60_16_9;
 			else {
 				ret = msm_hdmi_get_timing_info(pinfo, video_format);
-				if (!ret && pinfo->pixel_freq > 148500) {
-					DEV_DBG("%s: info->pixel_freq = %d is over clk with 0x14 BW dongle.\n",
+				if (!ret && pinfo->pixel_freq >= 148500) {
+					DEV_DBG("%s: info->pixel_freq = %d is over clk with 2.72Gbps dongle.\n",
 									__func__, pinfo->pixel_freq);
-					video_format = HDMI_VFRMT_1920x1080p30_16_9;
+					video_format = HDMI_VFRMT_1920x1080p60_16_9;
+				} else if (!ret && pinfo->pixel_freq < 148500) {
+					DEV_DBG("%s: info->pixel_freq = %d is under clk with 2.72Gbps dongle.\n",
+							        __func__, pinfo->pixel_freq);
+					switch(pinfo->ar) {
+						case HDMI_RES_AR_4_3:
+							video_format = HDMI_VFRMT_1024x768p60_4_3;
+							break;
+						case HDMI_RES_AR_5_4:
+							video_format = HDMI_VFRMT_1280x1024p60_5_4;
+							break;
+						case HDMI_RES_AR_16_9:
+						case HDMI_RES_AR_16_10:
+						default:
+							video_format = HDMI_VFRMT_1280x720p60_16_9;
+							break;
+					}
 				}
 			}
 			break;
@@ -1586,6 +1619,15 @@ u32 limit_supported_video_format(u32 video_format)
 				(video_format == HDMI_VFRMT_3840x2160p50_64_27) ||
 				(video_format == HDMI_VFRMT_3840x2160p60_64_27))
 				video_format = HDMI_VFRMT_3840x2160p30_16_9;
+			else {
+				ret = msm_hdmi_get_timing_info(pinfo, video_format);
+				if (!ret && pinfo->pixel_freq > 297000) {
+					DEV_DBG("%s: info->pixel_freq = %d is over clk with 0x14 BW dongle.\n",
+									__func__, pinfo->pixel_freq);
+					video_format = HDMI_VFRMT_3840x2160p30_16_9;
+				}
+			}
+			break;
 		}
 	}
 	else {
@@ -2397,6 +2439,13 @@ int hdmi_edid_parser(void *input)
 		DEV_DBG("HDMI DVI mode: %s\n",
 			edid_ctrl->sink_mode ? "no" : "yes");
 		goto bail;
+	}
+
+	/* Find out if CEA extension blocks exceeding max limit */
+	if (num_of_cea_blocks >= MAX_EDID_BLOCKS) {
+		DEV_WARN("%s: HDMI EDID exceeded max CEA blocks limit\n",
+				__func__);
+		num_of_cea_blocks = MAX_EDID_BLOCKS - 1;
 	}
 
 	/* check for valid CEA block */

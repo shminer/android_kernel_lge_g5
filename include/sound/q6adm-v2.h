@@ -1,4 +1,4 @@
-/* Copyright (c) 2012-2016, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2012-2017, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -34,7 +34,6 @@ enum {
 	ADM_AUDVOL_CAL,
 	ADM_RTAC_INFO_CAL,
 	ADM_RTAC_APR_CAL,
-	ADM_DTS_EAGLE,
 	ADM_SRS_TRUMEDIA,
 	ADM_RTAC_AUDVOL_CAL,
 	ADM_MAX_CAL_TYPES
@@ -65,10 +64,25 @@ struct route_payload {
 	unsigned int session_id;
 };
 
+
 struct msm_pcm_channel_mux {
 	int out_channel;
 	int input_channel;
 	u16 channel_config[16][16];
+};
+
+struct default_chmixer_param_id_coeff {
+	uint32_t index;
+	uint16_t num_output_channels;
+	uint16_t num_input_channels;
+};
+
+struct msm_pcm_channel_mixer {
+	int output_channel;
+	int input_channels[ADM_MAX_CHANNELS];
+	bool enable;
+	int rule;
+	int channel_weight[ADM_MAX_CHANNELS][ADM_MAX_CHANNELS];
 };
 
 int srs_trumedia_open(int port_id, int copp_idx, __s32 srs_tech_id,
@@ -93,7 +107,7 @@ int adm_dolby_dap_send_params(int port_id, int copp_idx, char *params,
 
 int adm_open(int port, int path, int rate, int mode, int topology,
 			   int perf_mode, uint16_t bits_per_sample,
-			   int app_type, int acdbdev_id);
+			   int app_type, int acdbdev_id, int session_type);
 
 int adm_map_rtac_block(struct rtac_cal_block_data *cal_block);
 
@@ -102,7 +116,7 @@ int adm_unmap_rtac_block(uint32_t *mem_map_handle);
 int adm_close(int port, int topology, int perf_mode);
 
 int adm_matrix_map(int path, struct route_payload payload_map,
-		   int perf_mode);
+		   int perf_mode, uint32_t passthr_mode);
 
 int adm_connect_afe_port(int mode, int session_id, int port_id);
 
@@ -144,6 +158,9 @@ int adm_set_softvolume(int port_id, int copp_idx,
 
 int adm_set_mic_gain(int port_id, int copp_idx, int volume);
 
+int adm_send_set_multichannel_ec_primary_mic_ch(int port_id, int copp_idx,
+				int primary_mic_ch);
+
 int adm_param_enable(int port_id, int copp_idx, int module_id,  int enable);
 
 int adm_send_calibration(int port_id, int copp_idx, int path, int perf_mode,
@@ -167,9 +184,8 @@ int adm_get_sound_focus(int port_id, int copp_idx,
 			struct sound_focus_param *soundFocusData);
 int adm_get_source_tracking(int port_id, int copp_idx,
 			    struct source_tracking_param *sourceTrackingData);
-				
-int programable_channel_mixer(int port_id, int copp_idx, int session_id,
-		int session_type, struct msm_pcm_channel_mux *ch_mux,
-		int num_ch);
-
+int adm_programable_channel_mixer(int port_id, int copp_idx, int session_id,
+			int session_type,
+			struct msm_pcm_channel_mixer *ch_mixer,
+			int channel_index);
 #endif /* __Q6_ADM_V2_H__ */

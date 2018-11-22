@@ -60,26 +60,23 @@
 
 /* mts tty driver ioctl values */
 #define MTS_TTY_IOCTL_MAGIC	'S'
-#define MTS_TTY_START	_IOWR(MTS_TTY_IOCTL_MAGIC, 0x01, int)
-#define MTS_TTY_STOP	_IOWR(MTS_TTY_IOCTL_MAGIC, 0x02, int)
-#define MTS_TTY__READ	_IOWR(MTS_TTY_IOCTL_MAGIC, 0x03, int)
-#define MTS_TTY_START_READY    _IOWR(MTS_TTY_IOCTL_MAGIC, 0x04, int)
-#define MTS_TTY_STOP_READY    _IOWR(MTS_TTY_IOCTL_MAGIC, 0x05, int)
+#define MTS_TTY_START		_IOWR(MTS_TTY_IOCTL_MAGIC, 0x01, int)
+#define MTS_TTY_STOP		_IOWR(MTS_TTY_IOCTL_MAGIC, 0x02, int)
+#define MTS_TTY__READ		_IOWR(MTS_TTY_IOCTL_MAGIC, 0x03, int)
+#define MTS_TTY_START_READY	_IOWR(MTS_TTY_IOCTL_MAGIC, 0x04, int)
+#define MTS_TTY_STOP_READY	_IOWR(MTS_TTY_IOCTL_MAGIC, 0x05, int)
 
-#define MTS_OFF         (0)
-#define MTS_START_READY (1)
-#define MTS_ON          (2)
-#define MTS_STOP_READY  (3)
-#define MTS_STOP_READY_COMPLETE  (4)
+#define MTS_OFF			(0)
+#define MTS_START_READY		(1)
+#define MTS_ON			(2)
+#define MTS_STOP_READY		(3)
+#define MTS_STOP_READY_COMPLETE	(4)
 
 struct mts_tty {
 	wait_queue_head_t waitq;
 	struct tty_driver *tty_drv;
 	struct tty_struct *tty_struct;
-    struct tty_port *mts_tty_port;
-//	struct notifier_block pm_notify;
-//	int pm_notify_info;
-//    int count;
+	struct tty_port *mts_tty_port;
 	spinlock_t lock;
 	int run;
 };
@@ -87,6 +84,5 @@ struct mts_tty {
 extern struct mts_tty *mts_tty;
 
 int mts_tty_process(char *, int);
-//int mts_tty_send_mask(struct diag_request *diag_read_ptr);
 #endif /* MTSK_TTY_H_ */
 

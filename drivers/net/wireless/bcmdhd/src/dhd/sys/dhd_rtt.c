@@ -496,19 +496,36 @@ dhd_rtt_event_handler(dhd_pub_t *dhd, wl_event_msg_t *event, void *event_data)
 	struct rtt_noti_callback *iter;
 	rtt_result_t *rtt_result, *entry, *next;
 	gfp_t kflags;
+
+	DHD_RTT(("Enter %s \n", __FUNCTION__));
 	NULL_CHECK(dhd, "dhd is NULL", err);
+
 	rtt_status = GET_RTTSTATE(dhd);
 	NULL_CHECK(rtt_status, "rtt_status is NULL", err);
+
+	if (ntoh32_ua((void *)&event->datalen) < sizeof(wl_proxd_event_data_t)) {
+		DHD_RTT(("%s: wrong datalen:%d\n", __FUNCTION__,
+			ntoh32_ua((void *)&event->datalen)));
+		return -EINVAL;
+	}
 	event_type = ntoh32_ua((void *)&event->event_type);
+	if (event_type != WLC_E_PROXD) {
+		DHD_ERROR((" failed event \n"));
+		return -EINVAL;
+	}
+
+	if (!event_data) {
+		DHD_ERROR(("%s: event_data:NULL\n", __FUNCTION__));
+		return -EINVAL;
+	}
+
 	flags = ntoh16_ua((void *)&event->flags);
 	status = ntoh32_ua((void *)&event->status);
 	reason = ntoh32_ua((void *)&event->reason);
 
-	if (event_type != WLC_E_PROXD) {
-		goto exit;
-	}
 	kflags = in_softirq()? GFP_ATOMIC : GFP_KERNEL;
 	evp = (wl_proxd_event_data_t*)event_data;
+
 	DHD_RTT(("%s enter : mode: %s, reason :%d \n", __FUNCTION__,
 		(ntoh16(evp->mode) == WL_PROXD_MODE_INITIATOR)?
 		"initiator":"target", reason));

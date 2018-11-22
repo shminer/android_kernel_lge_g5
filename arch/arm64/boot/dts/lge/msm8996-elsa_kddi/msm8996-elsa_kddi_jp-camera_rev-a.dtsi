@@ -27,11 +27,11 @@
 };
 
 &pmi8994_torch0 {
-	qcom,current = <150>;
+	qcom,current = <60>;
 };
 
 &pmi8994_torch1 {
-	qcom,current = <150>;
+	qcom,current = <60>;
 };
 
 &pmi8994_switch {

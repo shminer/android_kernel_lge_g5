@@ -36,7 +36,13 @@
 #include <linux/compat.h>
 #include "dmxdev.h"
 
-static int overflow_auto_flush;
+/* module parameters for overflow method configuration */
+#ifdef CONFIG_LGE_BROADCAST_ISDBT_JAPAN
+static int overflow_auto_flush = 0;
+#else /* CONFIG_LGE_BROADCAST_ISDBT_JAPAN */
+static int overflow_auto_flush = 1;
+#endif /* CONFIG_LGE_BROADCAST_ISDBT_JAPAN */
+
 module_param(overflow_auto_flush, int, S_IRUGO | S_IWUSR);
 MODULE_PARM_DESC(overflow_auto_flush,
 	"Automatically flush buffer on overflow (default: on)");
@@ -3924,12 +3930,6 @@ static int dvb_dmxdev_set_cipher(struct dmxdev *dmxdev,
 	if (!filter->sec_mode.is_secured && cipher_ops->operations_count) {
 		pr_err("%s: secure mode must be enabled to set cipher ops\n",
 			__func__);
-
-		/* ++ Modified by harold.kim 20151223 for QCT Joy debugging ++ */
-		pr_err("%s: (filter->sec_mode.is_secured : %d, cipher_ops->operations_count : %d) \n", 
-			__func__, filter->sec_mode.is_secured, cipher_ops->operations_count);
-		/* -- Modified by harold.kim 20151223 for QCT Joy debugging -- */
-
 		return -EPERM;
 	}
 

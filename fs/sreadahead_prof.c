@@ -18,6 +18,12 @@ static unsigned long vm_chk_jiffies;
 
 static DECLARE_WAIT_QUEUE_HEAD(prof_state_wait);
 
+#ifdef CONFIG_READAHEAD_MMAP_SIZE_ENABLE
+unsigned long sreadahead_ra_pages = CONFIG_READAHEAD_MMAP_PAGE_CNT;
+#else
+unsigned long sreadahead_ra_pages = VM_MIN_READAHEAD * 2;
+#endif
+
 static void prof_buf_free_work(struct work_struct *data)
 {
 	mutex_lock(&prof_buf.ulock);
@@ -378,8 +384,16 @@ static int sreadahead_profdata_init(void)
 
 int sreadahead_prof(struct file *filp, size_t len, loff_t pos)
 {
-	if (prof_buf.state == PROF_NOT || prof_buf.state == PROF_DONE)
+	if (prof_buf.state == PROF_NOT || prof_buf.state == PROF_DONE) {
+#ifdef CONFIG_READAHEAD_MMAP_SIZE_ENABLE
+		sreadahead_ra_pages = CONFIG_READAHEAD_MMAP_PAGE_CNT;
+#else
+		sreadahead_ra_pages = VM_MIN_READAHEAD * 2;
+#endif
 		return 0;
+	} else
+		sreadahead_ra_pages = 4;
+
 	if (prof_buf.state == PROF_INIT)
 		sreadahead_profdata_init();
 	if (prof_buf.state == PROF_RUN) {

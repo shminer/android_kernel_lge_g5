@@ -232,6 +232,10 @@ static struct tcp_metrics_block *__tcp_get_metrics_req(struct request_sock *req,
 	unsigned int hash;
 	struct net *net;
 
+	// fix maybe-uninitialized error
+	memset(&saddr, 0, sizeof(struct inetpeer_addr));
+	memset(&daddr, 0, sizeof(struct inetpeer_addr));
+
 	saddr.family = req->rsk_ops->family;
 	daddr.family = req->rsk_ops->family;
 	switch (daddr.family) {
@@ -270,6 +274,10 @@ static struct tcp_metrics_block *__tcp_get_metrics_tw(struct inet_timewait_sock 
 	struct inetpeer_addr saddr, daddr;
 	unsigned int hash;
 	struct net *net;
+
+	// fix maybe-uninitialized error
+	memset(&saddr, 0, sizeof(struct inetpeer_addr));
+	memset(&daddr, 0, sizeof(struct inetpeer_addr));
 
 	if (tw->tw_family == AF_INET) {
 		saddr.family = AF_INET;
@@ -318,6 +326,10 @@ static struct tcp_metrics_block *tcp_get_metrics(struct sock *sk,
 	struct inetpeer_addr saddr, daddr;
 	unsigned int hash;
 	struct net *net;
+
+	// fix maybe-uninitialized error
+	memset(&saddr, 0, sizeof(struct inetpeer_addr));
+	memset(&daddr, 0, sizeof(struct inetpeer_addr));
 
 	if (sk->sk_family == AF_INET) {
 		saddr.family = AF_INET;
@@ -550,7 +562,7 @@ reset:
 	 */
 	if (crtt > tp->srtt_us) {
 		/* Set RTO like tcp_rtt_estimator(), but from cached RTT. */
-		crtt /= 8 * USEC_PER_MSEC;
+		crtt /= 8 * USEC_PER_SEC / HZ;
 		inet_csk(sk)->icsk_rto = crtt + max(2 * crtt, tcp_rto_min(sk));
 	} else if (tp->srtt_us == 0) {
 		/* RFC6298: 5.7 We've failed to get a valid RTT sample from
@@ -976,6 +988,10 @@ static int tcp_metrics_nl_cmd_get(struct sk_buff *skb, struct genl_info *info)
 	int ret;
 	bool src = true;
 
+	// fix maybe-uninitialized error
+	memset(&saddr, 0, sizeof(struct inetpeer_addr));
+	memset(&daddr, 0, sizeof(struct inetpeer_addr));
+
 	ret = parse_nl_addr(info, &daddr, &hash, 0);
 	if (ret < 0)
 		return ret;
@@ -1059,6 +1075,10 @@ static int tcp_metrics_nl_cmd_del(struct sk_buff *skb, struct genl_info *info)
 	struct net *net = genl_info_net(info);
 	int ret;
 	bool src = true, found = false;
+
+	// fix maybe-uninitialized error
+	memset(&saddr, 0, sizeof(struct inetpeer_addr));
+	memset(&daddr, 0, sizeof(struct inetpeer_addr));
 
 	ret = parse_nl_addr(info, &daddr, &hash, 1);
 	if (ret < 0)

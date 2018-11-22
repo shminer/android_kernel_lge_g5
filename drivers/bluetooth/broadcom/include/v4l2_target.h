@@ -13,7 +13,7 @@
  * for more details.
 
 
- *  Copyright (C) 2009-2014 Broadcom Corporation
+ *  Copyright (C) 2009-2017 Broadcom Corporation
  */
 
 
@@ -29,6 +29,13 @@
  *
  ******************************************************************************/
 
+#ifndef TRUE
+#define TRUE 1
+#endif
+
+#ifndef FALSE
+#define FALSE 0
+#endif
 
  /* Macros to enable/disable debugging. This will overried debug macros in each of
    * V4L2 drivers. Set these to false for production release.*/
@@ -49,4 +56,11 @@
 #define V4L2_SNOOP_ENABLE TRUE
 #endif
 
+#ifndef V4L2_ANT
+#define V4L2_ANT FALSE //BT_S : LGE doesn't support ANT+
+#endif
+
+#ifndef V4L2_ANT_DEBUG
+#define V4L2_ANT_DEBUG FALSE //BT_S : LGE doesn't support ANT+
+#endif
 

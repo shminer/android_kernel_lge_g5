@@ -1,4 +1,4 @@
-/* Copyright (c) 2012-2016, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2012-2017, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -62,7 +62,39 @@
 #define MDSS_DSI_HW_REV_STEP_1		0x1
 #define MDSS_DSI_HW_REV_STEP_2		0x2
 
+#define MDSS_STATUS_TE_WAIT_MAX		3
 #define NONE_PANEL "none"
+
+#if defined(CONFIG_LGE_DISPLAY_COMMON)
+#define IPC_LOW	0x5E
+#define IPC_MID	0x9E
+#define IPC_HIGH	0xDE
+#define REG_READ_MIE	0x56
+#define REG_READ_GC_SH	0xF0
+#define REG_READ_SH_VAL 0xF2
+#define REG_READ_CE_VAL 0xF3
+#define SRE_LOW	1
+#define SRE_MID	2
+#define SRE_HIGH	3
+/* 55h */
+#define IE_MASK	0x80
+#define MONO_MASK   0x08
+#define CABC_MASK   0x01
+#define SRE_MASK	0x70
+#define SRE_MASK_LOW	0x40
+#define SRE_MASK_MID	0x50
+#define SRE_MASK_HIGH	0x60
+#define SRE_MASK_BLANK	0x8F
+/* F0h */
+#define SAT_MASK	0x80
+#define READER_GC_MASK   0x04
+#define SH_MASK	0x02
+/* F2h */
+#define SHARPNESS_VALUE	0x24
+/* FBh */
+#define CABC_ON_VALUE	0x06
+#define CABC_OFF_VALUE	0x02
+#endif
 
 enum {		/* mipi dsi panel */
 	DSI_VIDEO_MODE,
@@ -154,6 +186,7 @@ enum dsi_pm_type {
 #define CTRL_STATE_PANEL_INIT		BIT(0)
 #define CTRL_STATE_MDP_ACTIVE		BIT(1)
 #define CTRL_STATE_DSI_ACTIVE		BIT(2)
+#define CTRL_STATE_PANEL_LP		BIT(3)
 
 #define DSI_NON_BURST_SYNCH_PULSE	0
 #define DSI_NON_BURST_SYNCH_EVENT	1
@@ -347,20 +380,53 @@ struct dsi_panel_timing {
 	struct dsi_panel_cmds on_cmds;
 #if defined(CONFIG_LGE_DISPLAY_BL_EXTENDED)
 	struct dsi_panel_cmds display_on_cmds;
-	struct dsi_panel_cmds screen_cmds;
+#if defined(CONFIG_LGE_DISPLAY_MFTS_DET_SUPPORTED) && !defined(CONFIG_LGE_DISPLAY_DYN_DSI_MODE_SWITCH)
+	struct dsi_panel_cmds trimming_cmds;
+	struct dsi_panel_cmds cam_cmds;
+	struct dsi_panel_cmds screen_cmds_102v;
+	struct dsi_panel_cmds screen_cmds_129v;
+	struct dsi_panel_cmds screen_cmds_132v;
 #endif
-#if defined(CONFIG_LGE_DISPLAY_COMMON)
-	struct dsi_panel_cmds vcom_cmds;
+#endif
+#if defined(CONFIG_LGE_DISPLAY_DYN_DSI_MODE_SWITCH)
+	struct dsi_panel_cmds v_to_c_on_cmds;
+	struct dsi_panel_cmds c_to_v_on_cmds;
 #endif
 #if defined(CONFIG_LGE_ENHANCE_GALLERY_SHARPNESS)
 	struct dsi_panel_cmds sharpness_on_cmds;
 	struct dsi_panel_cmds ce_on_cmds;
 #endif
+#if defined(CONFIG_LGE_DISPLAY_COMMON)
+	struct dsi_panel_cmds vcom_cmds;
+#endif
 #if defined(CONFIG_LGE_LCD_DYNAMIC_CABC_MIE_CTRL)
 	struct dsi_panel_cmds ie_on_cmds;
 	struct dsi_panel_cmds ie_off_cmds;
-	struct dsi_panel_cmds cabc_20_cmds;
-	struct dsi_panel_cmds cabc_30_cmds;
+#endif
+#if defined(CONFIG_LGE_DISPLAY_LUCYE_COMMON)
+	struct dsi_panel_cmds display_on_cmds;
+	struct dsi_panel_cmds display_on_and_aod_comds;
+	struct dsi_panel_cmds reg_55h_cmds;
+	struct dsi_panel_cmds reg_f0h_cmds;
+	struct dsi_panel_cmds reg_f2h_cmds;
+	struct dsi_panel_cmds reg_f3h_cmds;
+	struct dsi_panel_cmds reg_fbh_cmds;
+	struct dsi_panel_cmds vgho_vglo_8p8v_cmd;
+	struct dsi_panel_cmds vgho_vglo_11p6v_cmd;
+	int mux_gate_voltage_status;
+#endif
+#if defined(CONFIG_LGE_DISPLAY_LINEAR_GAMMA)
+	struct dsi_panel_cmds linear_gamma_default_cmds;
+	struct dsi_panel_cmds linear_gamma_tuning_cmds;
+#endif
+#if defined(CONFIG_LGE_DISPLAY_SRE_MODE)
+	int sre_status;
+#endif
+#if defined(CONFIG_LGE_DISPLAY_HDR_MODE)
+	int hdr_status;
+#endif
+#if defined(CONFIG_LGE_DISPLAY_DOLBY_MODE)
+	int dolby_status;
 #endif
 	struct dsi_panel_cmds post_panel_on_cmds;
 	struct dsi_panel_cmds switch_cmds;
@@ -458,6 +524,7 @@ struct mdss_dsi_ctrl_pdata {
 	int disp_en_gpio;
 	int bklt_en_gpio;
 	int mode_gpio;
+	int intf_mux_gpio;
 	int bklt_ctrl;	/* backlight ctrl */
 #ifdef CONFIG_LGE_DISPLAY_BL_EXTENDED
 	int bkltex_ctrl;/* backlightex ctrl */
@@ -477,6 +544,7 @@ struct mdss_dsi_ctrl_pdata {
 #endif
 	bool dcs_cmd_insert;
 	atomic_t te_irq_ready;
+	bool idle;
 
 	bool cmd_sync_wait_broadcast;
 	bool cmd_sync_wait_trigger;
@@ -498,10 +566,32 @@ struct mdss_dsi_ctrl_pdata {
 	struct dsi_panel_cmds on_cmds;
 #if defined(CONFIG_LGE_DISPLAY_BL_EXTENDED)
 	struct dsi_panel_cmds display_on_cmds;
-	struct dsi_panel_cmds screen_cmds;
+#if defined(CONFIG_LGE_DISPLAY_MFTS_DET_SUPPORTED) && !defined(CONFIG_LGE_DISPLAY_DYN_DSI_MODE_SWITCH)
+	struct dsi_panel_cmds trimming_cmds;
+	struct dsi_panel_cmds cam_cmds;
+	struct dsi_panel_cmds screen_cmds_102v;
+	struct dsi_panel_cmds screen_cmds_129v;
+	struct dsi_panel_cmds screen_cmds_132v;
+#endif
+#endif
+#if defined(CONFIG_LGE_DISPLAY_DYN_DSI_MODE_SWITCH)
+	struct dsi_panel_cmds v_to_c_on_cmds;
+	struct dsi_panel_cmds c_to_v_on_cmds;
 #endif
 #if defined(CONFIG_LGE_DISPLAY_COMMON)
 	struct dsi_panel_cmds vcom_cmds;
+#endif
+#if defined(CONFIG_LGE_DISPLAY_LUCYE_COMMON)
+	struct dsi_panel_cmds display_on_cmds;
+	struct dsi_panel_cmds display_on_and_aod_comds;
+	struct dsi_panel_cmds reg_55h_cmds;
+	struct dsi_panel_cmds reg_f0h_cmds;
+	struct dsi_panel_cmds reg_f2h_cmds;
+	struct dsi_panel_cmds reg_f3h_cmds;
+	struct dsi_panel_cmds reg_fbh_cmds;
+	struct dsi_panel_cmds vgho_vglo_8p8v_cmd;
+	struct dsi_panel_cmds vgho_vglo_11p6v_cmd;
+	int mux_gate_voltage_status;
 #endif
 #if defined(CONFIG_LGE_ENHANCE_GALLERY_SHARPNESS)
 	struct dsi_panel_cmds sharpness_on_cmds;
@@ -514,10 +604,37 @@ struct mdss_dsi_ctrl_pdata {
 	struct dsi_panel_cmds cabc_30_cmds;
 	int ie_on;
 #endif
+#if defined(CONFIG_LGE_DISPLAY_LINEAR_GAMMA)
+	struct dsi_panel_cmds linear_gamma_default_cmds;
+	struct dsi_panel_cmds linear_gamma_tuning_cmds;
+#endif
+#if defined(CONFIG_LGE_DISPLAY_SRE_MODE)
+	int sre_status;
+#endif
+#if defined(CONFIG_LGE_DISPLAY_HDR_MODE)
+	int hdr_status;
+#endif
+#if defined(CONFIG_LGE_DISPLAY_DOLBY_MODE)
+	int dolby_status;
+#endif
+#if defined(CONFIG_LGE_DISPLAY_AOD_WITH_MIPI)
+	struct dsi_panel_cmds watch_rtc_set_cmd;
+	struct dsi_panel_cmds watch_rtc_info_cmd;
+	struct dsi_panel_cmds watch_ctl_cmd;
+	struct dsi_panel_cmds watch_set_cmd;
+	struct dsi_panel_cmds watch_fd_ctl_cmd;
+	struct dsi_panel_cmds watch_font_set_cmd;
+	struct dsi_panel_cmds watch_u2_scr_fad_cmd;
+	struct dsi_panel_cmds watch_font_crc_cmd;
+#endif
 	struct dsi_panel_cmds post_dms_on_cmds;
 	struct dsi_panel_cmds post_panel_on_cmds;
 	struct dsi_panel_cmds off_cmds;
+	struct dsi_panel_cmds lp_on_cmds;
+	struct dsi_panel_cmds lp_off_cmds;
 	struct dsi_panel_cmds status_cmds;
+	struct dsi_panel_cmds idle_on_cmds; /* for lp mode */
+	struct dsi_panel_cmds idle_off_cmds;
 	u32 *status_valid_params;
 	u32 *status_cmds_rlen;
 	u32 *status_value;
@@ -547,6 +664,7 @@ struct mdss_dsi_ctrl_pdata {
 	struct completion video_comp;
 	struct completion dynamic_comp;
 	struct completion bta_comp;
+	struct completion te_irq_comp;
 	spinlock_t irq_lock;
 	spinlock_t mdp_lock;
 	int mdp_busy;
@@ -729,6 +847,7 @@ void mdss_dsi_set_burst_mode(struct mdss_dsi_ctrl_pdata *ctrl);
 void mdss_dsi_set_reg(struct mdss_dsi_ctrl_pdata *ctrl, int off,
 	u32 mask, u32 val);
 int mdss_dsi_phy_pll_reset_status(struct mdss_dsi_ctrl_pdata *ctrl);
+int mdss_dsi_panel_power_ctrl(struct mdss_panel_data *pdata, int power_state);
 
 static inline const char *__mdss_dsi_pm_name(enum dsi_pm_type module)
 {
@@ -937,6 +1056,11 @@ static inline bool mdss_dsi_is_panel_on_interactive(
 static inline bool mdss_dsi_is_panel_on_lp(struct mdss_panel_data *pdata)
 {
 	return mdss_panel_is_power_on_lp(pdata->panel_info.panel_power_state);
+}
+
+static inline bool mdss_dsi_is_panel_on_ulp(struct mdss_panel_data *pdata)
+{
+	return mdss_panel_is_power_on_ulp(pdata->panel_info.panel_power_state);
 }
 
 static inline bool mdss_dsi_ulps_feature_enabled(

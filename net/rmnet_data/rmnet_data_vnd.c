@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2013-2016, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2013-2017, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -503,6 +503,18 @@ static void rmnet_vnd_setup(struct net_device *dev)
 	INIT_LIST_HEAD(&dev_conf->flow_head);
 }
 
+/**
+ * rmnet_vnd_setup() - net_device initialization helper function
+ * @dev:      Virtual network device
+ *
+ * Called during device initialization. Disables GRO.
+ */
+static void rmnet_vnd_disable_offload(struct net_device *dev)
+{
+	dev->wanted_features &= ~NETIF_F_GRO;
+	__netdev_update_features(dev);
+}
+
 /* ***************** Exposed API ******************************************** */
 
 /**
@@ -552,11 +564,11 @@ int rmnet_vnd_init(void)
  *      - RMNET_CONFIG_UNKNOWN_ERROR if register_netdevice() fails
  */
 int rmnet_vnd_create_dev(int id, struct net_device **new_device,
-			 const char *prefix)
+			 const char *prefix, int use_name)
 {
 	struct net_device *dev;
 	char dev_prefix[IFNAMSIZ];
-	int p, rc = 0;
+	int p = 0, rc = 0;
 
 	if (id < 0 || id >= RMNET_DATA_MAX_VND) {
 		*new_device = 0;
@@ -568,10 +580,12 @@ int rmnet_vnd_create_dev(int id, struct net_device **new_device,
 		return RMNET_CONFIG_DEVICE_IN_USE;
 	}
 
-	if (!prefix)
+	if (!prefix && !use_name)
 		p = scnprintf(dev_prefix, IFNAMSIZ, "%s%%d",
 			  RMNET_DATA_DEV_NAME_STR);
-	else
+	else if (prefix && use_name)
+		p = scnprintf(dev_prefix, IFNAMSIZ, "%s", prefix);
+	else if (prefix && !use_name)
 		p = scnprintf(dev_prefix, IFNAMSIZ, "%s%%d",
 			  prefix);
 	if (p >= (IFNAMSIZ-1)) {
@@ -581,7 +595,7 @@ int rmnet_vnd_create_dev(int id, struct net_device **new_device,
 
 	dev = alloc_netdev(sizeof(struct rmnet_vnd_private_s),
 			   dev_prefix,
-			   NET_NAME_ENUM,
+			   use_name ? NET_NAME_UNKNOWN : NET_NAME_ENUM,
 			   rmnet_vnd_setup);
 	if (!dev) {
 		LOGE("Failed to to allocate netdev for id %d", id);
@@ -615,6 +629,8 @@ int rmnet_vnd_create_dev(int id, struct net_device **new_device,
 		rmnet_devices[id] = dev;
 		*new_device = dev;
 	}
+
+	rmnet_vnd_disable_offload(dev);
 
 	LOGM("Registered device %s", dev->name);
 	return rc;
@@ -929,7 +945,7 @@ int rmnet_vnd_add_tc_flow(uint32_t id, uint32_t map_flow, uint32_t tc_flow)
 	list_add(&(itm->list), &(dev_conf->flow_head));
 	write_unlock_irqrestore(&dev_conf->flow_map_lock, flags);
 
-	LOGD("Created flow mapping [%s][0x%08X][0x%08X]@%p",
+	LOGD("Created flow mapping [%s][0x%08X][0x%08X]@%pK",
 	     dev->name, itm->map_flow_id, itm->tc_flow_id[0], itm);
 
 	return RMNET_CONFIG_OK;

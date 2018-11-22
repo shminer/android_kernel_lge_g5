@@ -11,29 +11,20 @@
 #include <linux/delay.h>
 #include <linux/workqueue.h>
 #include <linux/wakelock.h>         /* wake_lock, unlock */
+#include <linux/version.h>          /* check linux version */
 
 #include "../../broadcast_tdmb_drv_ifdef.h"
 #include "../inc/broadcast_fc8080.h"
 #include "../inc/fci_types.h"
 #include "../inc/bbm.h"
 
-//#include <linux/pm_qos.h> // FEATURE_DMB_USE_PM_QOS
-
 #include <linux/err.h>
 #include <linux/of_gpio.h>
 
 #include <linux/clk.h>
-//#include <linux/msm-bus.h> // FEATURE_DMB_USE_BUS_SCALE
 #define FEATURE_DMB_USE_PINCTRL
 #ifdef FEATURE_DMB_USE_PINCTRL
 #include <linux/pinctrl/consumer.h>
-#endif
-
-#ifdef CONFIG_LGE_PM_LGE_POWER_CLASS_BOARD_REVISION
-#include <soc/qcom/lge/power/lge_power_class.h>
-#include <soc/qcom/lge/power/lge_board_revision.h>
-#else
-#include <soc/qcom/lge/board_lge.h>
 #endif
 
 #include <linux/power_supply.h>
@@ -46,16 +37,8 @@ extern void tunerbb_drv_fc8080_isr_control(fci_u8 onoff);
 /* proto type declare */
 static int broadcast_tdmb_fc8080_probe(struct spi_device *spi);
 static int broadcast_tdmb_fc8080_remove(struct spi_device *spi);
-static int broadcast_tdmb_fc8080_suspend(struct spi_device *spi, pm_message_t mesg);
-static int broadcast_tdmb_fc8080_resume(struct spi_device *spi);
 
-/* SPI Data read using workqueue */
-//#define FEATURE_DMB_USE_WORKQUEUE
-//#define FEATURE_DMB_USE_XO
-//#define FEATURE_DMB_USE_BUS_SCALE
-//#define FEATURE_DMB_USE_PM_QOS
-
-#define LGE_FC8080_DRV_VER  "1.00.02"
+#define LGE_FC8080_DRV_VER  "1.00.12"
 
 /************************************************************************/
 /* LINUX Driver Setting                                                 */
@@ -65,34 +48,31 @@ struct tdmb_fc8080_ctrl_blk
 {
     boolean                                    TdmbPowerOnState;
     struct spi_device*                    spi_ptr;
-#ifdef FEATURE_DMB_USE_WORKQUEUE
-    struct work_struct                    spi_work;
-    struct workqueue_struct*          spi_wq;
-#endif
     struct mutex                            mutex;
     struct wake_lock                      wake_lock;    /* wake_lock,wake_unlock */
     boolean                                    spi_irq_status;
     spinlock_t                                 spin_lock;
     struct clk                                *clk;
     struct platform_device             *pdev;
-#ifdef FEATURE_DMB_USE_BUS_SCALE
-    struct msm_bus_scale_pdata    *bus_scale_pdata;
-    fci_u32                                     bus_scale_client_id;
-#endif
-#ifdef FEATURE_DMB_USE_PM_QOS
-    struct pm_qos_request             pm_req_list;
-#endif
+
     uint32                                      dmb_en;
     uint32                                      dmb_irq;
     uint32                                      dmb_use_xtal;
     uint32                                      dmb_xtal_freq;
-    uint32                                      dmb_use_ant_sw;
-    uint32                                      dmb_ant;
-    uint32                                      dmb_ctrl_ldo;
-    struct regulator                         *ldo;
+    uint32                                      dmb_interface_freq;
 
-    uint32                                      dmb_use_lna;
-    uint32                                      dmb_lna;
+    uint32                                      dmb_use_ant_sw;
+    uint32                                      dmb_ant_active_mode;
+    uint32                                      dmb_ant;
+    uint32                                      ctrl_dmb_ldo;
+    struct regulator                         *dmb_ldo;
+    uint32                                      ctrl_lna_ldo;
+    struct regulator                         *lna_ldo;
+
+    uint32                                      dmb_use_lna_ctrl;
+    uint32                                      dmb_lna_ctrl;
+    uint32                                      dmb_use_lna_en;
+    uint32                                      dmb_lna_en;
 };
 
 static struct tdmb_fc8080_ctrl_blk fc8080_ctrl_info;
@@ -168,25 +148,6 @@ void tdmb_fc8080_spi_write_read_test(void)
 }
 #endif
 
-static int get_board_revision(void)
-{
-#ifdef CONFIG_LGE_PM_LGE_POWER_CLASS_BOARD_REVISION
-    union lge_power_propval lge_val = {0,};
-    struct lge_power *lge_hw_rev_lpc = NULL;
-    int rc;
-
-    lge_hw_rev_lpc = lge_power_get_by_name("lge_hw_rev");
-    if (!lge_hw_rev_lpc)
-        return HW_REV_A;
-
-    rc = lge_hw_rev_lpc->get_property(lge_hw_rev_lpc,
-                LGE_POWER_PROP_HW_REV, &lge_val);
-    return lge_val.intval;
-#else
-    return lge_get_board_revno();
-#endif
-}
-
 struct spi_device *tdmb_fc8080_get_spi_device(void)
 {
     return fc8080_ctrl_info.spi_ptr;
@@ -240,10 +201,6 @@ unsigned int tdmb_fc8080_get_xtal_freq(void)
     return (unsigned int)fc8080_ctrl_info.dmb_xtal_freq;
 }
 
-/* EXPORT_SYMBOL() : when we use external symbol
-which is not included in current module - over kernel 2.6 */
-//EXPORT_SYMBOL(tdmb_fc8080_tdmb_is_on);
-/*[BCAST002][S] 20140804 seongeun.jin - modify chip init check timing issue on BLT*/
 #ifdef FEATURE_POWER_ON_RETRY
 int tdmb_fc8080_power_on_retry(void)
 {
@@ -295,19 +252,31 @@ int tdmb_fc8080_power_on_retry(void)
     return res;
 }
 #endif
-/*[BCAST002][E]*/
+
 int tdmb_fc8080_power_on(void)
 {
     int rc = FALSE;
 
-    if(fc8080_ctrl_info.dmb_ctrl_ldo) {
-        rc = regulator_enable(fc8080_ctrl_info.ldo);
+    if(fc8080_ctrl_info.ctrl_dmb_ldo) {
+        rc = regulator_enable(fc8080_ctrl_info.dmb_ldo);
         if(rc) {
-            dev_err(&fc8080_ctrl_info.spi_ptr->dev, "unable to enable ldo\n");
+            dev_err(&fc8080_ctrl_info.spi_ptr->dev, "unable to enable dmb_ldo\n");
             return rc;
         }
         else {
-            printk("tdmb_ldo enable\n");
+            printk("dmb_ldo enable\n");
+        }
+        mdelay(5);
+    }
+
+    if(fc8080_ctrl_info.ctrl_lna_ldo) {
+        rc = regulator_enable(fc8080_ctrl_info.lna_ldo);
+        if(rc) {
+            dev_err(&fc8080_ctrl_info.spi_ptr->dev, "unable to enable lna_ldo\n");
+            return rc;
+        }
+        else {
+            printk("lna_ldo enable\n");
         }
         mdelay(5);
     }
@@ -322,9 +291,15 @@ int tdmb_fc8080_power_on(void)
         gpio_set_value(fc8080_ctrl_info.dmb_en, 1);
         mdelay(5);
 
-#ifdef FEATURE_DMB_USE_BUS_SCALE
-        msm_bus_scale_client_update_request(fc8080_ctrl_info.bus_scale_client_id, 1); /* expensive call, index:1 is the <84 512 3000 152000> entry */
-#endif
+        if(fc8080_ctrl_info.dmb_use_lna_ctrl)
+        {
+            gpio_set_value(fc8080_ctrl_info.dmb_lna_ctrl, 0);
+        }
+
+        if(fc8080_ctrl_info.dmb_use_lna_en)
+        {
+            gpio_set_value(fc8080_ctrl_info.dmb_lna_en, 1);
+        }
 
         if(!fc8080_ctrl_info.dmb_use_xtal) {
             if(fc8080_ctrl_info.clk != NULL) {
@@ -338,20 +313,11 @@ int tdmb_fc8080_power_on(void)
             }
         }
 
-#ifdef FEATURE_DMB_USE_PM_QOS
-        if(pm_qos_request_active(&fc8080_ctrl_info.pm_req_list)) {
-            pm_qos_update_request(&fc8080_ctrl_info.pm_req_list, 20);
-        }
-#endif
-//        gpio_set_value(PM8058_GPIO_PM_TO_SYS(DMB_ANT_SEL_P-1), 0);
-//        gpio_set_value(PM8058_GPIO_PM_TO_SYS(DMB_ANT_SEL_N-1), 1);
-
         if(fc8080_ctrl_info.dmb_use_ant_sw)
-            gpio_set_value(fc8080_ctrl_info.dmb_ant, 0);
-
-        if(fc8080_ctrl_info.dmb_use_lna)
-            gpio_set_value(fc8080_ctrl_info.dmb_lna, 0);
-
+        {
+            gpio_set_value(fc8080_ctrl_info.dmb_ant, fc8080_ctrl_info.dmb_ant_active_mode);
+            printk("tdmb_ant_sw_gpio_value : %d\n", fc8080_ctrl_info.dmb_ant_active_mode);
+        }
         mdelay(30); /* Due to X-tal stablization Time */
 
         tdmb_fc8080_interrupt_free();
@@ -389,24 +355,31 @@ int tdmb_fc8080_power_off(void)
         wake_unlock(&fc8080_ctrl_info.wake_lock);
         mdelay(20);
 
-//        gpio_set_value(PM8058_GPIO_PM_TO_SYS(DMB_ANT_SEL_P-1), 1);    // for ESD TEST
-//        gpio_set_value(PM8058_GPIO_PM_TO_SYS(DMB_ANT_SEL_N-1), 0);
-
         if(fc8080_ctrl_info.dmb_use_ant_sw)
-            gpio_set_value(fc8080_ctrl_info.dmb_ant, 1);
-
-#ifdef FEATURE_DMB_USE_BUS_SCALE
-        msm_bus_scale_client_update_request(fc8080_ctrl_info.bus_scale_client_id, 0); /* expensive call, index:0 is the <84 512 0 0> entry */
-#endif
-#ifdef FEATURE_DMB_USE_PM_QOS
-        if(pm_qos_request_active(&fc8080_ctrl_info.pm_req_list)) {
-            pm_qos_update_request(&fc8080_ctrl_info.pm_req_list, PM_QOS_DEFAULT_VALUE);
+        {
+            gpio_set_value(fc8080_ctrl_info.dmb_ant, !(fc8080_ctrl_info.dmb_ant_active_mode));
+            printk("tdmb_ant_sw_gpio_value : %d\n", !(fc8080_ctrl_info.dmb_ant_active_mode));
         }
-#endif
 
-        if(fc8080_ctrl_info.dmb_ctrl_ldo) {
-            regulator_disable(fc8080_ctrl_info.ldo);
-            printk("tdmb_ldo disable\n");
+        if(fc8080_ctrl_info.dmb_use_lna_ctrl)
+        {
+            gpio_set_value(fc8080_ctrl_info.dmb_lna_ctrl, 0);
+        }
+
+        if(fc8080_ctrl_info.dmb_use_lna_en)
+        {
+            gpio_set_value(fc8080_ctrl_info.dmb_lna_en, 0);
+        }
+
+        if(fc8080_ctrl_info.ctrl_dmb_ldo) {
+            regulator_disable(fc8080_ctrl_info.dmb_ldo);
+            printk("dmb_ldo disable\n");
+            mdelay(5);
+        }
+
+        if(fc8080_ctrl_info.ctrl_lna_ldo) {
+            regulator_disable(fc8080_ctrl_info.lna_ldo);
+            printk("lna_ldo disable\n");
             mdelay(5);
         }
     }
@@ -435,8 +408,6 @@ static struct of_device_id tdmb_spi_table[] = {
 static struct spi_driver broadcast_tdmb_driver = {
     .probe = broadcast_tdmb_fc8080_probe,
     .remove    = __broadcast_dev_exit_p(broadcast_tdmb_fc8080_remove),
-    .suspend = broadcast_tdmb_fc8080_suspend,
-    .resume  = broadcast_tdmb_fc8080_resume,
     .driver = {
         .name = "tdmb",
         .of_match_table = tdmb_spi_table,
@@ -503,52 +474,6 @@ int tdmb_fc8080_spi_write_read(uint8* tx_data, int tx_length, uint8 *rx_data, in
     return TRUE;
 }
 
-#ifdef FEATURE_DMB_USE_WORKQUEUE
-static irqreturn_t broadcast_tdmb_spi_isr(int irq, void *handle)
-{
-    struct tdmb_fc8080_ctrl_blk* fc8080_info_p;
-
-    fc8080_info_p = (struct tdmb_fc8080_ctrl_blk *)handle;
-    if ( fc8080_info_p && fc8080_info_p->TdmbPowerOnState )
-    {
-        unsigned long flag;
-        if (fc8080_info_p->spi_irq_status)
-        {
-            printk("######### spi read function is so late skip #########\n");
-            return IRQ_HANDLED;
-        }
-//        printk("***** broadcast_tdmb_spi_isr coming *******\n");
-        spin_lock_irqsave(&fc8080_info_p->spin_lock, flag);
-        queue_work(fc8080_info_p->spi_wq, &fc8080_info_p->spi_work);
-        spin_unlock_irqrestore(&fc8080_info_p->spin_lock, flag);
-    }
-    else
-    {
-        printk("broadcast_tdmb_spi_isr is called, but device is off state\n");
-    }
-
-    return IRQ_HANDLED;
-}
-
-static void broacast_tdmb_spi_work(struct work_struct *tdmb_work)
-{
-    struct tdmb_fc8080_ctrl_blk *pTdmbWorkData;
-
-    pTdmbWorkData = container_of(tdmb_work, struct tdmb_fc8080_ctrl_blk, spi_work);
-    if ( pTdmbWorkData )
-    {
-        tunerbb_drv_fc8080_isr_control(0);
-        pTdmbWorkData->spi_irq_status = TRUE;
-        broadcast_fc8080_drv_if_isr();
-        pTdmbWorkData->spi_irq_status = FALSE;
-        tunerbb_drv_fc8080_isr_control(1);
-    }
-    else
-    {
-        printk("~~~~~~~broadcast_tdmb_spi_work call but pTdmbworkData is NULL ~~~~~~~\n");
-    }
-}
-#else
 static irqreturn_t broadcast_tdmb_spi_event_handler(int irq, void *handle)
 {
     struct tdmb_fc8080_ctrl_blk* fc8080_info_p;
@@ -575,37 +500,17 @@ static irqreturn_t broadcast_tdmb_spi_event_handler(int irq, void *handle)
 
     return IRQ_HANDLED;
 }
-#endif
 
 #ifdef FEATURE_DMB_USE_PINCTRL
 static int tdmb_pinctrl_init(void)
 {
     struct pinctrl *tdmb_pinctrl;
-    struct pinctrl_state *gpio_state_suspend;
-
     tdmb_pinctrl = devm_pinctrl_get(&(fc8080_ctrl_info.pdev->dev));
-
 
     if(IS_ERR_OR_NULL(tdmb_pinctrl)) {
         pr_err("%s: Getting pinctrl handle failed\n", __func__);
         return -EINVAL;
     }
-    gpio_state_suspend
-     = pinctrl_lookup_state(tdmb_pinctrl, "gpio_tdmb_suspend");
-
-     if(IS_ERR_OR_NULL(gpio_state_suspend)) {
-         pr_err("%s: Failed to get the suspend state pinctrl handle\n", __func__);
-         return -EINVAL;
-    }
-
-    if(pinctrl_select_state(tdmb_pinctrl, gpio_state_suspend)) {
-        pr_err("%s: error on pinctrl_select_state for tdmb enable and irq pin\n", __func__);
-        return -EINVAL;
-    }
-    else {
-        printk("%s: success to set pinctrl_select_state for tdmb enable and irq pin\n", __func__);
-    }
-
     return 0;
 }
 #endif
@@ -641,54 +546,89 @@ static int tunerbb_drv_load_hw_configure(struct spi_device *spi)
     printk("%s: use_xtal : %d\n", __func__, fc8080_ctrl_info.dmb_use_xtal);
 
     of_property_read_u32(fc8080_ctrl_info.pdev->dev.of_node, "xtal-freq", &fc8080_ctrl_info.dmb_xtal_freq);
-    fc8080_ctrl_info.spi_ptr->max_speed_hz     = (fc8080_ctrl_info.dmb_xtal_freq*1000);
     printk("%s: dmb_xtal_freq : %d\n", __func__, fc8080_ctrl_info.dmb_xtal_freq);
+
+    of_property_read_u32(fc8080_ctrl_info.pdev->dev.of_node, "interface-freq", &fc8080_ctrl_info.dmb_interface_freq);
+    fc8080_ctrl_info.spi_ptr->max_speed_hz     = (fc8080_ctrl_info.dmb_interface_freq*1000);
+    printk("%s: dmb_interface_freq : %d\n", __func__, fc8080_ctrl_info.dmb_interface_freq);
 
     of_property_read_u32(fc8080_ctrl_info.pdev->dev.of_node, "use-ant-sw", &fc8080_ctrl_info.dmb_use_ant_sw);
     printk("%s: dmb_use_ant_sw : %d\n", __func__, fc8080_ctrl_info.dmb_use_ant_sw);
 
     if(fc8080_ctrl_info.dmb_use_ant_sw) {
-        fc8080_ctrl_info.dmb_ant = of_get_named_gpio(fc8080_ctrl_info.pdev->dev.of_node,"tdmb-fc8080,ant-gpio",0);
+        of_property_read_u32(fc8080_ctrl_info.pdev->dev.of_node, "ant-active-mode", &fc8080_ctrl_info.dmb_ant_active_mode);
+    	printk("%s: dmb_ant_active_mode : %d\n", __func__, fc8080_ctrl_info.dmb_ant_active_mode);
 
+        fc8080_ctrl_info.dmb_ant = of_get_named_gpio(fc8080_ctrl_info.pdev->dev.of_node,"tdmb-fc8080,ant-gpio",0);
         rc = gpio_request(fc8080_ctrl_info.dmb_ant, "DMB_ANT");
         if (rc < 0) {
             err_count++;
-            printk("%s:Failed GPIO DMB_ANT request!!!\n",__func__);
+            printk("%s: Failed GPIO DMB_ANT request!!!\n",__func__);
         }
-        gpio_direction_output(fc8080_ctrl_info.dmb_ant,0);
+        gpio_direction_output(fc8080_ctrl_info.dmb_ant, 0);
     }
 
-    of_property_read_u32(fc8080_ctrl_info.pdev->dev.of_node, "ctrl-ldo", &fc8080_ctrl_info.dmb_ctrl_ldo);
-    printk("%s: dmb_ctrl_ldo : %d\n", __func__, fc8080_ctrl_info.dmb_ctrl_ldo);
+    of_property_read_u32(fc8080_ctrl_info.pdev->dev.of_node, "ctrl-dmb-ldo", &fc8080_ctrl_info.ctrl_dmb_ldo);
+    printk("%s: ctrl-dmb-ldo : %d\n", __func__, fc8080_ctrl_info.ctrl_dmb_ldo);
+
+    of_property_read_u32(fc8080_ctrl_info.pdev->dev.of_node, "ctrl-lna-ldo", &fc8080_ctrl_info.ctrl_lna_ldo);
+    printk("%s: ctrl-lna-ldo : %d\n", __func__, fc8080_ctrl_info.ctrl_lna_ldo);
 
     gpio_direction_output(fc8080_ctrl_info.dmb_en, 0);
     gpio_direction_input(fc8080_ctrl_info.dmb_irq);
 
     if(err_count > 0) rc = -EINVAL;
 
-    if(fc8080_ctrl_info.dmb_ctrl_ldo) {
-        fc8080_ctrl_info.ldo = devm_regulator_get(&fc8080_ctrl_info.spi_ptr->dev, "ldo");
-        if(IS_ERR(fc8080_ctrl_info.ldo)) {
-            rc = PTR_ERR(fc8080_ctrl_info.ldo);
-            dev_err(&fc8080_ctrl_info.spi_ptr->dev, "regulator ldo failed\n");
+    if(fc8080_ctrl_info.ctrl_dmb_ldo) {
+        fc8080_ctrl_info.dmb_ldo = devm_regulator_get(&fc8080_ctrl_info.spi_ptr->dev, "dmb_ldo");
+        if(IS_ERR(fc8080_ctrl_info.dmb_ldo)) {
+            rc = PTR_ERR(fc8080_ctrl_info.dmb_ldo);
+            dev_err(&fc8080_ctrl_info.spi_ptr->dev, "regulator dmb_ldo failed\n");
         }
         else {
-            printk("tdmb_ldo regulator OK\n");
+            printk("dmb_ldo regulator OK\n");
         }
     }
 
-    of_property_read_u32(fc8080_ctrl_info.pdev->dev.of_node, "use-lna", &fc8080_ctrl_info.dmb_use_lna);
-    printk("%s: dmb_use_lna : %d\n", __func__, fc8080_ctrl_info.dmb_use_lna);
+    if(fc8080_ctrl_info.ctrl_lna_ldo) {
+        fc8080_ctrl_info.lna_ldo= devm_regulator_get(&fc8080_ctrl_info.spi_ptr->dev, "lna_ldo");
+        if(IS_ERR(fc8080_ctrl_info.lna_ldo)) {
+            rc = PTR_ERR(fc8080_ctrl_info.lna_ldo);
+            dev_err(&fc8080_ctrl_info.spi_ptr->dev, "regulator lna_ldo failed\n");
+        }
+        else {
+            printk("lna_ldo regulator OK\n");
+        }
+    }
 
-    if(fc8080_ctrl_info.dmb_use_lna) {
-        fc8080_ctrl_info.dmb_lna = of_get_named_gpio(fc8080_ctrl_info.pdev->dev.of_node,"tdmb-fc8080,lna-gpio",0);
+    of_property_read_u32(fc8080_ctrl_info.pdev->dev.of_node, "use-lna-ctrl", &fc8080_ctrl_info.dmb_use_lna_ctrl);
+    printk("%s: dmb_use_lna_ctrl : %d\n", __func__, fc8080_ctrl_info.dmb_use_lna_ctrl);
 
-        rc = gpio_request(fc8080_ctrl_info.dmb_lna, "DMB_LNA");
+    if(fc8080_ctrl_info.dmb_use_lna_ctrl) {
+        fc8080_ctrl_info.dmb_lna_ctrl = of_get_named_gpio(fc8080_ctrl_info.pdev->dev.of_node,"tdmb-fc8080,lna-ctrl-gpio",0);
+        rc = gpio_request(fc8080_ctrl_info.dmb_lna_ctrl, "DMB_LNA_CTRL");
         if (rc < 0) {
             err_count++;
-            printk("%s:Failed GPIO DMB_LNA request!!!\n",__func__);
+            printk("%s: Failed GPIO DMB_LNA_CTRL request!!!\n",__func__);
+        } else {
+            printk("%s: Successed GPIO DMB_LNA_CTRL %d request!!!\n",__func__, fc8080_ctrl_info.dmb_lna_ctrl);
         }
-        gpio_direction_output(fc8080_ctrl_info.dmb_lna,0);
+        gpio_direction_output(fc8080_ctrl_info.dmb_lna_ctrl,0);
+    }
+
+    of_property_read_u32(fc8080_ctrl_info.pdev->dev.of_node, "use-lna-en", &fc8080_ctrl_info.dmb_use_lna_en);
+    printk("%s: dmb_use_lna_en : %d\n", __func__, fc8080_ctrl_info.dmb_use_lna_en);
+
+    if(fc8080_ctrl_info.dmb_use_lna_en) {
+        fc8080_ctrl_info.dmb_lna_en = of_get_named_gpio(fc8080_ctrl_info.pdev->dev.of_node,"tdmb-fc8080,lna-en-gpio",0);
+        rc = gpio_request(fc8080_ctrl_info.dmb_lna_en , "DMB_LNA_EN");
+        if (rc < 0) {
+            err_count++;
+            printk("%s: Failed GPIO DMB_LNA_EN request!!!\n",__func__);
+        } else {
+            printk("%s: Successed GPIO DMB_LNA_EN %d request!!!\n",__func__, fc8080_ctrl_info.dmb_lna_en);
+        }
+        gpio_direction_output(fc8080_ctrl_info.dmb_lna_en ,0);
     }
 
     return rc;
@@ -704,13 +644,7 @@ static int broadcast_tdmb_fc8080_probe(struct spi_device *spi)
         return -1;
     }
 
-    printk("%s: get_board_revision(%d)\n", __func__, get_board_revision());
     tunerbb_drv_load_hw_configure(spi);
-
-#ifdef FEATURE_DMB_USE_BUS_SCALE
-    fc8080_ctrl_info.bus_scale_pdata = msm_bus_cl_get_pdata(fc8080_ctrl_info.pdev);
-    fc8080_ctrl_info.bus_scale_client_id = msm_bus_scale_register_client(fc8080_ctrl_info.bus_scale_pdata);
-#endif
 
     // Once I have a spi_device structure I can do a transfer anytime
 
@@ -735,26 +669,13 @@ static int broadcast_tdmb_fc8080_probe(struct spi_device *spi)
         clk_disable_unprepare(fc8080_ctrl_info.clk);
     }
 
-#ifdef FEATURE_DMB_USE_WORKQUEUE
-    INIT_WORK(&fc8080_ctrl_info.spi_work, broacast_tdmb_spi_work);
-    fc8080_ctrl_info.spi_wq = create_singlethread_workqueue("tdmb_spi_wq");
-    if(fc8080_ctrl_info.spi_wq == NULL){
-        printk("Failed to setup tdmb spi workqueue \n");
-        return -ENOMEM;
-    }
-#endif
-
 #ifdef FEATURE_DMB_USE_PINCTRL
     tdmb_pinctrl_init();
 #endif
 
-#ifdef FEATURE_DMB_USE_WORKQUEUE
-    rc = request_irq(spi->irq, broadcast_tdmb_spi_isr, IRQF_DISABLED | IRQF_TRIGGER_FALLING,
+    rc = request_threaded_irq(spi->irq, NULL, broadcast_tdmb_spi_event_handler, IRQF_ONESHOT | IRQF_TRIGGER_FALLING,
                        spi->dev.driver->name, &fc8080_ctrl_info);
-#else
-    rc = request_threaded_irq(spi->irq, NULL, broadcast_tdmb_spi_event_handler, IRQF_ONESHOT | IRQF_DISABLED | IRQF_TRIGGER_FALLING,
-                       spi->dev.driver->name, &fc8080_ctrl_info);
-#endif
+
     printk("%s: request_irq=%d\n", __func__, rc);
 
     tdmb_fc8080_interrupt_lock();
@@ -765,9 +686,6 @@ static int broadcast_tdmb_fc8080_probe(struct spi_device *spi)
 
     spin_lock_init(&fc8080_ctrl_info.spin_lock);
 
-#ifdef FEATURE_DMB_USE_PM_QOS
-    pm_qos_add_request(&fc8080_ctrl_info.pm_req_list, PM_QOS_CPU_DMA_LATENCY, PM_QOS_DEFAULT_VALUE);
-#endif
     printk("%s: End\n", __func__);
 
     return rc;
@@ -777,42 +695,16 @@ static int broadcast_tdmb_fc8080_remove(struct spi_device *spi)
 {
     printk("broadcast_tdmb_fc8080_remove \n");
 
-#ifdef FEATURE_DMB_USE_WORKQUEUE
-    if (fc8080_ctrl_info.spi_wq)
-    {
-        flush_workqueue(fc8080_ctrl_info.spi_wq);
-        destroy_workqueue(fc8080_ctrl_info.spi_wq);
-    }
-#endif
-
-#ifdef FEATURE_DMB_USE_BUS_SCALE
-    msm_bus_scale_unregister_client(fc8080_ctrl_info.bus_scale_client_id);
-#endif
-
     free_irq(spi->irq, &fc8080_ctrl_info);
 
     mutex_destroy(&fc8080_ctrl_info.mutex);
 
     wake_lock_destroy(&fc8080_ctrl_info.wake_lock);
 
-#ifdef FEATURE_DMB_USE_PM_QOS
-    pm_qos_remove_request(&fc8080_ctrl_info.pm_req_list);
-#endif
     memset((unsigned char*)&fc8080_ctrl_info, 0x0, sizeof(struct tdmb_fc8080_ctrl_blk));
     return 0;
 }
 
-static int broadcast_tdmb_fc8080_suspend(struct spi_device *spi, pm_message_t mesg)
-{
-    printk("broadcast_tdmb_fc8080_suspend \n");
-    return 0;
-}
-
-static int broadcast_tdmb_fc8080_resume(struct spi_device *spi)
-{
-    printk("broadcast_tdmb_fc8080_resume \n");
-    return 0;
-}
 #if 0
 static int broadcast_tdmb_fc8080_check_chip_id(void)
 {
@@ -851,6 +743,7 @@ int __broadcast_dev_init broadcast_tdmb_fc8080_drv_init(void)
 
     rc = broadcast_tdmb_drv_start(&device_fc8080);
     printk("FC8080 DRV_VER : 20130808, BBM_VER : 1.5.1 \n");
+    printk("Linux Version : %d\n", LINUX_VERSION_CODE);
     printk("LGE_FC8080_DRV_VER : %s\n", LGE_FC8080_DRV_VER);
     printk("broadcast_tdmb_fc8080_probe start %d \n", rc);
 
@@ -861,8 +754,6 @@ static void __exit broadcast_tdmb_fc8080_drv_exit(void)
 {
     spi_unregister_driver(&broadcast_tdmb_driver);
 }
-
-
 
 module_init(broadcast_tdmb_fc8080_drv_init);
 module_exit(broadcast_tdmb_fc8080_drv_exit);

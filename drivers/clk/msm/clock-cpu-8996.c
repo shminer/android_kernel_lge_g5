@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2014-2016, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2014-2017, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -40,6 +40,12 @@
 
 #include "clock.h"
 #include "vdd-level-8994.h"
+
+#ifdef CONFIG_LGE_PM
+#include <soc/qcom/lge/board_lge.h>
+#include <soc/qcom/socinfo.h>
+#include <soc/qcom/smem.h>
+#endif
 
 enum {
 	APC0_PLL_BASE,
@@ -676,7 +682,7 @@ static int cpu_clk_8996_set_rate(struct clk *c, unsigned long rate)
 {
 	struct cpu_clk_8996 *cpuclk = to_cpu_clk_8996(c);
 	int ret, err_ret;
-	unsigned long alt_pll_prev_rate;
+	unsigned long alt_pll_prev_rate = 0;
 	unsigned long alt_pll_rate;
 	unsigned long n_alt_freqs = cpuclk->n_alt_pll_freqs;
 	bool on_acd_leg = rate > MAX_PLL_MAIN_FREQ;
@@ -1257,6 +1263,10 @@ static void populate_opp_table(struct platform_device *pdev)
 	perfcl_fmax = perfcl_clk.c.fmax[perfcl_clk.c.num_fmax - 1];
 	cbf_fmax = cbf_clk.c.fmax[cbf_clk.c.num_fmax - 1];
 
+#ifdef CONFIG_LGE_PM
+	pr_err("pwrcl_fmax, perfcl_fmax, cbf_fmax : %lu %lu %lu\n",
+			pwrcl_fmax, perfcl_fmax, cbf_fmax);
+#endif
 	for_each_possible_cpu(cpu) {
 		if (logical_cpu_to_clk(cpu) == &pwrcl_clk.c) {
 			WARN(add_opp(&pwrcl_clk.c, get_cpu_device(cpu),
@@ -1302,12 +1312,30 @@ unsigned long perfcl_early_boot_rate = 883200000;
 unsigned long cbf_early_boot_rate = 614400000;
 unsigned long alt_pll_early_boot_rate = 307200000;
 
+#ifdef CONFIG_LGE_PM
+#define BUILD_ID_LENGTH 32
+
+struct socinfo_v0_1 {
+	uint32_t format;
+	uint32_t id;
+	uint32_t version;
+	char build_id[BUILD_ID_LENGTH];
+};
+
+static union {
+	struct socinfo_v0_1 v0_1;
+} *_socinfo;
+
+static unsigned size;
+#endif
+
 static int cpu_clock_8996_driver_probe(struct platform_device *pdev)
 {
 	int ret, cpu;
 	unsigned long pwrclrate, perfclrate, cbfrate;
 	int pvs_ver = 0;
 	u32 pte_efuse;
+	u32 clk_rate;
 	char perfclspeedbinstr[] = "qcom,perfcl-speedbinXX-vXX";
 	char pwrclspeedbinstr[] = "qcom,pwrcl-speedbinXX-vXX";
 	char cbfspeedbinstr[] = "qcom,cbf-speedbinXX-vXX";
@@ -1331,7 +1359,22 @@ static int cpu_clock_8996_driver_probe(struct platform_device *pdev)
 
 	snprintf(perfclspeedbinstr, ARRAY_SIZE(perfclspeedbinstr),
 			"qcom,perfcl-speedbin%d-v%d", perfclspeedbin, pvs_ver);
+#ifdef CONFIG_LGE_PM
+	_socinfo = smem_get_entry(SMEM_HW_SW_BUILD_ID, &size, 0, SMEM_ANY_HOST_FLAG);
 
+	if (_socinfo != NULL) {
+		pr_err("soc_id = %d\n", _socinfo->v0_1.id);
+
+		if (_socinfo->v0_1.id == 305 &&
+				(lge_get_factory_boot()
+				 || lge_get_laf_mode()
+				 || lge_get_boot_partition_recovery())) {
+			snprintf(perfclspeedbinstr, ARRAY_SIZE(perfclspeedbinstr),
+					"qcom,perfcl-speedbin%d-v%d-%s", perfclspeedbin, pvs_ver, "f");
+		}
+	}
+	pr_err("%s\n", perfclspeedbinstr);
+#endif
 	ret = of_get_fmax_vdd_class(pdev, &perfcl_clk.c, perfclspeedbinstr);
 	if (ret) {
 		dev_err(&pdev->dev, "Can't get speed bin for perfcl. Falling back to zero.\n");
@@ -1342,10 +1385,21 @@ static int cpu_clock_8996_driver_probe(struct platform_device *pdev)
 			return ret;
 		}
 	}
-
 	snprintf(pwrclspeedbinstr, ARRAY_SIZE(pwrclspeedbinstr),
 			"qcom,pwrcl-speedbin%d-v%d", perfclspeedbin, pvs_ver);
 
+#ifdef CONFIG_LGE_PM
+	if (_socinfo != NULL) {
+		if (_socinfo->v0_1.id == 305 &&
+				(lge_get_factory_boot()
+				 || lge_get_laf_mode()
+				 || lge_get_boot_partition_recovery())) {
+			snprintf(pwrclspeedbinstr, ARRAY_SIZE(pwrclspeedbinstr),
+					"qcom,pwrcl-speedbin%d-v%d-%s", perfclspeedbin, pvs_ver, "f");
+		}
+	}
+	pr_err("%s\n", pwrclspeedbinstr);
+#endif
 	ret = of_get_fmax_vdd_class(pdev, &pwrcl_clk.c, pwrclspeedbinstr);
 	if (ret) {
 		dev_err(&pdev->dev, "Can't get speed bin for pwrcl. Falling back to zero.\n");
@@ -1435,6 +1489,18 @@ static int cpu_clock_8996_driver_probe(struct platform_device *pdev)
 	clk_prepare_enable(&pwrcl_alt_pll.c);
 	clk_prepare_enable(&cbf_pll.c);
 
+	/* Override the existing ealry boot frequency for power cluster */
+	ret = of_property_read_u32(pdev->dev.of_node,
+				"qcom,pwrcl-early-boot-freq", &clk_rate);
+	if (!ret)
+		pwrcl_early_boot_rate = clk_rate;
+
+	/* Override the existing ealry boot frequency for perf cluster */
+	ret = of_property_read_u32(pdev->dev.of_node,
+				"qcom,perfcl-early-boot-freq", &clk_rate);
+	if (!ret)
+		perfcl_early_boot_rate = clk_rate;
+
 	/* Set the early boot rate. This may also switch us to the ACD leg */
 	clk_set_rate(&pwrcl_clk.c, pwrcl_early_boot_rate);
 	clk_set_rate(&perfcl_clk.c, perfcl_early_boot_rate);
@@ -1450,6 +1516,7 @@ static struct of_device_id match_table[] = {
 	{ .compatible = "qcom,cpu-clock-8996" },
 	{ .compatible = "qcom,cpu-clock-8996-v3" },
 	{ .compatible = "qcom,cpu-clock-8996-pro" },
+	{ .compatible = "qcom,cpu-clock-8996-auto" },
 	{}
 };
 
@@ -1499,6 +1566,9 @@ module_exit(cpu_clock_8996_exit);
 #define HF_MUX_SEL_LF_MUX 0x1
 #define LF_MUX_SEL_ALT_PLL 0x1
 
+#define PWRCL_EARLY_BOOT_RATE 1286400000
+#define PERFCL_EARLY_BOOT_RATE 1363200000
+
 static int use_alt_pll;
 module_param(use_alt_pll, int, 0444);
 
@@ -1536,6 +1606,12 @@ int __init cpu_clock_8996_early_init(void)
 					 "qcom,cpu-clock-8996-pro")) {
 		cpu_clocks_v3 = true;
 		cpu_clocks_pro = true;
+	} else if (of_find_compatible_node(NULL, NULL,
+					"qcom,cpu-clock-8996-auto")) {
+		cpu_clocks_v3 = true;
+		cpu_clocks_pro = true;
+		pwrcl_early_boot_rate = PWRCL_EARLY_BOOT_RATE;
+		perfcl_early_boot_rate = PERFCL_EARLY_BOOT_RATE;
 	} else if (of_find_compatible_node(NULL, NULL,
 					 "qcom,cpu-clock-8996-v3")) {
 		cpu_clocks_v3 = true;

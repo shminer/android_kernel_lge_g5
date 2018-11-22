@@ -3,7 +3,30 @@
 
 #ifdef CONFIG_LGE_PM_LGE_POWER_CLASS_BOARD_REVISION
 #else
-#if defined(CONFIG_MACH_MSM8996_ELSA)
+#if defined(CONFIG_MACH_MSM8996_LUCYE)
+enum hw_rev_type {
+	HW_REV_EVB1 = 0,
+	HW_REV_EVB2,
+	HW_REV_EVB3,
+	HW_REV_0,
+	HW_REV_0_1,
+	HW_REV_0_2,
+	HW_REV_0_3,
+	HW_REV_0_4,
+	HW_REV_A,
+	HW_REV_B,
+	HW_REV_C,
+	HW_REV_D,
+	HW_REV_1_0,
+	HW_REV_1_1,
+	HW_REV_1_2,
+	HW_REV_1_3,
+	HW_REV_1_4,
+	HW_REV_1_5,
+	HW_REV_1_6,
+	HW_REV_MAX
+};
+#elif defined(CONFIG_MACH_MSM8996_ELSA) || defined(CONFIG_MACH_MSM8996_ANNA)
 enum hw_rev_type {
 	HW_REV_EVB1 = 0,
 	HW_REV_EVB2,
@@ -57,9 +80,11 @@ enum hw_rev_type lge_get_board_revno(void);
 enum lge_laf_mode_type {
 	LGE_LAF_MODE_NORMAL = 0,
 	LGE_LAF_MODE_LAF,
+	LGE_LAF_MODE_MID,
 };
 
 enum lge_laf_mode_type lge_get_laf_mode(void);
+enum lge_laf_mode_type lge_get_laf_mid(void);
 #endif
 
 #if defined(CONFIG_PRE_SELF_DIAGNOSIS)
@@ -99,7 +124,11 @@ extern int lge_get_bootreason(void);
 extern int lge_get_bootreason_with_lcd_dimming(void);
 #endif
 
-#ifdef CONFIG_LGE_EARJACK_DEBUGGER
+extern int lge_get_fota_mode(void);
+extern int lge_get_boot_partition_recovery(void);
+extern char* lge_get_boot_partition(void);
+
+#if defined(CONFIG_LGE_EARJACK_DEBUGGER) || defined(CONFIG_LGE_USB_DEBUGGER)
 /* config */
 #define UART_CONSOLE_ENABLE_ON_EARJACK		BIT(0)
 #define UART_CONSOLE_ENABLE_ON_EARJACK_DEBUGGER	BIT(1)

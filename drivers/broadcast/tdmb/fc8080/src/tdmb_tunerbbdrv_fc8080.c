@@ -654,12 +654,13 @@ int8    tunerbb_drv_fc8080_get_ber(struct broadcast_tdmb_sig_info *dmb_bb_info)
     uint16 antTable[MAX_ANT_RAW][MAX_ANT_COLUMN];
 #ifdef FEATURE_CHECK_EEP
     uint32 eep_info;
-    uint8 eep_pi1, eep_pi2, en_num;
+    uint8 eep_pi1, eep_pi2;
+    uint8 en_num = 0;
     uint8 protection_level;
     uint16 protection_type;
 #endif
     uint16 avgBER;
-    uint8 refAntLevel;
+    uint8 refAntLevel = 0;
     int nation_info = 0;
     /* LGE_ADD_E, [hyun118.shin@lge.com], TDMB Antenna Leveling */
 
@@ -1027,7 +1028,7 @@ int8    tunerbb_drv_fc8080_get_ber(struct broadcast_tdmb_sig_info *dmb_bb_info)
         bbm_com_word_write(0, BBM_BUF_OVERRUN, 0);
     }
     if(overrun != 0) {
-        print_log(0, "======= FC8080 BBM_BUF_OVERRUN =====  0x%x\n", overrun);
+        printk( "======= FC8080 BBM_BUF_OVERRUN =====  0x%x\n", overrun);
     }
 }
 

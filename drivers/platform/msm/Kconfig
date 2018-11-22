@@ -292,13 +292,23 @@ config MSM_11AD
 	tristate "Platform driver for 11ad chip"
 	depends on PCI
 	depends on PCI_MSM
-	default n
+	depends on !MACH_LGE
+	default y
 	---help---
 	  This module adds required platform support for wireless adapter based on
 	  Qualcomm Technologies, Inc. 11ad chip, integrated into MSM platform
 
 	  If you choose to build it as a module, it will be called
 	  msm_11ad_proxy.
+
+config BW_MONITOR
+	bool "Bandwidth monitor driver"
+        depends on BUS_TOPOLOGY_ADHOC && THERMAL
+	help
+	 Enable this module if any bandwidth of a bus needs to be
+	 monitored and limited by thermal core framework. It does
+	 it by registering the bus bandwidth as a sensor in
+	 thermal core framework.
 
 config LGE_PM_HARDRESET_MODE
 	boolean"LGE add hardrset mode in hiddenmenu"
@@ -315,5 +325,11 @@ config LGE_QPNP_HAPTIC_OV_RB
 	help
 	  LGE implements Over Drive and Reverse Brake voltage on Direct mode.
 
+	default n
+config LGE_QPNP_REMOVE_OV_RB
+	boolean "LGE Remove DIRECT MODE Over Drive, Modify Reverse Brake voltage"
+	depends on QPNP_HAPTIC
+	help
+	  LGE remove Over Drive and modify Reverse Brake voltage on Direct mode.
 	default n
 endmenu

@@ -114,7 +114,6 @@
 	qcom,fg-dischg-med-voltage-gain = <5 4 4>;
 	qcom,fg-dischg-high-voltage-gain = <4 4 3>;
 	qcom,cl-max-limit-deciperc= <50>;
-	qcom,cl-min-limit-deciperc= <200>;
 };
 
 &pmi8994_haptics {
@@ -344,12 +343,18 @@
 			"battery", "temp", "/sys/class/power_supply/battery/temp",
 			"battery", "valid_batt_id", "/sys/class/lge_power/lge_batt_id/valid_batt_id",
 			"battery", "voltage_now", "/sys/class/power_supply/battery/voltage_now",
+			"battery", "condition", "/sys/class/power_supply/battery/battery_condition",
+			"battery", "time_to_full_now", "/sys/class/power_supply/battery/time_to_full_now",
+			"battery", "cycle", "NULL",
+			"battery", "battery_type", "/sys/class/power_supply/bms/battery_type",
+			"battery", "charge_full", "/sys/class/power_supply/bms/charge_full",
+			"battery", "charge_now_raw", "/sys/class/power_supply/bms/charge_now_raw",
 			/* Charger */
 			"charger", "ac_online", "NULL",
 			"charger", "usb_online", "/sys/class/power_supply/usb/online",
 			"charger", "present", "/sys/class/power_supply/usb/present",
 			"charger", "wlc_online", "NULL",
-			"charger", "type", "/sys/class/power_supply/usb/type",
+			"charger", "type", "/sys/class/power_supply/usb/real_type",
 			"charger", "time_out", "/sys/class/power_supply/battery/safety_timer_enabled",
 			"charger", "charging_enabled", "/sys/class/power_supply/battery/charging_enabled",
 			"charger", "ibat_current", "/sys/class/power_supply/battery/current_now",
@@ -359,7 +364,15 @@
 			"charger", "wlc_thermal_mitigation", "NULL",
 			"charger", "usb_parallel_chg_status", "/sys/class/power_supply/usb-parallel/status",
 			"charger", "usb_parallel_charging_enabled", "/sys/class/power_supply/usb-parallel/charging_enabled",
-			"charger", "quick_charging_state", "/sys/module/lge_power_class_charging_controller/parameters/quick_charging_state",
+			"charger", "restricted_charging", "/sys/module/lge_power_class_charging_controller/parameters/restricted_charging",
+			"charger", "fastchg", "/sys/class/power_supply/usb/fastchg",
+			"charger", "chgstep", "/sys/class/power_supply/battery/device/chgstep",
+			"charger", "incompatible", "/sys/class/power_supply/usb/incompatible_chg",
+			"charger", "ext_pwr", "/sys/class/power_supply/battery/ext_pwr",
+			"charger", "input_current_settled", "/sys/class/power_supply/battery/input_current_settled",
+			"charger", "connection_type", "NULL",
+			"charger", "wireless_charging_enabled", "NULL",
+			"charger", "input_suspend", "NULL",
 			/* LCD Backlight */
 			"lcd", "brightness", "/sys/class/leds/lcd-backlight/brightness",
 			"lcd", "max_brightness", "/sys/class/leds/lcd-backlight/max_brightness",
@@ -379,6 +392,7 @@
 			"platform", "power_state", "/sys/power/autosleep",
 			"platform", "poweron_alarm", "/sys/module/qpnp_rtc/parameters/poweron_alarm",
 			"platform", "pcb_rev", "/sys/class/hwmon/hwmon1/device/pcb_rev",
+			"platform", "smpl_boot", "/sys/module/lge_smpl_count/parameters/smpl_boot",
 			/* testmode */
 			"testmode", "charge", "/sys/class/power_supply/battery/device/at_charge",
 			"testmode", "chcomp", "/sys/class/power_supply/battery/device/at_chcomp",

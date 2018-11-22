@@ -468,12 +468,12 @@ static ssize_t voice_svc_write(struct file *file, const char __user *buf,
 				ret = -EINVAL;
 				goto done;
 			}
-	} else {
+		} else {
 			pr_err("%s: invalid data payload size for request command\n",
 				__func__);
-		ret = -EINVAL;
-		goto done;
-	}
+			ret = -EINVAL;
+			goto done;
+		}
 		break;
 	default:
 		pr_debug("%s: Invalid command: %u\n", __func__, cmd);

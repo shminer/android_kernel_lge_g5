@@ -1,4 +1,4 @@
-/* Copyright (c) 2014-2016, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2014-2017, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -9,7 +9,6 @@
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License for more details.
  */
-
 #include <linux/module.h>
 #include <linux/firmware.h>
 #include <linux/device.h>
@@ -371,6 +370,9 @@ static int wcd_cpe_enable_cpe_clks(struct wcd_cpe_core *core, bool enable)
 {
 	int ret, ret1;
 
+	pr_info("Enter func : %s , line : %d\n", __func__, __LINE__);
+
+
 	if (!core || !core->cpe_cdc_cb ||
 	    !core->cpe_cdc_cb->cpe_clk_en) {
 		pr_err("%s: invalid handle\n",
@@ -404,6 +406,8 @@ static int wcd_cpe_enable_cpe_clks(struct wcd_cpe_core *core, bool enable)
 
 	if (enable)
 		core->cpe_clk_ref++;
+
+	pr_info("Exit func : %s , line : %d\n", __func__, __LINE__);
 
 	return 0;
 
@@ -473,7 +477,7 @@ static int wcd_cpe_load_fw(struct wcd_cpe_core *core,
 	bool load_segment;
 
 	if (!core || !core->cpe_handle) {
-		pr_err("%s: Error CPE core %p\n", __func__,
+		pr_err("%s: Error CPE core %pK\n", __func__,
 		       core);
 		return -EINVAL;
 	}
@@ -780,6 +784,9 @@ static int wcd_cpe_check_new_image(struct wcd_cpe_core *core)
 	int rc = 0;
 	char temp_img_name[WCD_CPE_IMAGE_FNAME_MAX];
 
+	pr_info("Enter func : %s , line : %d\n", __func__, __LINE__);
+
+
 	if (!strcmp(core->fname, core->dyn_fname) &&
 	    core->ssr_type != WCD_CPE_INITIALIZED) {
 		dev_dbg(core->dev,
@@ -798,6 +805,9 @@ static int wcd_cpe_check_new_image(struct wcd_cpe_core *core)
 		WCD_CPE_IMAGE_FNAME_MAX);
 
 	rc = wcd_cpe_load_fw(core, ELF_FLAG_EXECUTE);
+
+	pr_info("CPE load fw func : %s , line : %d\n", __func__, __LINE__);
+
 	if (rc) {
 		dev_err(core->dev,
 			"%s: Failed to dload new image %s, err = %d\n",
@@ -814,6 +824,9 @@ static int wcd_cpe_check_new_image(struct wcd_cpe_core *core)
 		dev_info(core->dev, "%s: fw changed to %s\n",
 			 __func__, core->fname);
 	}
+
+	pr_info("Exit func : %s , line : %d\n", __func__, __LINE__);
+
 done:
 	return rc;
 }
@@ -822,6 +835,8 @@ static int wcd_cpe_enable(struct wcd_cpe_core *core,
 		bool enable)
 {
 	int ret = 0;
+	int timeout = 0;
+	int err_cnt = 0;
 
 	if (enable) {
 		/* Reset CPE first */
@@ -844,8 +859,20 @@ static int wcd_cpe_enable(struct wcd_cpe_core *core,
 		if (ret)
 			goto fail_boot;
 
-		/* Dload data section */
-		ret = wcd_cpe_load_fw(core, ELF_FLAG_RW);
+		for(err_cnt = 0; err_cnt < 10; err_cnt++){
+			/* Dload data section */
+			ret = wcd_cpe_load_fw(core, ELF_FLAG_RW);
+			if (ret) {
+				pr_err("%s: wcd_cpe_load_fw error ret=%d. retry.\n", __func__,ret);
+				msleep(5);
+			} else {
+				if(err_cnt > 0){
+					pr_err("%s: wcd_cpe_load_fw error count=%d.\n", __func__,err_cnt);
+				}
+				break;
+			}
+		}
+
 		if (ret) {
 			dev_err(core->dev,
 				"%s: Failed to dload data section, err = %d\n",
@@ -875,7 +902,14 @@ static int wcd_cpe_enable(struct wcd_cpe_core *core,
 			"%s: waiting for CPE bootup\n",
 			__func__);
 
-		wait_for_completion(&core->online_compl);
+		timeout = wait_for_completion_timeout(&core->online_compl, msecs_to_jiffies(1000));
+		if (!timeout) {
+			dev_err(core->dev,
+				"%s: Timeout boot CPE.\n",
+				__func__);
+			ret = -EINVAL;
+			goto fail_boot;
+		}
 
 		dev_dbg(core->dev,
 			"%s: CPE bootup done\n",
@@ -891,14 +925,7 @@ static int wcd_cpe_enable(struct wcd_cpe_core *core,
 			 * instead SSR handler will control CPE.
 			 */
 			wcd_cpe_enable_cpe_clks(core, false);
-			/*
-			 * During BUS_DOWN event, possibly the
-			 * irq driver is under cleanup, do not request
-			 * cleanup of irqs here, rather cleanup irqs
-			 * once BUS_UP event is received.
-			 */
-			if (core->ssr_type != WCD_CPE_BUS_DOWN_EVENT)
-				wcd_cpe_cleanup_irqs(core);
+			wcd_cpe_cleanup_irqs(core);
 			goto done;
 		}
 
@@ -1149,7 +1176,6 @@ int wcd_cpe_ssr_event(void *core_handle,
 		break;
 
 	case WCD_CPE_BUS_UP_EVENT:
-		wcd_cpe_cleanup_irqs(core);
 		wcd_cpe_set_and_complete(core, WCD_CPE_BUS_READY);
 		/*
 		 * In case of bus up event ssr_type will be changed
@@ -1462,6 +1488,8 @@ static int wcd_cpe_setup_irqs(struct wcd_cpe_core *core)
 	struct wcd9xxx *wcd9xxx = dev_get_drvdata(codec->dev->parent);
 	struct wcd9xxx_core_resource *core_res = &wcd9xxx->core_res;
 
+	pr_info("Enter func : %s , line : %d\n", __func__, __LINE__);
+
 	ret = wcd9xxx_request_irq(core_res,
 				  core->irq_info.cpe_engine_irq,
 				  svass_engine_irq, "SVASS_Engine", core);
@@ -1495,6 +1523,8 @@ static int wcd_cpe_setup_irqs(struct wcd_cpe_core *core)
 			__func__);
 		goto fail_exception_irq;
 	}
+
+	pr_info("Exit func : %s , line : %d\n", __func__, __LINE__);
 
 	return 0;
 
@@ -1644,9 +1674,15 @@ static int wcd_cpe_vote(struct wcd_cpe_core *core,
 			ret = wcd_cpe_enable(core, enable);
 			if (ret) {
 				dev_err(core->dev,
-					"%s: CPE enable failed, err = %d\n",
+					"%s: CPE enable failed: retrying, err = %d\n",
 					__func__, ret);
-				goto done;
+				ret = wcd_cpe_enable(core, enable);
+				if (ret) {
+					dev_err(core->dev,
+						"%s: CPE enable failed, err = %d\n",
+						__func__, ret);
+					goto done;
+				}
 			}
 		} else {
 			dev_dbg(core->dev,
@@ -1739,10 +1775,10 @@ static ssize_t fw_name_store(struct wcd_cpe_core *core,
 	if (pos)
 		copy_count = pos - buf;
 
-	if (copy_count > WCD_CPE_IMAGE_FNAME_MAX) {
+	if (copy_count > (WCD_CPE_IMAGE_FNAME_MAX - 1)) {
 		dev_err(core->dev,
 			"%s: Invalid length %d, max allowed %d\n",
-			__func__, copy_count, WCD_CPE_IMAGE_FNAME_MAX);
+			__func__, copy_count, WCD_CPE_IMAGE_FNAME_MAX - 1);
 		return -EINVAL;
 	}
 
@@ -3051,25 +3087,9 @@ static int wcd_cpe_set_one_param(void *core_handle,
 		rc = wcd_cpe_send_param_epd_thres(core, session,
 						data, &ids);
 		break;
-	case LSM_OPERATION_MODE: {
-		struct cpe_lsm_ids connectport_ids;
-
-		rc = wcd_cpe_send_param_opmode(core, session,
-					data, &ids);
-		if (rc)
-			break;
-
-		connectport_ids.module_id = LSM_MODULE_ID_FRAMEWORK;
-		connectport_ids.param_id = LSM_PARAM_ID_CONNECT_TO_PORT;
-
-		rc = wcd_cpe_send_param_connectport(core, session, NULL,
-				       &connectport_ids, CPE_AFE_PORT_1_TX);
-		if (rc)
-			dev_err(core->dev,
-				"%s: send_param_connectport failed, err %d\n",
-				__func__, rc);
+	case LSM_OPERATION_MODE:
+		rc = wcd_cpe_send_param_opmode(core, session, data, &ids);
 		break;
-	}
 	case LSM_GAIN:
 		rc = wcd_cpe_send_param_gain(core, session, data, &ids);
 		break;
@@ -3578,6 +3598,8 @@ static int wcd_cpe_lsm_lab_control(
 
 	pr_debug("%s: enter payload_size = %d Enable %d\n",
 		 __func__, pld_size, enable);
+
+	memset(&cpe_lab_enable, 0, sizeof(cpe_lab_enable));
 
 	if (fill_lsm_cmd_header_v0_inband(&cpe_lab_enable.hdr, session->id,
 		(u8) pld_size, CPE_LSM_SESSION_CMD_SET_PARAMS_V2)) {

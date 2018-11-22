@@ -4,7 +4,7 @@
 #define IOCTL_PATH "triton:io"
 
 /* Feature defines */
-#define BMC
+
 #define SCHED_BUSY_SUPPORT
 
 #define MAX_CORES          (4)
@@ -24,9 +24,6 @@
 
 enum sys_state_machine{
 	RUNNING,
-#ifdef FPS_BOOST
-	BOOST,
-#endif
 	FREEZE
 };
 enum adjust_level {
@@ -62,24 +59,15 @@ struct sys_cmd_tunables_req {
 	int tunable_ping_exp;
 	int tunable_ping_intv;
 };
-#ifdef BMC
 struct sys_cmd_tunables_bmc_req{
 	int coeff_b;
 	int minturbo;
 	int turbo;
 	int maxturbo;
-#ifdef FPS_BOOST
-	int thres;
-	int duration;
-#endif
 };
-#endif
 struct sys_cmd_freq_req {
 	unsigned long req_cpuload[NUM_CLUSTER];
 	unsigned long each_load[MAX_CORES];
-#ifdef CURR_HIST
-	int cstate[MAX_CORES];
-#endif
 	int req_cluster;
 	int req_cpu;
 	int req_freq;
@@ -104,9 +92,6 @@ enum ioctl_req_id {
 	REQ_ID_BASIC_TUNABLE,
 	REQ_ID_TUNABLE_BMC,
 	REQ_ID_PING,
-#ifdef CURR_HIST
-	REQ_ID_LOAD,
-#endif
 	REQ_MAX
 };
 #define IOCTL_AFREQ_REQ \
@@ -125,15 +110,9 @@ enum ioctl_req_id {
 	_IOW(MAGIC_NUM, REQ_ID_BASIC_TUNABLE, struct sys_cmd_tunables_req)
 
 
-#ifdef BMC
 #define IOCTL_TUNALBE_BMC_REQ \
 	_IOW(MAGIC_NUM, REQ_ID_TUNABLE_BMC, struct sys_cmd_tunables_bmc_req)
-#endif
 
 #define IOCTL_PING_REQ \
 	_IOW(MAGIC_NUM, REQ_ID_PING, int)
-#ifdef CURR_HIST
-#define IOCTL_LOAD_REQ \
-	_IOR(MAGIC_NUM, REQ_ID_LOAD, struct sys_cmd_freq_req)
-#endif
 #endif

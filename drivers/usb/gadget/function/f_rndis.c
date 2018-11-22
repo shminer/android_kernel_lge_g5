@@ -27,7 +27,7 @@
 #include "u_ether_configfs.h"
 #include "u_rndis.h"
 #include "rndis.h"
-#include "../drivers/usb/gadget/configfs.h"
+#include "configfs.h"
 
 /*
  * This function is an RNDIS Ethernet port -- a Microsoft protocol that's
@@ -542,6 +542,12 @@ static void rndis_command_complete(struct usb_ep *ep, struct usb_request *req)
 	struct usb_composite_dev	*cdev;
 	int				status;
 	rndis_init_msg_type		*buf;
+
+	if (req->status != 0) {
+		pr_err("%s: RNDIS command completion error:%d\n",
+				__func__, req->status);
+		return;
+	}
 
 	spin_lock(&_rndis_lock);
 	rndis = __rndis;

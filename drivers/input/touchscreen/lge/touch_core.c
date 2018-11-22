@@ -215,7 +215,7 @@ irqreturn_t touch_irq_thread(int irq, void *dev_id)
 			touch_send_uevent(ts, TOUCH_UEVENT_SWIPE_DOWN);
 
 		if (ts->intr_status & TOUCH_IRQ_SWIPE_UP)
-			TOUCH_I("Do not send Uevent for Swipe up gesture\n");
+			touch_send_uevent(ts, TOUCH_UEVENT_SWIPE_UP);
 
 		if (ts->intr_status & TOUCH_IRQ_SWIPE_RIGHT)
 			touch_send_uevent(ts, TOUCH_UEVENT_SWIPE_RIGHT);
@@ -229,8 +229,8 @@ irqreturn_t touch_irq_thread(int irq, void *dev_id)
 			touch_interrupt_control(ts->dev, INTERRUPT_DISABLE);
 			ts->driver->power(ts->dev, POWER_OFF);
 			ts->driver->power(ts->dev, POWER_ON);
-			mod_delayed_work(ts->wq, &ts->init_work,
-				msecs_to_jiffies(ts->caps.hw_reset_delay));
+			touch_msleep(ts->caps.hw_reset_delay);
+			mod_delayed_work(ts->wq, &ts->init_work, 0);
 		}
 		if (ret == -EUPGRADE) {
 			ts->force_fwup = 1;
@@ -294,10 +294,10 @@ static void touch_upgrade_work_func(struct work_struct *upgrade_work)
 
 	ts->driver->power(ts->dev, POWER_OFF);
 	ts->driver->power(ts->dev, POWER_ON);
+	touch_msleep(ts->caps.hw_reset_delay);
 	mutex_unlock(&ts->lock);
 
-	mod_delayed_work(ts->wq, &ts->init_work,
-			msecs_to_jiffies(ts->caps.hw_reset_delay));
+	mod_delayed_work(ts->wq, &ts->init_work, 0);
 }
 
 static void touch_fb_work_func(struct work_struct *fb_work)

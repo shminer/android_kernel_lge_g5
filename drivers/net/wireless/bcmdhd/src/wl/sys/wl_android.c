@@ -1741,7 +1741,7 @@ wls_parse_batching_cmd(struct net_device *dev, char *command, int total_len)
 	int err = BCME_OK;
 	uint i, tokens;
 	char *pos, *pos2, *token, *token2, *delim;
-	char param[PNO_PARAM_SIZE], value[VALUE_SIZE];
+	char param[PNO_PARAM_SIZE+1], value[VALUE_SIZE+1];
 	struct dhd_pno_batch_params batch_params;
 	DHD_PNO(("%s: command=%s, len=%d\n", __FUNCTION__, command, total_len));
 	if (total_len < strlen(CMD_WLS_BATCHING)) {
@@ -3028,15 +3028,15 @@ wl_android_set_sarlimit_txctrl(struct net_device *dev, const char* string_num)
 	/* As Samsung specific and their requirement, '0' means activate sarlimit
 	 * and '-1' means back to normal state (deactivate sarlimit)
 	 */
-	if (mode == 0) {
-		DHD_INFO(("%s: SAR limit control activated\n", __FUNCTION__));
-		setval = 1;
-	} else if (mode == -1) {
-		DHD_INFO(("%s: SAR limit control deactivated\n", __FUNCTION__));
-		setval = 0;
-	} else {
-		return -EINVAL;
-	}
+        if (mode >= 0 && mode < 3) {
+                DHD_INFO(("%s: SAR limit control activated mode = %d\n", __FUNCTION__, mode));
+                setval = mode + 1;
+        } else if (mode == -1) {
+                DHD_INFO(("%s: SAR limit control deactivated\n", __FUNCTION__));
+                setval = 0;
+        } else {
+                return -EINVAL;
+        }
 
 	err = wldev_iovar_setint(dev, "sar_enable", setval);
 	if (unlikely(err)) {
@@ -3546,7 +3546,32 @@ wl_android_set_miracast(struct net_device *dev, char *command, int total_len)
 		config.len = sizeof(int);
 		ret = wl_android_iolist_add(dev, &miracast_resume_list, &config);
 		if (ret)
-			goto resume;
+            goto resume;
+        // 180115, kyungckt.chung, Tune SRL/LRL value for Miracast Session [S]
+        /* Increase lrl and srl to 15 */
+        val = 15;
+        config.iovar = NULL;
+        config.ioctl = WLC_GET_LRL;
+        config.arg = &val;
+        config.len = sizeof(int);
+        ret = wl_android_iolist_add(dev, &miracast_resume_list, &config);
+        if (ret) {
+            DHD_ERROR(("%s: Failed set lrl\n", __FUNCTION__));
+            goto resume;
+        }
+
+        val = 15;
+        config.iovar = NULL;
+        config.ioctl = WLC_GET_SRL;
+        config.arg = &val;
+        config.len = sizeof(int);
+
+        ret = wl_android_iolist_add(dev, &miracast_resume_list, &config);
+        if (ret) {
+            DHD_ERROR(("%s: Failed set srl\n", __FUNCTION__));
+            goto resume;
+        }
+        // 180115, kyungckt.chung, Tune SRL/LRL value for Miracast Session [E]
 
 #if defined(BCM4339_CHIP)
 		config.iovar = "phy_watchdog";

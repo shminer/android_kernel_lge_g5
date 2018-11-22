@@ -425,7 +425,7 @@ static int lg4945_get_swipe_data(struct device *dev)
 
 	ts->lpwg.code_num = count;
 	ts->lpwg.code[0].x = rdata[1] & 0xffff;
-	ts->lpwg.code[0].x = rdata[1]  >> 16;
+	ts->lpwg.code[0].y = rdata[1]  >> 16;
 
 	ts->lpwg.code[count].x = -1;
 	ts->lpwg.code[count].y = -1;
@@ -935,7 +935,7 @@ static int lg4945_lpwg_mode(struct device *dev)
 				lg4945_clock(dev, 1);
 
 			TOUCH_I("Skip lpwg_mode\n");
-#if defined(CONFIG_MACH_MSM8996_ELSA)
+#if defined(CONFIG_MACH_MSM8996_ELSA) || defined(CONFIG_MACH_MSM8996_ANNA)
 			//lg4945_debug_tci(dev);
 			//lg4945_debug_swipe(dev);
 #else
@@ -951,13 +951,13 @@ static int lg4945_lpwg_mode(struct device *dev)
 			lg4945_tc_driving(dev, d->lcd_mode);
 		} else {
 			/* knock on/code */
-#if defined(CONFIG_MACH_MSM8996_ELSA)
+#if defined(CONFIG_MACH_MSM8996_ELSA) || defined(CONFIG_MACH_MSM8996_ANNA)
 	//		lg4945_deep_sleep(dev);
 #else
 			lg4945_deep_sleep(dev);
 #endif
 
-#if defined(CONFIG_MACH_MSM8996_ELSA)
+#if defined(CONFIG_MACH_MSM8996_ELSA) || defined(CONFIG_MACH_MSM8996_ANNA)
 			if (atomic_read(&ts->state.sleep) == IC_DEEP_SLEEP)
 				lg4945_clock(dev, 1);
 
@@ -2079,7 +2079,7 @@ static struct touch_hwif hwif = {
 static int __init touch_device_init(void)
 {
 	TOUCH_TRACE();
-#if !defined(CONFIG_MACH_MSM8996_ELSA) // LCD Maker ID is not used in ELSA.
+#if !defined(CONFIG_MACH_MSM8996_ELSA) && !defined(CONFIG_MACH_MSM8996_ANNA) // LCD Maker ID is not used in ELSA.
 	if (touch_get_device_type() != TYPE_LG4945 ) {
 		TOUCH_I("%s, lg4945 returned\n", __func__);
 		return 0;

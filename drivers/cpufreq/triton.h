@@ -76,9 +76,7 @@ struct ioctl_data {
 	struct sys_cmd_perf_level_req perf_param[BIT_MAX];
 	struct sys_cmd_comm_req common_req;
 	struct sys_cmd_tunables_req tunables_param;
-#ifdef BMC
 	struct sys_cmd_tunables_bmc_req tunables_bmc_param[NUM_CLUSTER];
-#endif
 };
 struct triton_platform_data {
 	int major;

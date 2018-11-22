@@ -20,7 +20,7 @@ else
 include $(srctree)/arch/arm64/boot/dts/lge/Makefile
 endif
 
-targets := Image Image.$(KERNEL_COMPRESSION_SUFFIX)
+targets := Image Image.gz Image.lz4
 
 DTB_NAMES := $(subst $\",,$(CONFIG_BUILD_ARM64_APPENDED_DTB_IMAGE_NAMES))
 ifneq ($(DTB_NAMES),)
@@ -30,27 +30,36 @@ else
 DTB_OBJS := $(shell find $(obj)/dts/ -name \*.dtb)
 endif
 
-ifeq ($(KERNEL_COMPRESSION_SUFFIX),lz4)
-COMPRESSION_CMND := lz4
-endif
-
-ifeq ($(KERNEL_COMPRESSION_SUFFIX),gz)
-COMPRESSION_CMND := gzip
-endif
-
 $(obj)/Image: vmlinux FORCE
 	$(call if_changed,objcopy)
 
-$(obj)/Image.$(KERNEL_COMPRESSION_SUFFIX): $(obj)/Image FORCE
-	$(call if_changed,$(COMPRESSION_CMND))
+$(obj)/Image-dtb: $(obj)/Image $(DTB_OBJS) FORCE
+	$(call if_changed,cat)
 
-$(obj)/Image.$(KERNEL_COMPRESSION_SUFFIX)-dtb: $(obj)/Image.$(KERNEL_COMPRESSION_SUFFIX) $(DTB_OBJS) FORCE
+$(obj)/Image.gz: $(obj)/Image FORCE
+	$(call if_changed,gzip)
+
+$(obj)/Image.lz4: $(obj)/Image FORCE
+	$(call if_changed,lz4)
+
+
+$(obj)/Image.gz-dtb: $(obj)/Image.gz $(DTB_OBJS) FORCE
+	$(call if_changed,cat)
+
+$(obj)/Image.lz4-dtb: $(obj)/Image.lz4 $(DTB_OBJS) FORCE
+	$(call if_changed,cat)
+
+$(obj)/Image-dtb-hdr: $(obj)/Image FORCE
+	echo -n 'UNCOMPRESSED_IMG' > $@ && \
+	$(call size_append, $(filter-out FORCE,$^)) >> $@
+
+$(obj)/Image-dtb: $(obj)/Image-dtb-hdr $(obj)/Image $(DTB_OBJS) FORCE
 	$(call if_changed,cat)
 
 install: $(obj)/Image
 	$(CONFIG_SHELL) $(srctree)/$(src)/install.sh $(KERNELRELEASE) \
 	$(obj)/Image System.map "$(INSTALL_PATH)"
 
-zinstall: $(obj)/Image.$(KERNEL_COMPRESSION_SUFFIX)
+zinstall: $(obj)/Image.gz
 	$(CONFIG_SHELL) $(srctree)/$(src)/install.sh $(KERNELRELEASE) \
-	$(obj)/Image.$(KERNEL_COMPRESSION_SUFFIX) System.map "$(INSTALL_PATH)"
+	$(obj)/Image.gz System.map "$(INSTALL_PATH)"

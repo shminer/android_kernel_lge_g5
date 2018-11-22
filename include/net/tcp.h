@@ -94,11 +94,7 @@ void tcp_time_wait(struct sock *sk, int state, int timeo);
 				 * RFC1122 says that the limit is 100 sec.
 				 * 15 is ~13-30min depending on RTO.
 				 */
-/* 2012-01-17 jk.soh@lge.com LGP_DATA_TCPIP_TCP_SYN_RETRY_CONFIG_UPLUS [START]*/
-//2014.01.15 bongsook.jeong@lge.com Feature is changed with 'android\kernel\arch\arm\configs\xxx_deconfig' and ' android\kernel\net\ipv4\Kconfig
-#ifdef CONFIG_LGP_DATA_TCPIP_TCP_SYN_RETRY_CONFIG_UPLUS
-#define TCP_SYN_RETRIES	 4
-#else
+
 #define TCP_SYN_RETRIES	 6	/* This is how many retries are done
 				 * when active opening a connection.
 				 * RFC1122 says the minimum retry MUST
@@ -107,8 +103,6 @@ void tcp_time_wait(struct sock *sk, int state, int timeo);
 				 * 63secs of retransmission with the
 				 * current initial RTO.
 				 */
-#endif
-/* 2012-01-17 jk.soh@lge.com LGP_DATA_TCPIP_TCP_SYN_RETRY_CONFIG_UPLUS [END]*/
 
 #define TCP_SYNACK_RETRIES 5	/* This is how may retries are done
 				 * when passive opening a connection.
@@ -412,7 +406,7 @@ bool tcp_snd_wnd_test(const struct tcp_sock *tp, const struct sk_buff *skb,
 unsigned int tcp_cwnd_test(const struct tcp_sock *tp, const struct sk_buff *skb);
 int tcp_init_tso_segs(const struct sock *sk, struct sk_buff *skb,
 		      unsigned int mss_now);
-void __pskb_trim_head(struct sk_buff *skb, int len);
+int __pskb_trim_head(struct sk_buff *skb, int len);
 void tcp_queue_skb(struct sock *sk, struct sk_buff *skb);
 void tcp_init_nondata_skb(struct sk_buff *skb, u32 seq, u8 flags);
 void tcp_reset(struct sock *sk);
@@ -1265,6 +1259,7 @@ static inline void tcp_prequeue_init(struct tcp_sock *tp)
 }
 
 bool tcp_prequeue(struct sock *sk, struct sk_buff *skb);
+int tcp_filter(struct sock *sk, struct sk_buff *skb);
 
 #undef STATE_TRACE
 
@@ -1650,8 +1645,10 @@ static inline void tcp_advance_send_head(struct sock *sk, const struct sk_buff *
 
 static inline void tcp_check_send_head(struct sock *sk, struct sk_buff *skb_unlinked)
 {
-    if (tcp_sk(sk)->highest_sack == skb_unlinked)
-        tcp_sk(sk)->highest_sack = NULL;
+	if (sk->sk_send_head == skb_unlinked)
+		sk->sk_send_head = NULL;
+	if (tcp_sk(sk)->highest_sack == skb_unlinked)
+		tcp_sk(sk)->highest_sack = NULL;
 }
 
 static inline void tcp_init_send_head(struct sock *sk)
@@ -1821,8 +1818,6 @@ static inline bool tcp_stream_memory_free(const struct sock *sk)
 
 	return notsent_bytes < tcp_notsent_lowat(tp);
 }
-
-extern int tcp_nuke_addr(struct net *net, struct sockaddr *addr);
 
 #ifdef CONFIG_PROC_FS
 int tcp4_proc_init(void);
