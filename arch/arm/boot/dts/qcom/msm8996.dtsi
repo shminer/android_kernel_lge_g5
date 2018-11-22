@@ -158,34 +158,6 @@
 
 	soc: soc { };
 
-	firmware: firmware {
-		android {
-			compatible = "android,firmware";
-			fstab {
-				compatible = "android,fstab";
-				/* do not use at O OS upgrade
-				vendor {
-					compatible = "android,vendor";
-					dev = "/dev/block/platform/soc/7464900.sdhci/by-name/vendor";
-					type = "ext4";
-					mnt_flags = "ro,barrier=1,discard";
-					fsmgr_flags = "wait";
-					status = "disabled";
-				 };
-				*/
-				 system {
-					compatible = "android,system";
-					dev = "/dev/block/platform/soc/624000.ufshc/by-name/system";
-					type = "ext4";
-					mnt_flags = "ro,noatime,barrier=1,discard";
-					fsmgr_flags = "wait,verify";
-					status = "ok";
-				};
-
-			};
-		};
-	};
-
 	reserved-memory {
 		#address-cells = <2>;
 		#size-cells = <2>;
