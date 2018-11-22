@@ -3,11 +3,13 @@
 
 #ifdef __KERNEL__
 
+#include <linux/err.h>
 #include <linux/mm_types.h>
 #include <linux/scatterlist.h>
 #include <linux/dma-debug.h>
 #include <linux/kmemcheck.h>
 #include <linux/kref.h>
+#include <linux/dma-mapping-fast.h>
 
 struct dma_iommu_mapping {
 	/* iommu specific data */
@@ -19,6 +21,8 @@ struct dma_iommu_mapping {
 
 	spinlock_t		lock;
 	struct kref		kref;
+
+	struct dma_fast_smmu_mapping *fast;
 };
 
 #ifdef CONFIG_ARM64_DMA_USE_IOMMU
@@ -35,8 +39,7 @@ void arm_iommu_detach_device(struct device *dev);
 #else  /* !CONFIG_ARM64_DMA_USE_IOMMU */
 
 static inline struct dma_iommu_mapping *
-arm_iommu_create_mapping(struct bus_type *bus, dma_addr_t base, size_t size,
-			int order)
+arm_iommu_create_mapping(struct bus_type *bus, dma_addr_t base, size_t size)
 {
 	return ERR_PTR(-ENOMEM);
 }

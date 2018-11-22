@@ -16,7 +16,7 @@
 #include <linux/delay.h>
 #include <linux/module.h>
 #include <linux/ratelimit.h>
-
+#include <linux/atomic.h>
 
 #define MIN_TTYB_SIZE	256
 #define TTYB_ALIGN_MASK	255
@@ -364,7 +364,10 @@ void tty_schedule_flip(struct tty_port *port)
 	struct tty_bufhead *buf = &port->buf;
 
 	buf->tail->commit = buf->tail->used;
-	schedule_work(&buf->work);
+	if (atomic_read(&port->kref.refcount) > 0)
+		schedule_work(&buf->work);
+	else
+		printk(KERN_ERR "%s : kerf's refcount is 0\n", __func__);
 }
 EXPORT_SYMBOL(tty_schedule_flip);
 
@@ -438,7 +441,7 @@ static void flush_to_ldisc(struct work_struct *work)
 	struct tty_struct *tty;
 	struct tty_ldisc *disc;
 
-	tty = port->itty;
+	tty = READ_ONCE(port->itty);
 	if (tty == NULL)
 		return;
 

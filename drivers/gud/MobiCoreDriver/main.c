@@ -144,6 +144,9 @@ int debug_generic_release(struct inode *inode, struct file *file)
 {
 	struct kasnprintf_buf *buf = file->private_data;
 
+	if (!buf)
+		return 0;
+
 	kfree(buf->buf);
 	kfree(buf);
 	return 0;

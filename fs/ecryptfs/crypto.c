@@ -47,7 +47,7 @@
 
 #ifdef CONFIG_CRYPTO_CCMODE
 #define SEED_LEN 48
-#ifndef CONFIG_CRYPTO_DEV_HWCRYPTO_FOR_SDCARD
+#if !defined(CONFIG_CRYPTO_DEV_HWCRYPTO_FOR_SDCARD) && !defined(CONFIG_LGCRYPTO_FIPS_ENABLE)
 static int crypto_sec_reset_rng(struct crypto_rng *tfm)
 {
 	char *seed = NULL;
@@ -109,7 +109,7 @@ static int crypto_sec_rng_get_bytes(u8 *data, unsigned int len)
 	int err = 0;
 
 	if (!crypto_sec_rng) {
-#ifdef CONFIG_CRYPTO_DEV_HWCRYPTO_FOR_SDCARD
+#if defined(CONFIG_CRYPTO_DEV_HWCRYPTO_FOR_SDCARD) || defined(CONFIG_LGCRYPTO_FIPS_ENABLE)
 		rng = crypto_alloc_rng("qrng", 0, 0);
 #else
 		rng = crypto_alloc_rng("fips(ansi_cprng)", 0, 0);
@@ -117,7 +117,7 @@ static int crypto_sec_rng_get_bytes(u8 *data, unsigned int len)
 		err = PTR_ERR(rng);
 		if (IS_ERR(rng))
 			goto out;
-#ifndef CONFIG_CRYPTO_DEV_HWCRYPTO_FOR_SDCARD
+#if !defined(CONFIG_CRYPTO_DEV_HWCRYPTO_FOR_SDCARD) && !defined(CONFIG_LGCRYPTO_FIPS_ENABLE)
 		err = crypto_sec_reset_rng(rng);
 		if (err) {
 			if (rng)
@@ -193,6 +193,7 @@ void ecryptfs_from_hex(char *dst, char *src, int dst_size)
  * Uses the allocated crypto context that crypt_stat references to
  * generate the SHA256 sum of the contents of src.
  */
+#ifndef CONFIG_LGCRYPTO_FIPS_ENABLE
 struct hash_result {
 	struct completion completion;
 	int err;
@@ -214,10 +215,6 @@ static int ecryptfs_calculate_sha256_qct_hw(char *dst,
                   char *src, int len)
 {
     struct scatterlist sg;
-    struct hash_desc desc = {
-        .tfm = crypt_stat->hash_tfm,
-        .flags = CRYPTO_TFM_REQ_MAY_SLEEP
-    };
     int rc = 0;
     struct hash_result result;
     struct crypto_ahash *tfm;
@@ -225,25 +222,23 @@ static int ecryptfs_calculate_sha256_qct_hw(char *dst,
 
     mutex_lock(&crypt_stat->cs_hash_tfm_mutex);
     sg_init_one(&sg, (u8 *)src, len);
-    if (!desc.tfm) {
-        tfm = crypto_alloc_ahash("qcom-sha256", 0, 0);
-        if (IS_ERR(tfm)) {
-            pr_err("failed to load transform %ld\n", PTR_ERR(tfm));
-            mutex_unlock(&crypt_stat->cs_hash_tfm_mutex);
-            return -1;
-        }
-
-        init_completion(&result.completion);
-
-        req = ahash_request_alloc(tfm, GFP_KERNEL);
-        if (!req) {
-            pr_err("ahash request allocation failure\n");
-            rc = -1;
-            goto out;
-        }
-
-        ahash_request_set_callback(req, CRYPTO_TFM_REQ_MAY_BACKLOG, hash_complete, &result);
+	tfm = crypto_alloc_ahash("qcom-sha256", 0, 0);
+    if (IS_ERR(tfm)) {
+       	pr_err("failed to load transform %ld\n", PTR_ERR(tfm));
+	    mutex_unlock(&crypt_stat->cs_hash_tfm_mutex);
+        return -1;
     }
+
+	init_completion(&result.completion);
+
+   	req = ahash_request_alloc(tfm, GFP_KERNEL);
+    if (!req) {
+   	    pr_err("ahash request allocation failure\n");
+       	rc = -1;
+       	goto out;
+   	}
+
+   	ahash_request_set_callback(req, CRYPTO_TFM_REQ_MAY_BACKLOG, hash_complete, &result);
 
     ahash_request_set_crypt(req, &sg, dst, len);
 
@@ -263,8 +258,9 @@ out:
     mutex_unlock(&crypt_stat->cs_hash_tfm_mutex);
     return rc;
 }
+#endif
 
-#if defined(CONFIG_CRYPTO_DEV_HWCRYPTO_FOR_SDCARD) && ! defined(CONFIG_CRYPTO_DEV_FOR_H1_SPRINT)
+#if (defined(CONFIG_CRYPTO_DEV_HWCRYPTO_FOR_SDCARD) && !defined(CONFIG_CRYPTO_DEV_FOR_H1_SPRINT)) || defined(CONFIG_LGCRYPTO_FIPS_ENABLE)
 static int ecryptfs_calculate_sha256(char *dst,
 				  struct ecryptfs_crypt_stat *crypt_stat,
 				  char *src, int len)
@@ -279,8 +275,13 @@ static int ecryptfs_calculate_sha256(char *dst,
 	mutex_lock(&crypt_stat->cs_hash_tfm_mutex);
 	sg_init_one(&sg, (u8 *)src, len);
 	if (!desc.tfm) {
+#ifdef CONFIG_LGCRYPTO_FIPS_ENABLE
+		desc.tfm = crypto_alloc_hash("lge-sha256", 0,
+					     CRYPTO_ALG_ASYNC);
+#else
 		desc.tfm = crypto_alloc_hash(ECRYPTFS_SHA256_HASH, 0,
 					     CRYPTO_ALG_ASYNC);
+#endif
 		if (IS_ERR(desc.tfm)) {
 			rc = PTR_ERR(desc.tfm);
 			ecryptfs_printk(KERN_ERR, "Error attempting to "
@@ -319,7 +320,7 @@ out:
 #endif //CONFIG_CRYPTO_DEV_HWCRYPTO_FOR_SDCARD
 #endif // CONFIG_CRYPTO_CCMODE
 
-#if !defined(CONFIG_CRYPTO_DEV_HWCRYPTO_FOR_SDCARD) || defined(CONFIG_CRYPTO_DEV_FOR_H1_SPRINT)
+#if (!defined(CONFIG_CRYPTO_DEV_HWCRYPTO_FOR_SDCARD) || defined(CONFIG_CRYPTO_DEV_FOR_H1_SPRINT)) && !defined(CONFIG_LGCRYPTO_FIPS_ENABLE)
 /**
  * ecryptfs_calculate_md5 - calculates the md5 of @src
  * @dst: Pointer to 16 bytes of allocated memory
@@ -403,11 +404,15 @@ static int ecryptfs_crypto_api_algify_cipher_name(char **algified_name,
 	int algified_name_len;
 	int rc;
 
-#if defined(CONFIG_CRYPTO_CCMODE) && defined(CONFIG_CRYPTO_DEV_HWCRYPTO_FOR_SDCARD)
-    if (!strcmp(cipher_name, "aes") &&
-		(!strcmp(chaining_modifier, "cbc") ||
-		!strcmp(chaining_modifier, "xts")))
-		chaining_modifier ="qcom-cbc";
+#if (defined(CONFIG_CRYPTO_CCMODE) && defined(CONFIG_CRYPTO_DEV_HWCRYPTO_FOR_SDCARD)) || defined(CONFIG_LGCRYPTO_FIPS_ENABLE)
+	if (!strcmp(cipher_name, "aes") &&
+       (!strcmp(chaining_modifier, "cbc") ||
+	    !strcmp(chaining_modifier, "xts")))
+#ifdef CONFIG_LGCRYPTO_FIPS_ENABLE
+		chaining_modifier ="lge-cbc";
+#else
+       	chaining_modifier ="qcom-cbc";
+#endif
 
 	cipher_name_len = strlen(cipher_name);
 	chaining_modifier_len = strlen(chaining_modifier);
@@ -467,10 +472,13 @@ int ecryptfs_derive_iv(char *iv, struct ecryptfs_crypt_stat *crypt_stat,
 #ifdef CONFIG_CRYPTO_CCMODE
 	/* Check if cc mode is enabled.*/
 	cc_flag = get_cc_mode_state();
-	if ((cc_flag & FLAG_CC_MODE) == FLAG_CC_MODE)
+#ifndef CONFIG_LGCRYPTO_FIPS_ENABLE
+	if ((cc_flag & FLAG_CC_MODE) == FLAG_CC_MODE) {
 		rc = ecryptfs_calculate_sha256_qct_hw(dst, crypt_stat, src, (crypt_stat->iv_bytes + 16));
+	}
 	else
-#if defined(CONFIG_CRYPTO_DEV_HWCRYPTO_FOR_SDCARD) && ! defined(CONFIG_CRYPTO_DEV_FOR_H1_SPRINT)
+#endif
+#if (defined(CONFIG_CRYPTO_DEV_HWCRYPTO_FOR_SDCARD) && !defined(CONFIG_CRYPTO_DEV_FOR_H1_SPRINT)) || defined(CONFIG_LGCRYPTO_FIPS_ENABLE)
 		rc = ecryptfs_calculate_sha256(dst, crypt_stat, src, (crypt_stat->iv_bytes + 16));
 #else
 	    rc = ecryptfs_calculate_md5(dst, crypt_stat, src, (crypt_stat->iv_bytes + 16));
@@ -1026,10 +1034,12 @@ int ecryptfs_compute_root_iv(struct ecryptfs_crypt_stat *crypt_stat)
 #ifdef CONFIG_CRYPTO_CCMODE
 	/* Check if cc mode is enabled.*/
 	cc_flag = get_cc_mode_state();
+#ifndef CONFIG_LGCRYPTO_FIPS_ENABLE
 	if ((cc_flag & FLAG_CC_MODE) == FLAG_CC_MODE)
 		rc = ecryptfs_calculate_sha256_qct_hw(dst, crypt_stat, crypt_stat->key, crypt_stat->key_size);
 	else
-#if defined(CONFIG_CRYPTO_DEV_HWCRYPTO_FOR_SDCARD) && ! defined(CONFIG_CRYPTO_DEV_FOR_H1_SPRINT)
+#endif
+#if (defined(CONFIG_CRYPTO_DEV_HWCRYPTO_FOR_SDCARD) && !defined(CONFIG_CRYPTO_DEV_FOR_H1_SPRINT)) || defined(CONFIG_LGCRYPTO_FIPS_ENABLE)
 		rc = ecryptfs_calculate_sha256(dst, crypt_stat, crypt_stat->key, crypt_stat->key_size);
 #else
 	    rc = ecryptfs_calculate_md5(dst, crypt_stat, crypt_stat->key, crypt_stat->key_size);
@@ -1045,8 +1055,9 @@ int ecryptfs_compute_root_iv(struct ecryptfs_crypt_stat *crypt_stat)
 	}
 
 #ifdef CONFIG_CRYPTO_CCMODE
-    if ((cc_flag & FLAG_CC_MODE) == FLAG_CC_MODE)
+    if ((cc_flag & FLAG_CC_MODE) == FLAG_CC_MODE) {
         memcpy(crypt_stat->root_iv, dst + 16, crypt_stat->iv_bytes);
+	}
     else
         memcpy(crypt_stat->root_iv, dst, crypt_stat->iv_bytes);
 #else
@@ -1069,6 +1080,7 @@ static void ecryptfs_generate_new_key(struct ecryptfs_crypt_stat *crypt_stat)
 #endif //CONFIG_CRYPTO_CCMODE
 	crypt_stat->flags |= ECRYPTFS_KEY_VALID;
 	ecryptfs_compute_root_iv(crypt_stat);
+
 	if (unlikely(ecryptfs_verbosity > 0)) {
 		ecryptfs_printk(KERN_DEBUG, "Generated new session key:\n");
 		ecryptfs_dump_hex(crypt_stat->key,
@@ -1997,7 +2009,7 @@ ecryptfs_process_key_cipher(struct crypto_blkcipher **key_tfm,
 		goto out;
 	}
 #ifdef CONFIG_CRYPTO_CCMODE
-#if defined(CONFIG_CRYPTO_DEV_HWCRYPTO_FOR_SDCARD) && !defined(CONFIG_CRYPTO_DEV_FOR_H1_SPRINT)
+#if (defined(CONFIG_CRYPTO_DEV_HWCRYPTO_FOR_SDCARD) && !defined(CONFIG_CRYPTO_DEV_FOR_H1_SPRINT)) || defined(CONFIG_LGCRYPTO_FIPS_ENABLE)
 		kfree(full_alg_name);
 		full_alg_name = kmalloc(strlen("cbc(aes)") + 1, GFP_KERNEL);
 		strlcpy(full_alg_name, "cbc(aes)", strlen("cbc(aes)") + 1);

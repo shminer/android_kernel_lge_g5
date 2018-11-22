@@ -1,6 +1,6 @@
 /*
  * Copyright (C) 2007 Google, Inc.
- * Copyright (c) 2012-2015, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2012-2016, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -1618,6 +1618,7 @@ static int msm_nand_read_oob(struct mtd_info *mtd, loff_t from,
 	struct sps_iovec *iovec;
 	struct sps_iovec iovec_temp;
 	bool erased_page;
+	uint64_t fix_data_in_pages = 0;
 
 	/*
 	 * The following 6 commands will be sent only once for the first
@@ -1839,6 +1840,20 @@ static int msm_nand_read_oob(struct mtd_info *mtd, loff_t from,
 				}
 			}
 		}
+
+		if (rawerr && !pageerr && erased_page) {
+			/*
+			 * This means an erased page had bit flips and now
+			 * those bit-flips need to be cleared in the data
+			 * being sent to upper layers. This will keep track
+			 * of those pages and at the end, the data will be
+			 * fixed before this function returns.
+			 * Note that a whole page worth of data will be fixed
+			 * and this will only handle about 64 pages being read
+			 * at a time i.e. one erase block worth of pages.
+			 */
+			fix_data_in_pages |= BIT(rw_params.page_count);
+		}
 		/* check for correctable errors */
 		if (!rawerr) {
 			for (n = rw_params.start_sector; n < cwperpage; n++) {
@@ -1898,6 +1913,30 @@ free_dma:
 	if (ops->datbuf)
 		dma_unmap_page(chip->dev, rw_params.data_dma_addr,
 				 ops->len, DMA_BIDIRECTIONAL);
+	/*
+	 * If there were any erased pages detected with ECC errors, then
+	 * it is most likely that the data is not all 0xff. So memset that
+	 * page to all 0xff.
+	 */
+	while (fix_data_in_pages) {
+		int temp_page = 0, oobsize = rw_params.cwperpage << 2;
+		int count = 0, offset = 0;
+
+		temp_page = fix_data_in_pages & BIT_MASK(0);
+		fix_data_in_pages = fix_data_in_pages >> 1;
+		count++;
+
+		if (!temp_page)
+			continue;
+
+		offset = (count - 1) * mtd->writesize;
+		if (ops->datbuf)
+			memset((ops->datbuf + offset), 0xff, mtd->writesize);
+
+		offset = (count - 1) * oobsize;
+		if (ops->oobbuf)
+			memset(ops->oobbuf + offset, 0xff, oobsize);
+	}
 validate_mtd_params_failed:
 	if (ops->mode != MTD_OPS_RAW)
 		ops->retlen = mtd->writesize * pages_read;
@@ -1936,6 +1975,7 @@ static int msm_nand_read_partial_page(struct mtd_info *mtd,
 	size_t len;
 	size_t actual_len, ret_len;
 	int is_euclean = 0;
+	int is_ebadmsg = 0;
 
 	actual_len = ops->len;
 	ret_len = 0;
@@ -1973,8 +2013,13 @@ static int msm_nand_read_partial_page(struct mtd_info *mtd,
 			err = 0;
 		}
 
+		if (err == -EBADMSG) {
+			is_ebadmsg = 1;
+			err = 0;
+		}
+
 		if (err < 0) {
-			/* Clear previously set EUCLEAN */
+			/* Clear previously set EUCLEAN / EBADMSG */
 			is_euclean = 0;
 			ret_len = ops->retlen;
 			break;
@@ -1999,6 +2044,10 @@ static int msm_nand_read_partial_page(struct mtd_info *mtd,
 out:
 	if (is_euclean == 1)
 		err = -EUCLEAN;
+
+	/* Snub EUCLEAN if we also have EBADMSG */
+	if (is_ebadmsg == 1)
+		err = -EBADMSG;
 	return err;
 }
 
@@ -3324,6 +3373,7 @@ static int msm_nand_probe(struct platform_device *pdev)
 	struct resource *res;
 	int i, err, nr_parts;
 	struct device *dev;
+	u32 adjustment_offset;
 	/*
 	 * The partition information can also be passed from kernel command
 	 * line. Also, the MTD core layer supports adding the whole device as
@@ -3343,6 +3393,18 @@ static int msm_nand_probe(struct platform_device *pdev)
 		goto out;
 	}
 	info->nand_phys = res->start;
+
+	err = of_property_read_u32(pdev->dev.of_node,
+				   "qcom,reg-adjustment-offset",
+				   &adjustment_offset);
+	if (err) {
+		pr_err("adjustment_offset not found, err = %d\n", err);
+		WARN_ON(1);
+		return err;
+	}
+
+	info->nand_phys_adjusted = info->nand_phys + adjustment_offset;
+
 	res = platform_get_resource_byname(pdev, IORESOURCE_MEM,
 						"bam_phys");
 	if (!res || !res->start) {

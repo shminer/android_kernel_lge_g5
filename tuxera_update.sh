@@ -279,6 +279,12 @@ build_package() {
     if [ -e "${OUTPUT_LINK}/scripts/recordmcount.h" ]; then echo "${OUTPUT_LINK}/scripts/recordmcount.h" >> ${INCLUDEFILE}; fi
     if [ -e "${KERNEL_LINK}/scripts/recordmcount.h" ]; then echo "${KERNEL_LINK}/scripts/recordmcount.h" >> ${INCLUDEFILE}; fi
 
+    # Commit 338d4f49d6f7114a017d294ccf7374df4f998edc requires arm64 some kernel headers from arm
+    echo "$archdirs" | grep arm64 > /dev/null && (
+        arm64_extra_file=arch/arm/include/asm/opcodes.h
+        if [ -e "${OUTPUT_LINK}/${arm64_extra_file}" ]; then echo "${OUTPUT_LINK}/${arm64_extra_file}" >> ${INCLUDEFILE}; fi
+        if [ -e "${KERNEL_LINK}/${arm64_extra_file}" ]; then echo "${KERNEL_LINK}/${arm64_extra_file}" >> ${INCLUDEFILE}; fi
+    )
 
     echo "Packing kernel headers ..."
     tar cjf "${1}" --dereference --no-recursion --files-from "${INCLUDEFILE}"
@@ -295,13 +301,37 @@ build_package() {
 }
 
 #
+# Retry network operations
+#
+do_retry() {
+    local result
+    local status
+    local delay=$conn_fail_retry_delay
+    local retr=1
+    while :
+    do
+        result=$("$@")
+        status=$?
+        if [ $status -eq 0 ] || [ $retr -gt $conn_fail_retry ] || [ -z "$retry_on_conn_fail" ] ; then
+            break
+        fi
+        echo "Trying to reconnect in "$delay" seconds..." >&2
+        sleep $delay
+        delay=$(($delay * 2))
+        retr=$(($retr + 1))
+    done
+    [ -n "$result" ] && echo "$result"
+    return $status
+}
+
+#
 # Upload kernel headers package using curl.
 #
 upload_package_curl() {
     echo "Uploading the following package:"
     ls -lh "${1}"
 
-    reply=$($curl -F "file=@${1}" https://${server}/upload.php)
+    reply=$(do_retry $curl -F "file=@${1}" https://${server}/upload.php)
 
     if [ $? -ne 0 ] ; then
         echo "curl failed. Unable to continue. Check connectivity and username/password."
@@ -338,7 +368,7 @@ upload_package_wget() {
 
     echo "Uploading package..."
 
-    reply=$($wget --post-file="$encoded" -O - https://${server}/upload.php)
+    reply=$(do_retry $wget --post-file="$encoded" -O - https://${server}/upload.php)
 
     if [ $? -ne 0 ] ; then
         echo "wget failed. Unable to continue. Check connectivity and username/password."
@@ -643,9 +673,9 @@ do_remote_build() {
 
     # Start build
     if [ "$http_client" = "wget" ] ; then
-        reply=$($wget --post-data="terminal=1&filename=${remote_package}&target-config=${target}&tags=${tags}&extraargs=${extraargs}&use-cache=${using_cache}&script-version=${script_version}&cache-lookup-time=${cache_lookup_time}&suid=${suid}&start-build=1" -O - https://${server})
+        reply=$(do_retry $wget --post-data="terminal=1&filename=${remote_package}&target-config=${target}&tags=${tags}&extraargs=${extraargs}&use-cache=${using_cache}&script-version=${script_version}&cache-lookup-time=${cache_lookup_time}&suid=${suid}&start-build=1" -O - https://${server})
     else
-        reply=$($curl -d terminal=1 -d filename="$remote_package" -d target-config="$target" -d tags="$tags" -d extraargs="$extraargs" -d use-cache="$using_cache" -d script-version="$script_version" -d cache-lookup-time="$cache_lookup_time" -d suid="$suid" -d start-build=1 https://${server})
+        reply=$(do_retry $curl -d terminal=1 -d filename="$remote_package" -d target-config="$target" -d tags="$tags" -d extraargs="$extraargs" -d use-cache="$using_cache" -d script-version="$script_version" -d cache-lookup-time="$cache_lookup_time" -d suid="$suid" -d start-build=1 https://${server})
     fi
 
     if [ $? -ne 0 ] ; then
@@ -713,9 +743,9 @@ do_remote_build() {
     echo "Downloading ${filename} ..."
 
     if [ "$http_client" = "wget" ] ; then
-        $wget -O "$filename" "$fileurl"
+        reply=$(do_retry $wget -O "$filename" "$fileurl")
     else
-        $curl -o "$filename" "$fileurl"
+        reply=$(do_retry $curl -o "$filename" "$fileurl")
     fi
 
     if [ $? -ne 0 ] ; then
@@ -767,9 +797,9 @@ list_targets() {
     echo "Connecting..."
 
     if [ "$http_client" = "wget" ] ; then
-        reply=$($wget --post-data="suid=${suid}" -O - https://${server}/targets.php)
+        reply=$(do_retry $wget --post-data="suid=${suid}" -O - https://${server}/targets.php)
     else
-        reply=$($curl -d suid="$suid" https://${server}/targets.php)
+        reply=$(do_retry $curl -d suid="$suid" https://${server}/targets.php)
     fi
 
     if [ $? -ne 0 ] ; then
@@ -791,9 +821,9 @@ get_latest() {
     echo "Checking for latest release..."
 
     if [ "$http_client" = "wget" ] ; then
-        latest_pkg=$($wget --post-data="target-config=${target}&suid=${suid}" -O - https://${server}/latest.php)
+        latest_pkg=$(do_retry $wget --post-data="target-config=${target}&suid=${suid}" -O - https://${server}/latest.php)
     else
-        latest_pkg=$($curl -d target-config="$target" https://${server}/latest.php)
+        latest_pkg=$(do_retry $curl -d target-config="$target" https://${server}/latest.php)
     fi
 
     if [ $? -ne 0 ] ; then
@@ -815,25 +845,21 @@ get_latest() {
 #
 select_server() {
     # for addr in `shuf -e $autobuild_addrs`; do
+    local status
+    local result
     for addr in $autobuild_addrs; do
-        echo "Trying $addr ..."
+        echo "Trying $addr ..." >&2
 
         if [ "$http_client" = "wget" ] ; then
-            addr=$($wget -O - --connect-timeout=15 "https://${addr}/node_select.php")
+            result=$($wget -O - --connect-timeout=15 "https://${addr}/node_select.php")
         else
-            addr=$($curl --connect-timeout 15 "https://${addr}/node_select.php")
+            result=$($curl --connect-timeout 15 "https://${addr}/node_select.php")
         fi
-
-        if [ $? -eq 0 ] ; then
-            echo "OK, using $addr"
-            server="$addr"
-            return 0
-        fi
+        status=$?
+        [ $status -eq 0 ] && break
     done
-
-    echo "Unable to contact Autobuild."
-    echo "Check connectivity and username/password."
-    exit 1
+    echo "$result"
+    return $status
 }
 
 #
@@ -871,7 +897,7 @@ check_http_client() {
         wget=${wget}" -nv"
     fi
 
-    if [ -n "$ignore_certificates" ] ; then
+	if [ -n "$ignore_certificates" ] ; then
         curl_quiet=${curl_quiet}" -k"
         wget_quiet=${wget_quiet}" --no-check-certificate"
         wget=${wget}" --no-check-certificate"
@@ -904,7 +930,14 @@ check_http_client() {
     if [ -n "$server" ] ; then
         echo "Server forced to $server"
     else
-        select_server
+        server=$(do_retry select_server)
+        if [ $? -ne 0 ] ; then
+            echo "Unable to contact Autobuild."
+            echo "Check connectivity and username/password."
+            exit 1
+        else
+            echo "OK, using $server"
+        fi
     fi
 }
 
@@ -966,9 +999,9 @@ upgrade() {
     tmpscript=$(mktemp)
 
     if [ "$http_client" = "wget" ] ; then
-        $wget -O "$tmpscript" "$upgrade_url"
+        reply=$(do_retry $wget -O "$tmpscript" "$upgrade_url")
     else
-        $curl -o "$tmpscript" "$upgrade_url"
+        reply=$(do_retry $curl -o "$tmpscript" "$upgrade_url")
     fi
 
     if [ $? -ne 0 ] ; then
@@ -1020,7 +1053,7 @@ set_source_dir() {
 # Script start
 #
 
-script_version="15.10.30"
+script_version="16.3.29"
 cache_dir=".tuxera_update_cache"
 dbgdev="/dev/null"
 cache_lookup_time="none"
@@ -1030,10 +1063,12 @@ autobuild_addrs="autobuild-1.tuxera.com autobuild-2.tuxera.com"
 retry=5
 retry_delay=2
 retry_max_time=120
+conn_fail_retry=6
+conn_fail_retry_delay=4
 
 echo "tuxera_update.sh version $script_version"
 
-if ! options=$(getopt -o pahuv -l target:,user:,pass:,use-package:,source-dir:,output-dir:,version:,cache-dir:,server:,extraargs:,max-cache-entries:,admin:,upgrade,help,ignore-cert,no-check-certificate,use-curl,use-wget,no-excludes,use-cache,verbose,latest -- "$@")
+if ! options=$(getopt -o pahuv -l target:,user:,pass:,use-package:,source-dir:,output-dir:,version:,cache-dir:,server:,extraargs:,max-cache-entries:,admin:,upgrade,help,ignore-cert,no-check-certificate,use-curl,use-wget,no-excludes,use-cache,verbose,latest,retry-on-connection-fail -- "$@")
 then
     usage
 fi
@@ -1071,12 +1106,20 @@ do
     --retry-delay) retry_delay="$2" ; shift;;
     --retry-max-time) retry_max_time="$2" ; shift;;
     --admin) admin="$2" ; shift;;
+    --retry-on-connection-fail) retry_on_conn_fail="yes" ;;
     (--) shift; break;;
     (-*) echo "$0: error - unrecognized option $1" 1>&2; usage;;
     (*) break;;
     esac
     shift
 done
+
+# Retry enabled only in case --use-cache is set
+# (assume high-load clients use --use-cache)
+[ -n "$use_cache" ] && retry_on_conn_fail="yes"
+
+# double max_polls if retry_on_conn_fail enabled
+[ -n "$retry_on_conn_fail" ] && max_polls=$(($max_polls * 2))
 
 if [ -n "$do_upgrade" ] ; then
     upgrade

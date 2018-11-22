@@ -1,4 +1,4 @@
-/* Copyright (c) 2011-2015, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2011-2016, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -177,6 +177,8 @@
 #define P_RST_P_SW_RST                             0x1
 
 /* P_HALTn */
+#define P_HALT_P_PIPE_EMPTY			   0x8
+#define P_HALT_P_LAST_DESC_ZLT                     0x4
 #define P_HALT_P_PROD_HALTED                       0x2
 #define P_HALT_P_HALT                              0x1
 
@@ -1271,6 +1273,58 @@ void bam_disable_pipe(void *base, u32 pipe)
 	wmb(); /* ensure pipe is disabled */
 }
 
+/*
+ * Check if the last desc is ZLT
+ */
+bool bam_pipe_check_zlt(void *base, u32 pipe)
+{
+	struct sps_bam *dev = to_sps_bam_dev(base);
+
+	if ((dev == NULL) || (&dev->base != base)) {
+		SPS_ERR(sps, "%s:Failed to get dev for base addr 0x%p\n",
+				__func__, base);
+		return false;
+	}
+
+	if (bam_read_reg_field(base, P_HALT, pipe, P_HALT_P_LAST_DESC_ZLT)) {
+		SPS_DBG(dev,
+			"sps:%s:bam=0x%p(va).pipe=%d: the last desc is ZLT.",
+			__func__, base, pipe);
+		return true;
+	}
+
+	SPS_DBG(dev,
+		"sps:%s:bam=0x%p(va).pipe=%d: the last desc is not ZLT.",
+		__func__, base, pipe);
+	return false;
+}
+
+/*
+ * Check if desc FIFO is empty
+ */
+bool bam_pipe_check_pipe_empty(void *base, u32 pipe)
+{
+	struct sps_bam *dev = to_sps_bam_dev(base);
+
+	if ((dev == NULL) || (&dev->base != base)) {
+		SPS_ERR(sps, "%s:Failed to get dev for base addr 0x%p\n",
+				__func__, base);
+		return false;
+	}
+
+	if (bam_read_reg_field(base, P_HALT, pipe, P_HALT_P_PIPE_EMPTY)) {
+		SPS_DBG(dev,
+			"sps:%s:bam=0x%p(va).pipe=%d: desc FIFO is empty.",
+			__func__, base, pipe);
+		return true;
+	}
+
+	SPS_DBG(dev,
+		"sps:%s:bam=0x%p(va).pipe=%d: desc FIFO is not empty.",
+		__func__, base, pipe);
+	return false;
+}
+
 /**
  * Initialize a BAM pipe
  */
@@ -1451,8 +1505,10 @@ void bam_pipe_set_irq(void *base, u32 pipe, enum bam_enable irq_en,
 				__func__, base);
 		return;
 	}
-	SPS_DBG2(dev, "sps:%s:bam=%pa 0x%p(va).pipe=%d.",
-			__func__, BAM_ID(dev), dev->base, pipe);
+	SPS_DBG2(dev,
+		"sps:%s:bam=%pa 0x%p(va).pipe=%d; irq_en:%d; src_mask:0x%x; ee:%d.\n",
+			__func__, BAM_ID(dev), dev->base, pipe,
+			irq_en, src_mask, ee);
 	if (src_mask & BAM_PIPE_IRQ_RST_ERROR) {
 		if (enhd_pipe)
 			bam_write_reg_field(base, IRQ_EN, 0,

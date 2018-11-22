@@ -1,4 +1,4 @@
-/* Copyright (c) 2014-2015, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2014-2015, 2016 The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -109,11 +109,11 @@ void diag_md_close_all()
 		 * internal buffers in the table so that there are no stale
 		 * entries.
 		 */
+		spin_lock_irqsave(&ch->lock, flags);
 		for (j = 0; j < ch->num_tbl_entries; j++) {
 			entry = &ch->tbl[j];
 			if (entry->len <= 0)
 				continue;
-			spin_lock_irqsave(&ch->lock, flags);
 			if (ch->ops && ch->ops->write_done)
 				ch->ops->write_done(entry->buf, entry->len,
 						    entry->ctx,
@@ -121,8 +121,8 @@ void diag_md_close_all()
 			entry->buf = NULL;
 			entry->len = 0;
 			entry->ctx = 0;
-			spin_unlock_irqrestore(&ch->lock, flags);
 		}
+		spin_unlock_irqrestore(&ch->lock, flags);
 	}
 
 	diag_ws_reset(DIAG_WS_MUX);
@@ -158,7 +158,7 @@ int diag_md_write(int id, unsigned char *buf, int len, int ctx)
 		if (ch->tbl[i].buf != buf)
 			continue;
 		found = 1;
-		pr_err_ratelimited("diag: trying to write the same buffer buf: %p, ctxt: %d len: %d at i: %d back to the table, proc: %d, mode: %d\n",
+		pr_err_ratelimited("diag: trying to write the same buffer buf: %pK, ctxt: %d len: %d at i: %d back to the table, proc: %d, mode: %d\n",
 				   buf, ctx, ch->tbl[i].len,
 				   i, id, driver->logging_mode);
 	}
@@ -329,6 +329,9 @@ int diag_md_close_peripheral(int id, uint8_t peripheral)
 			ch->ops->write_done(entry->buf, entry->len,
 					    entry->ctx,
 					    DIAG_MEMORY_DEVICE_MODE);
+			entry->buf = NULL;
+			entry->len = 0;
+			entry->ctx = 0;
 		}
 	}
 	spin_unlock_irqrestore(&ch->lock, flags);
@@ -353,8 +356,8 @@ int diag_md_init()
 			ch->tbl[j].buf = NULL;
 			ch->tbl[j].len = 0;
 			ch->tbl[j].ctx = 0;
-			spin_lock_init(&(ch->lock));
 		}
+		spin_lock_init(&(ch->lock));
 	}
 
 	return 0;

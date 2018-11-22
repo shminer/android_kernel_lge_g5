@@ -15,17 +15,18 @@
 #include <linux/cpu.h>
 #include <linux/export.h>
 
-static spinlock_t spinlock;
-static DEFINE_PER_CPU(int, app_wa_applied);
-static unsigned int app_wa_set[NR_CPUS];
-static unsigned int app_wa_clear[NR_CPUS];
+#include <asm/app_api.h>
 
-#define APP_SETTING_BIT 30
+static spinlock_t spinlock;
+static spinlock_t spinlock_l2;
+static DEFINE_PER_CPU(int, app_config_applied);
+static unsigned long app_config_set[NR_CPUS];
+static unsigned long app_config_clear[NR_CPUS];
 
 void set_app_setting_bit(uint32_t bit)
 {
-	uint64_t reg;
 	unsigned long flags;
+	uint64_t reg;
 	int cpu;
 
 	spin_lock_irqsave(&spinlock, flags);
@@ -34,22 +35,21 @@ void set_app_setting_bit(uint32_t bit)
 	isb();
 	asm volatile("msr S3_1_C15_C15_0, %0" : : "r" (reg));
 	isb();
-	spin_unlock_irqrestore(&spinlock, flags);
-
 	if (bit == APP_SETTING_BIT) {
 		cpu = raw_smp_processor_id();
-		app_wa_set[cpu]++;
+		app_config_set[cpu]++;
 
-		this_cpu_write(app_wa_applied, 1);
+		this_cpu_write(app_config_applied, 1);
 	}
+	spin_unlock_irqrestore(&spinlock, flags);
 
 }
 EXPORT_SYMBOL(set_app_setting_bit);
 
 void clear_app_setting_bit(uint32_t bit)
 {
-	uint64_t reg;
 	unsigned long flags;
+	uint64_t reg;
 	int cpu;
 
 	spin_lock_irqsave(&spinlock, flags);
@@ -58,21 +58,73 @@ void clear_app_setting_bit(uint32_t bit)
 	isb();
 	asm volatile("msr S3_1_C15_C15_0, %0" : : "r" (reg));
 	isb();
-	spin_unlock_irqrestore(&spinlock, flags);
-
 	if (bit == APP_SETTING_BIT) {
 		cpu = raw_smp_processor_id();
-		app_wa_clear[cpu]++;
+		app_config_clear[cpu]++;
 
-		this_cpu_write(app_wa_applied, 0);
+		this_cpu_write(app_config_applied, 0);
 	}
-
+	spin_unlock_irqrestore(&spinlock, flags);
 }
 EXPORT_SYMBOL(clear_app_setting_bit);
+
+void set_app_setting_bit_for_l2(uint32_t bit)
+{
+	unsigned long flags;
+	uint64_t reg;
+
+	spin_lock_irqsave(&spinlock_l2, flags);
+	asm volatile("mrs %0, S3_2_C15_C15_1" : "=r" (reg));
+	reg = reg | BIT(bit);
+	isb();
+	asm volatile("msr S3_2_C15_C15_1, %0" : : "r" (reg));
+	isb();
+	asm volatile("mrs %0, S3_0_c15_c15_1 " : "=r" (reg));
+	reg = reg | BIT(18);
+	reg = reg & ~BIT(2);
+	reg = reg | 0x3;
+	isb();
+	asm volatile("msr S3_0_c15_c15_1, %0" : : "r" (reg));
+	isb();
+	asm volatile("mrs %0, S3_0_c15_c15_0  " : "=r" (reg));
+	reg = reg | BIT(24);
+	isb();
+	asm volatile("msr S3_0_c15_c15_0 , %0" : : "r" (reg));
+	isb();
+	spin_unlock_irqrestore(&spinlock_l2, flags);
+}
+EXPORT_SYMBOL(set_app_setting_bit_for_l2);
+
+void clear_app_setting_bit_for_l2(uint32_t bit)
+{
+	unsigned long flags;
+	uint64_t reg;
+
+	spin_lock_irqsave(&spinlock_l2, flags);
+	asm volatile("mrs %0, S3_2_C15_C15_1" : "=r" (reg));
+	reg = reg & ~BIT(bit);
+	isb();
+	asm volatile("msr S3_2_C15_C15_1, %0" : : "r" (reg));
+	isb();
+	asm volatile("mrs %0, S3_0_c15_c15_1 " : "=r" (reg));
+	reg = reg & ~BIT(18);
+	reg = reg & ~0x3;
+	isb();
+	asm volatile("msr S3_0_c15_c15_1, %0" : : "r" (reg));
+	isb();
+	asm volatile("mrs %0, S3_0_c15_c15_0  " : "=r" (reg));
+	reg = reg & ~BIT(24);
+	isb();
+	asm volatile("msr S3_0_c15_c15_0 , %0" : : "r" (reg));
+	isb();
+	spin_unlock_irqrestore(&spinlock_l2, flags);
+}
+EXPORT_SYMBOL(clear_app_setting_bit_for_l2);
 
 static int __init init_app_api(void)
 {
 	spin_lock_init(&spinlock);
+	spin_lock_init(&spinlock_l2);
 	return 0;
 }
 early_initcall(init_app_api);

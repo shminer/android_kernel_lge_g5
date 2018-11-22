@@ -253,7 +253,7 @@ static int __dcc_ll_cfg(struct dcc_drvdata *drvdata)
 	uint32_t prev_addr, addr;
 	uint32_t prev_off = 0, off;
 	uint32_t link;
-	uint32_t pos;
+	uint32_t pos, total_len = 0;
 	struct dcc_config_entry *entry;
 
 	if (list_empty(&drvdata->config_head)) {
@@ -272,6 +272,7 @@ static int __dcc_ll_cfg(struct dcc_drvdata *drvdata)
 		addr = (entry->base >> 4) & BM(0, 27);
 		addr |= BIT(31);
 		off = entry->offset/4;
+		total_len += entry->len * 4;
 
 		if (!prev_addr || prev_addr != addr || prev_off > off) {
 			/* Check if we need to write link of prev entry */
@@ -289,7 +290,7 @@ static int __dcc_ll_cfg(struct dcc_drvdata *drvdata)
 			prev_off = 0;
 		}
 
-		if ((off - prev_off) > 0xFF || entry->len > 0x7F) {
+		if ((off - prev_off) > 0xFF || entry->len > MAX_DCC_LEN) {
 			dev_err(drvdata->dev,
 				"DCC: Progamming error! Base: 0x%x, offset 0x%x.\n",
 				entry->base, entry->offset);
@@ -339,8 +340,25 @@ static int __dcc_ll_cfg(struct dcc_drvdata *drvdata)
 	dcc_sram_writel(drvdata, 0, sram_offset);
 	sram_offset += 4;
 
-	drvdata->ram_cfg = (sram_offset  / 4);
+	/* check if the data will overstep */
+	if (drvdata->data_sink == DCC_DATA_SINK_SRAM
+	    && drvdata->func_type == DCC_FUNC_TYPE_CAPTURE) {
+		if (sram_offset + total_len > drvdata->ram_size) {
+			sram_offset += total_len;
+			goto overstep;
+		}
+	} else {
+		if (sram_offset > drvdata->ram_size)
+			goto overstep;
+	}
 
+	drvdata->ram_cfg = (sram_offset  / 4);
+	return 0;
+overstep:
+	ret = -EINVAL;
+	memset_io(drvdata->ram_base, 0, drvdata->ram_size);
+	dev_err(drvdata->dev, "DCC SRAM oversteps, 0x%x (0x%x)\n",
+		sram_offset, drvdata->ram_size);
 err:
 	return ret;
 }
@@ -1203,7 +1221,7 @@ static int dcc_probe(struct platform_device *pdev)
 
 	res = platform_get_resource_byname(pdev, IORESOURCE_MEM, "dcc-base");
 	if (!res)
-		return -ENODEV;
+		return -EINVAL;
 
 	drvdata->reg_size = resource_size(res);
 	drvdata->base = devm_ioremap(dev, res->start, resource_size(res));
@@ -1213,7 +1231,7 @@ static int dcc_probe(struct platform_device *pdev)
 	res = platform_get_resource_byname(pdev, IORESOURCE_MEM,
 					   "dcc-ram-base");
 	if (!res)
-		return -ENODEV;
+		return -EINVAL;
 
 	drvdata->ram_size = resource_size(res);
 	drvdata->ram_base = devm_ioremap(dev, res->start, resource_size(res));
@@ -1233,19 +1251,21 @@ static int dcc_probe(struct platform_device *pdev)
 
 	INIT_LIST_HEAD(&drvdata->config_head);
 	drvdata->nr_config = 0;
+	drvdata->xpu_scm_avail = 0;
 
-	if (scm_is_call_available(SCM_SVC_MP, SCM_SVC_DISABLE_XPU) >  0)
-		drvdata->xpu_scm_avail = 1;
-	else
-		drvdata->xpu_scm_avail = 0;
-
-	if (drvdata->xpu_scm_avail) {
-		res = platform_get_resource_byname(pdev, IORESOURCE_MEM,
-						   "dcc-xpu-base");
-		if (!res)
-			return -ENODEV;
-
-		drvdata->xpu_addr = res->start;
+	res = platform_get_resource_byname(pdev, IORESOURCE_MEM,
+					   "dcc-xpu-base");
+	if (res) {
+		if (scm_is_call_available(SCM_SVC_MP,
+					  SCM_SVC_DISABLE_XPU) > 0) {
+			drvdata->xpu_scm_avail = 1;
+			drvdata->xpu_addr = res->start;
+		} else {
+			dev_err(dev, "scm call is not available\n");
+			return -EINVAL;
+		}
+	} else {
+		dev_info(dev, "DCC XPU is not specified\n");
 	}
 
 	ret = dcc_xpu_unlock(drvdata);

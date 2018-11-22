@@ -1,4 +1,4 @@
-/* Copyright (c) 2008-2015, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2008-2016, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -38,6 +38,7 @@
 #include "diag_masks.h"
 #include "diag_usb.h"
 #include "diag_mux.h"
+#include "diag_ipc_logging.h"
 
 #define STM_CMD_VERSION_OFFSET	4
 #define STM_CMD_MASK_OFFSET	5
@@ -244,7 +245,7 @@ void chk_logging_wakeup(void)
 		 * index as all the indices point to the same session
 		 * structure.
 		 */
-		if (driver->md_session_mode == DIAG_MD_NORMAL && j == 0)
+		if ((driver->md_session_mask == DIAG_CON_ALL) && (j == 0))
 			break;
 	}
 }
@@ -288,7 +289,8 @@ static void pack_rsp_and_send(unsigned char *buf, int len)
 		 * for responses. Make sure we don't miss previous wakeups for
 		 * draining responses when we are in Memory Device Mode.
 		 */
-		if (driver->logging_mode == DIAG_MEMORY_DEVICE_MODE)
+		if (driver->logging_mode == DIAG_MEMORY_DEVICE_MODE ||
+				driver->logging_mode == DIAG_MULTI_MODE)
 			chk_logging_wakeup();
 
 #ifdef CONFIG_LGE_DM_APP
@@ -361,7 +363,8 @@ static void encode_rsp_and_send(unsigned char *buf, int len)
 		 * for responses. Make sure we don't miss previous wakeups for
 		 * draining responses when we are in Memory Device Mode.
 		 */
-		if (driver->logging_mode == DIAG_MEMORY_DEVICE_MODE)
+		if (driver->logging_mode == DIAG_MEMORY_DEVICE_MODE ||
+				driver->logging_mode == DIAG_MULTI_MODE)
 			chk_logging_wakeup();
 
 #ifdef CONFIG_LGE_DM_APP
@@ -424,7 +427,7 @@ void diag_update_pkt_buffer(unsigned char *buf, uint32_t len, int type)
 	uint32_t max_len = 0;
 
 	if (!buf || len == 0) {
-		pr_err("diag: In %s, Invalid ptr %p and length %d\n",
+		pr_err("diag: In %s, Invalid ptr %pK and length %d\n",
 		       __func__, buf, len);
 		return;
 	}
@@ -447,7 +450,9 @@ void diag_update_pkt_buffer(unsigned char *buf, uint32_t len, int type)
 		return;
 	}
 
+	DIAG_LOG(DIAG_DEBUG_PERIPHERALS," %d:diagchar_mutex to obtain ", __LINE__);	
 	mutex_lock(&driver->diagchar_mutex);
+	DIAG_LOG(DIAG_DEBUG_PERIPHERALS," %d:diagchar_mutex obtained ", __LINE__);
 	if (CHK_OVERFLOW(ptr, ptr, ptr + max_len, len)) {
 		memcpy(ptr, temp , len);
 		*length = len;
@@ -457,25 +462,32 @@ void diag_update_pkt_buffer(unsigned char *buf, uint32_t len, int type)
 			 __func__, len, type);
 	}
 	mutex_unlock(&driver->diagchar_mutex);
+	DIAG_LOG(DIAG_DEBUG_PERIPHERALS," %d:diagchar_mutex released ", __LINE__);
 }
 
 void diag_update_userspace_clients(unsigned int type)
 {
 	int i;
 
+	DIAG_LOG(DIAG_DEBUG_PERIPHERALS," %d:diagchar_mutex to obtain ", __LINE__);	
 	mutex_lock(&driver->diagchar_mutex);
+	DIAG_LOG(DIAG_DEBUG_PERIPHERALS," %d:diagchar_mutex obtained ", __LINE__);
 	for (i = 0; i < driver->num_clients; i++)
 		if (driver->client_map[i].pid != 0)
 			driver->data_ready[i] |= type;
 	wake_up_interruptible(&driver->wait_q);
 	mutex_unlock(&driver->diagchar_mutex);
+	DIAG_LOG(DIAG_DEBUG_PERIPHERALS," %d:diagchar_mutex released ", __LINE__);
 }
 
 void diag_update_md_clients(unsigned int type)
 {
 	int i, j;
 
+	DIAG_LOG(DIAG_DEBUG_PERIPHERALS," %d:diagchar_mutex to obtain ", __LINE__);	
+
 	mutex_lock(&driver->diagchar_mutex);
+	DIAG_LOG(DIAG_DEBUG_PERIPHERALS," %d:diagchar_mutex obtained ", __LINE__);
 	for (i = 0; i < NUM_MD_SESSIONS; i++) {
 		if (driver->md_session_map[i] != NULL)
 			for (j = 0; j < driver->num_clients; j++) {
@@ -489,6 +501,7 @@ void diag_update_md_clients(unsigned int type)
 	}
 	wake_up_interruptible(&driver->wait_q);
 	mutex_unlock(&driver->diagchar_mutex);
+	DIAG_LOG(DIAG_DEBUG_PERIPHERALS," %d:diagchar_mutex released ", __LINE__);
 }
 
 #ifdef CONFIG_LGE_USB_DIAG_LOCK_SPR
@@ -496,7 +509,9 @@ void diag_update_sleeping_process_atd(int data_type)
 {
 	int i;
 
+	DIAG_LOG(DIAG_DEBUG_PERIPHERALS," %d:diagchar_mutex to obtain ", __LINE__);
 	mutex_lock(&driver->diagchar_mutex);
+	DIAG_LOG(DIAG_DEBUG_PERIPHERALS," %d:diagchar_mutex obtained ", __LINE__);
 	for (i = 0; i < driver->num_clients; i++)
 		if (!strcmp(driver->client_map[i].name, "atd")) {
 			pr_debug("%s: process atd found\n", __func__);
@@ -520,6 +535,7 @@ void diag_update_sleeping_process(int process_id, int data_type)
 		}
 	wake_up_interruptible(&driver->wait_q);
 	mutex_unlock(&driver->diagchar_mutex);
+	DIAG_LOG(DIAG_DEBUG_PERIPHERALS," %d:diagchar_mutex released ", __LINE__);
 }
 
 static int diag_send_data(struct diag_cmd_reg_t *entry, unsigned char *buf,
@@ -559,7 +575,7 @@ void diag_process_stm_mask(uint8_t cmd, uint8_t data_mask, int data_type)
 	if (data_type >= PERIPHERAL_MODEM && data_type <= PERIPHERAL_SENSORS) {
 		if (driver->feature[data_type].stm_support) {
 			status = diag_send_stm_state(data_type, cmd);
-			if (status == 1)
+			if (status == 0)
 				driver->stm_state[data_type] = cmd;
 		}
 		driver->stm_state_requested[data_type] = cmd;
@@ -577,7 +593,7 @@ int diag_process_stm_cmd(unsigned char *buf, unsigned char *dest_buf)
 	int i;
 
 	if (!buf || !dest_buf) {
-		pr_err("diag: Invalid pointers buf: %p, dest_buf %p in %s\n",
+		pr_err("diag: Invalid pointers buf: %pK, dest_buf %pK in %s\n",
 		       buf, dest_buf, __func__);
 		return -EIO;
 	}
@@ -666,7 +682,7 @@ int diag_process_time_sync_query_cmd(unsigned char *src_buf, int src_len,
 	struct diag_cmd_time_sync_query_rsp_t rsp;
 
 	if (!src_buf || !dest_buf || src_len <= 0 || dest_len <= 0) {
-		pr_err("diag: Invalid input in %s, src_buf: %p, src_len: %d, dest_buf: %p, dest_len: %d",
+		pr_err("diag: Invalid input in %s, src_buf: %pK, src_len: %d, dest_buf: %pK, dest_len: %d",
 			__func__, src_buf, src_len, dest_buf, dest_len);
 		return -EINVAL;
 	}
@@ -693,7 +709,7 @@ int diag_process_time_sync_switch_cmd(unsigned char *src_buf, int src_len,
 	int err = 0, write_len = 0;
 
 	if (!src_buf || !dest_buf || src_len <= 0 || dest_len <= 0) {
-		pr_err("diag: Invalid input in %s, src_buf: %p, src_len: %d, dest_buf: %p, dest_len: %d",
+		pr_err("diag: Invalid input in %s, src_buf: %pK, src_len: %d, dest_buf: %pK, dest_len: %d",
 			__func__, src_buf, src_len, dest_buf, dest_len);
 		return -EINVAL;
 	}
@@ -765,7 +781,7 @@ int diag_cmd_log_on_demand(unsigned char *src_buf, int src_len,
 		return 0;
 
 	if (!src_buf || !dest_buf || src_len <= 0 || dest_len <= 0) {
-		pr_err("diag: Invalid input in %s, src_buf: %p, src_len: %d, dest_buf: %p, dest_len: %d",
+		pr_err("diag: Invalid input in %s, src_buf: %pK, src_len: %d, dest_buf: %pK, dest_len: %d",
 		       __func__, src_buf, src_len, dest_buf, dest_len);
 		return -EINVAL;
 	}
@@ -1040,8 +1056,13 @@ int diag_process_apps_pkt(unsigned char *buf, int len,
 			if (MD_PERIPHERAL_MASK(reg_item->proc) &
 				info->peripheral_mask)
 				write_len = diag_send_data(reg_item, buf, len);
-		} else
-			write_len = diag_send_data(reg_item, buf, len);
+		} else {
+			if (MD_PERIPHERAL_MASK(reg_item->proc) &
+				driver->logging_mask)
+				diag_send_error_rsp(buf, len);
+			else
+				write_len = diag_send_data(reg_item, buf, len);
+		}
 		mutex_unlock(&driver->cmd_reg_mutex);
 		return write_len;
 	}
@@ -1363,15 +1384,17 @@ static int diagfwd_mux_close(int id, int mode)
 		return -EINVAL;
 	}
 
-	if ((mode == DIAG_USB_MODE &&
-#ifndef CONFIG_LGE_DM_APP
-	     driver->logging_mode == DIAG_MEMORY_DEVICE_MODE) ||
+
+#ifdef CONFIG_LGE_DM_APP
+	if ((driver->logging_mode == DIAG_MULTI_MODE &&
+		driver->md_session_mode == DIAG_MD_NONE) ||
+		(driver->md_session_mode == DIAG_MD_PERIPHERAL) ||
+		(driver->logging_mode == DM_APP_MODE)) {
 #else
-		(driver->logging_mode == DIAG_MEMORY_DEVICE_MODE ||
-		driver->logging_mode == DM_APP_MODE)) ||
+	if ((driver->logging_mode == DIAG_MULTI_MODE &&
+		driver->md_session_mode == DIAG_MD_NONE) ||
+		(driver->md_session_mode == DIAG_MD_PERIPHERAL)) {
 #endif
-	    (mode == DIAG_MEMORY_DEVICE_MODE &&
-	     driver->logging_mode == DIAG_USB_MODE)) {
 		/*
 		 * In this case the channel must not be closed. This case
 		 * indicates that the USB is removed but there is a client
@@ -1386,9 +1409,11 @@ static int diagfwd_mux_close(int id, int mode)
 		pr_debug("diag: In %s, re-enabling HDLC encoding\n",
 		       __func__);
 		mutex_lock(&driver->hdlc_disable_mutex);
+		DIAG_LOG(DIAG_DEBUG_PERIPHERALS," %d:hdlc_disable_mutex obtained ", __LINE__);
 		if (driver->md_session_mode == DIAG_MD_NONE)
 			driver->hdlc_disabled = 0;
 		mutex_unlock(&driver->hdlc_disable_mutex);
+		DIAG_LOG(DIAG_DEBUG_PERIPHERALS," %d:hdlc_disable_mutex released ", __LINE__);
 		queue_work(driver->diag_wq,
 			&(driver->update_user_clients));
 	}
@@ -1629,6 +1654,7 @@ static int diagfwd_mux_write_done(unsigned char *buf, int len, int buf_ctxt,
 		} else if (peripheral == APPS_DATA) {
 			diagmem_free(driver, (unsigned char *)buf,
 				     POOL_TYPE_HDLC);
+			buf = NULL;
 		} else {
 			pr_err_ratelimited("diag: Invalid peripheral %d in %s, type: %d\n",
 					   peripheral, __func__, type);

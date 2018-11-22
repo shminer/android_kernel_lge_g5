@@ -1,4 +1,4 @@
-/* Copyright (c) 2007-2015, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2007-2016, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -23,14 +23,32 @@
 #include "mdss_debug.h"
 
 #define MDSS_SMMU_COMPATIBLE "qcom,smmu"
+#define SMMU_CBN_FSYNR1		0x6c
 
-enum mdss_smmu_version {
-	MDSS_SMMU_V1,
-	MDSS_SMMU_V2
+struct mdss_iommu_map_type {
+	char *client_name;
+	char *ctx_name;
+	unsigned long start;
+	unsigned long size;
+};
+
+struct mdss_smmu_domain {
+	char *ctx_name;
+	int domain;
+	unsigned long start;
+	unsigned long size;
 };
 
 void mdss_smmu_register(struct device *dev);
 int mdss_smmu_init(struct mdss_data_type *mdata, struct device *dev);
+
+static inline int mdss_smmu_dma_data_direction(int dir)
+{
+	struct mdss_data_type *mdata = mdss_mdp_get_mdata();
+
+	return (mdss_has_quirk(mdata, MDSS_QUIRK_DMA_BI_DIR)) ?
+		DMA_BIDIRECTIONAL : dir;
+}
 
 static inline bool is_mdss_smmu_compatible_device(const char *str)
 {
@@ -39,9 +57,30 @@ static inline bool is_mdss_smmu_compatible_device(const char *str)
 			strlen(MDSS_SMMU_COMPATIBLE))) ? true : false;
 }
 
+/*
+ * mdss_smmu_is_valid_domain_type()
+ *
+ * Used to check if rotator smmu domain is defined or not by checking if
+ * vbif base is defined and wb rotator exists. As those are associated.
+ */
+static inline bool mdss_smmu_is_valid_domain_type(struct mdss_data_type *mdata,
+		int domain_type)
+{
+	if ((domain_type == MDSS_IOMMU_DOMAIN_ROT_UNSECURE ||
+			domain_type == MDSS_IOMMU_DOMAIN_ROT_SECURE) &&
+			(!mdss_mdp_is_wb_rotator_supported(mdata) ||
+			!mdss_mdp_is_nrt_vbif_base_defined(mdata)))
+		return false;
+	return true;
+}
+
 static inline struct mdss_smmu_client *mdss_smmu_get_cb(u32 domain)
 {
 	struct mdss_data_type *mdata = mdss_mdp_get_mdata();
+
+	if (!mdss_smmu_is_valid_domain_type(mdata, domain))
+		return NULL;
+
 	return (domain >= MDSS_IOMMU_MAX_DOMAIN) ? NULL :
 			&mdata->mdss_smmu[domain];
 }
@@ -56,22 +95,6 @@ static inline int is_mdss_iommu_attached(void)
 {
 	struct mdss_data_type *mdata = mdss_mdp_get_mdata();
 	return mdata ? mdata->iommu_attached : false;
-}
-
-/*
- * mdss_smmu_is_valid_domain_type()
- *
- * Used to check if rotator smmu domain is defined or not by checking if
- * vbif base is defined. As those are associated.
- */
-static inline bool mdss_smmu_is_valid_domain_type(struct mdss_data_type *mdata,
-		int domain_type)
-{
-	if ((domain_type == MDSS_IOMMU_DOMAIN_ROT_UNSECURE ||
-			domain_type == MDSS_IOMMU_DOMAIN_ROT_SECURE) &&
-			!mdss_mdp_is_nrt_vbif_base_defined(mdata))
-		return false;
-	return true;
 }
 
 static inline int mdss_smmu_get_domain_type(u32 flags, bool rotator)
@@ -134,6 +157,10 @@ static inline int mdss_smmu_detach(struct mdss_data_type *mdata)
 static inline int mdss_smmu_get_domain_id(u32 type)
 {
 	struct mdss_data_type *mdata = mdss_mdp_get_mdata();
+
+	if (!mdss_smmu_is_valid_domain_type(mdata, type))
+		return -ENODEV;
+
 	if (!mdata || !mdata->smmu_ops.smmu_get_domain_id
 			|| type >= MDSS_IOMMU_MAX_DOMAIN)
 		return -ENODEV;
@@ -145,7 +172,7 @@ static inline struct dma_buf_attachment *mdss_smmu_dma_buf_attach(
 		struct dma_buf *dma_buf, struct device *dev, int domain)
 {
 	struct mdss_data_type *mdata = mdss_mdp_get_mdata();
-	if (!mdata->smmu_ops.smmu_dma_buf_attach)
+	if (!mdata || !mdata->smmu_ops.smmu_dma_buf_attach)
 		return NULL;
 
 	return mdata->smmu_ops.smmu_dma_buf_attach(dma_buf, dev, domain);
@@ -160,7 +187,8 @@ static inline int mdss_smmu_map_dma_buf(struct dma_buf *dma_buf,
 		return -ENOSYS;
 
 	return mdata->smmu_ops.smmu_map_dma_buf(dma_buf, table,
-			domain, iova, size, dir);
+			domain, iova, size,
+			mdss_smmu_dma_data_direction(dir));
 }
 
 static inline void mdss_smmu_unmap_dma_buf(struct sg_table *table, int domain,
@@ -168,7 +196,8 @@ static inline void mdss_smmu_unmap_dma_buf(struct sg_table *table, int domain,
 {
 	struct mdss_data_type *mdata = mdss_mdp_get_mdata();
 	if (mdata->smmu_ops.smmu_unmap_dma_buf)
-		mdata->smmu_ops.smmu_unmap_dma_buf(table, domain, dir, dma_buf);
+		mdata->smmu_ops.smmu_unmap_dma_buf(table, domain,
+		mdss_smmu_dma_data_direction(dir), dma_buf);
 }
 
 static inline int mdss_smmu_dma_alloc_coherent(struct device *dev, size_t size,
@@ -176,7 +205,7 @@ static inline int mdss_smmu_dma_alloc_coherent(struct device *dev, size_t size,
 		gfp_t gfp, int domain)
 {
 	struct mdss_data_type *mdata = mdss_mdp_get_mdata();
-	if (!mdata->smmu_ops.smmu_dma_alloc_coherent)
+	if (!mdata || !mdata->smmu_ops.smmu_dma_alloc_coherent)
 		return -ENOSYS;
 
 	return mdata->smmu_ops.smmu_dma_alloc_coherent(dev, size,
@@ -229,7 +258,8 @@ static inline int mdss_smmu_dsi_map_buffer(phys_addr_t phys,
 		return -ENOSYS;
 
 	return mdata->smmu_ops.smmu_dsi_map_buffer(phys, domain, size,
-			dma_addr, cpu_addr, dir);
+			dma_addr, cpu_addr,
+			mdss_smmu_dma_data_direction(dir));
 }
 
 static inline void mdss_smmu_dsi_unmap_buffer(dma_addr_t dma_addr, int domain,
@@ -238,7 +268,7 @@ static inline void mdss_smmu_dsi_unmap_buffer(dma_addr_t dma_addr, int domain,
 	struct mdss_data_type *mdata = mdss_mdp_get_mdata();
 	if (mdata->smmu_ops.smmu_dsi_unmap_buffer)
 		mdata->smmu_ops.smmu_dsi_unmap_buffer(dma_addr, domain,
-			size, dir);
+			size, mdss_smmu_dma_data_direction(dir));
 }
 
 static inline void mdss_smmu_deinit(struct mdss_data_type *mdata)

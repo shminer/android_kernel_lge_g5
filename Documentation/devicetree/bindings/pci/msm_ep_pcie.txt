@@ -42,6 +42,10 @@ Optional Properties:
   - qcom,pcie-phy-ver: version of PCIe PHY.
   - qcom,pcie-link-speed: generation of PCIe link speed. The value could be
     1, 2 or 3.
+  - qcom,pcie-active-config: boolean type; active configuration of PCIe
+    addressing.
+  - qcom,pcie-aggregated-irq: boolean type; interrupts are aggregated.
+  - mdm2apstatus-gpio: GPIO used by PCIe endpoint side to notify the host side.
   - Refer to "Documentation/devicetree/bindings/arm/msm/msm_bus.txt" for
     below optional properties:
 	- qcom,msm-bus,name
@@ -80,6 +84,7 @@ Example:
 		perst-gpio = <&msmgpio 65 0>;
 		wake-gpio = <&msmgpio 61 0>;
 		clkreq-gpio = <&msmgpio 64 0>;
+		mdm2apstatus-gpio = <&tlmm_pinmux 16 0>;
 
 		gdsc-vdd-supply = <&gdsc_pcie_0>;
 		vreg-1.8-supply = <&pmd9635_l8>;
@@ -103,4 +108,6 @@ Example:
 				<45 512 500 800>;
 
 		qcom,pcie-link-speed = <1>;
+		qcom,pcie-active-config;
+		qcom,pcie-aggregated-irq;
 	};

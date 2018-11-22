@@ -1887,8 +1887,11 @@ static inline int usb_translate_errors(int error_code)
 #define USB_DEVICE_REMOVE	0x0002
 #define USB_BUS_ADD		0x0003
 #define USB_BUS_REMOVE		0x0004
+#define USB_BUS_DIED		0x0005
 extern void usb_register_notify(struct notifier_block *nb);
 extern void usb_unregister_notify(struct notifier_block *nb);
+extern void usb_register_atomic_notify(struct notifier_block *nb);
+extern void usb_unregister_atomic_notify(struct notifier_block *nb);
 
 /* debugfs stuff */
 extern struct dentry *usb_debug_root;
@@ -1903,6 +1906,16 @@ enum usb_led_event {
 extern void usb_led_activity(enum usb_led_event ev);
 #else
 static inline void usb_led_activity(enum usb_led_event ev) {}
+#endif
+
+#ifdef CONFIG_LGE_ALICE_FRIENDS
+extern bool alice_friends_hm;
+extern bool alice_friends_hm_earjack;
+extern atomic_t in_call_status;
+#define IS_ALICE_FRIENDS_HM_ON() \
+	(alice_friends_hm && alice_friends_hm_earjack)
+
+extern int alice_friends_hm_reset(void);
 #endif
 
 #endif  /* __KERNEL__ */

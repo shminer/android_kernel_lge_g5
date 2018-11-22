@@ -1,4 +1,4 @@
-/* Copyright (c) 2012-2015, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2012-2016, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -75,7 +75,7 @@ static const struct of_device_id msm_smmu_list[] = {
 };
 
 struct msm_scm_paddr_list {
-	unsigned int list;
+	phys_addr_t list;
 	unsigned int list_size;
 	unsigned int size;
 };
@@ -267,8 +267,8 @@ static void print_iova_to_phys(struct msm_iommu_ctx_drvdata *ctx_drvdata,
 		pagetable_phys = msm_iommu_iova_to_phys_soft(
 					ctx_drvdata->attached_domain,
 					faulty_iova);
-		pr_err("Page table in DDR shows PA = %lx\n",
-					(unsigned long) pagetable_phys);
+		pr_err("Page table in DDR shows PA = %pa\n",
+					&pagetable_phys);
 	}
 }
 
@@ -374,7 +374,7 @@ static int msm_iommu_sec_ptbl_init(void)
 		unsigned int spare;
 	} pinit = {0};
 	int psize[2] = {0, 0};
-	unsigned int spare;
+	unsigned int spare = 0;
 	int ret, ptbl_ret = 0;
 	int version;
 	/* Use a dummy device for dma_alloc_attrs allocation */
@@ -571,14 +571,14 @@ static int msm_iommu_sec_ptbl_map(struct msm_iommu_drvdata *iommu_drvdata,
 	return 0;
 }
 
-static unsigned int get_phys_addr(struct scatterlist *sg)
+static phys_addr_t get_phys_addr(struct scatterlist *sg)
 {
 	/*
 	 * Try sg_dma_address first so that we can
 	 * map carveout regions that do not have a
 	 * struct page associated with them.
 	 */
-	unsigned int pa = sg_dma_address(sg);
+	phys_addr_t pa = sg_dma_address(sg);
 
 	if (pa == 0)
 		pa = sg_phys(sg);
@@ -591,8 +591,9 @@ static int msm_iommu_sec_ptbl_map_range(struct msm_iommu_drvdata *iommu_drvdata,
 {
 	struct scatterlist *sgiter;
 	struct msm_scm_map2_req map;
-	unsigned int *pa_list = 0;
-	unsigned int pa, cnt;
+	phys_addr_t *pa_list = 0;
+	unsigned int cnt;
+	phys_addr_t pa;
 	void *flush_va, *flush_va_end;
 	unsigned int offset = 0, chunk_offset = 0;
 	int ret;
@@ -640,8 +641,7 @@ static int msm_iommu_sec_ptbl_map_range(struct msm_iommu_drvdata *iommu_drvdata,
 			return -EINVAL;
 		}
 		while (offset < len) {
-			pa += chunk_offset;
-			pa_list[cnt] = pa;
+			pa_list[cnt] = pa + chunk_offset;
 			chunk_offset += SZ_1M;
 			offset += SZ_1M;
 			cnt++;
@@ -745,6 +745,9 @@ static int msm_iommu_attach_dev(struct iommu_domain *domain, struct device *dev)
 		ret = -EINVAL;
 		goto fail;
 	}
+
+	if (!(priv->client_name))
+		priv->client_name = dev_name(dev);
 
 	iommu_drvdata = dev_get_drvdata(dev->parent);
 	ctx_drvdata = dev_get_drvdata(dev);
@@ -1024,6 +1027,12 @@ static int msm_iommu_domain_set_attr(struct iommu_domain *domain,
 		/*
 		 * MSM iommu driver doesn't set the VMID for
 		 * any domain.
+		 */
+		break;
+	case DOMAIN_ATTR_ATOMIC:
+		/*
+		 * Map / unmap in legacy driver are by default atomic. So
+		 * we don't need to do anything here.
 		 */
 		break;
 	default:

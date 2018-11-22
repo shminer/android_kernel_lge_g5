@@ -7,6 +7,7 @@ Required properties:
   - reg : should contain SDHC, SD Core register map.
   - reg-names : indicates various resources passed to driver (via reg proptery) by name.
 		Required "reg-names" are "hc_mem" and "core_mem"
+		optional ones are "tlmm_mem"
   - interrupts : should contain SDHC interrupts.
   - interrupt-names : indicates interrupts passed to driver (via interrupts property) by name.
 		      Required "interrupt-names" are "hc_irq" and "pwr_irq".
@@ -65,6 +66,12 @@ Optional Properties:
 	  when load is high (performance mode) and the second is for low loads
 	  (power saving mode). These values will be used for cpu group voting for
 	  command-queueing mode or legacy respectively.
+	- qcom,core_3_0v_support: an optional property that is used to fake
+	  3.0V support for SDIO devices.
+	- qcom,scaling-lower-bus-speed-mode:	specifies the lower bus speed mode to be used
+						during clock scaling. If this property is not
+						defined, then it falls back to the default HS
+						bus speed mode to maintain backward compatibility.
 
 In the following, <supply> can be vdd (flash core voltage) or vdd-io (I/O voltage).
 	- qcom,<supply>-always-on - specifies whether supply should be kept "on" always.
@@ -134,6 +141,8 @@ Example:
 		qcom,large-address-bus;
 		qcom,bus-speed-mode = "HS200_1p8v", "DDR_1p8v";
 		qcom,ice-clk-rates = <300000000>;
+
+		qcom,scaling-lower-bus-speed-mode = "DDR52";
 
 		gpios = <&msmgpio 40 0>, /* CLK */
 			<&msmgpio 39 0>, /* CMD */

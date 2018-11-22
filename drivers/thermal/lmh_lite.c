@@ -1,4 +1,4 @@
-/* Copyright (c) 2014-2015, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2014-2016, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -387,7 +387,7 @@ static void lmh_poll(struct work_struct *work)
 		goto poll_exit;
 	} else {
 		queue_delayed_work(lmh_dat->poll_wq, &lmh_dat->poll_work,
-			msecs_to_jiffies(lmh_poll_interval));
+			msecs_to_jiffies(lmh_get_poll_interval()));
 	}
 
 poll_exit:
@@ -455,18 +455,11 @@ static irqreturn_t lmh_isr_thread(int irq, void *data)
 			goto decide_next_action;
 		}
 	}
-	lmh_read_and_update(lmh_dat);
-	if (!lmh_dat->intr_status_val) {
-		pr_debug("LMH not throttling. Enabling interrupt\n");
-		lmh_dat->intr_state = LMH_ISR_MONITOR;
-		trace_lmh_event_call("Lmh Zero throttle Interrupt Clear");
-		goto decide_next_action;
-	}
 
 decide_next_action:
 	if (lmh_dat->intr_state == LMH_ISR_POLLING)
 		queue_delayed_work(lmh_dat->poll_wq, &lmh_dat->poll_work,
-			msecs_to_jiffies(lmh_poll_interval));
+			msecs_to_jiffies(lmh_get_poll_interval()));
 	else
 #ifdef CONFIG_LGE_PM
 		queue_delayed_work(lmh_dat->zero_intensity_delay_wq,
@@ -726,7 +719,8 @@ static int lmh_get_sensor_list(void)
 	} while (next < size);
 
 get_exit:
-	dma_free_attrs(&dev, size, payload, payload_phys, &attrs);
+	dma_free_attrs(&dev, PAGE_ALIGN(sizeof(struct lmh_sensor_packet)),
+		payload, payload_phys, &attrs);
 	return ret;
 }
 

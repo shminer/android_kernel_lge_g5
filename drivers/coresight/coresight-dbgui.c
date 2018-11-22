@@ -807,15 +807,10 @@ static int dbgui_probe(struct platform_device *pdev)
 	struct msm_dump_entry dump_entry;
 	void *baddr;
 
-	if (coresight_fuse_access_disabled())
-		return -EPERM;
-
-	if (pdev->dev.of_node) {
-		pdata = of_get_coresight_platform_data(dev, pdev->dev.of_node);
-		if (IS_ERR(pdata))
-			return PTR_ERR(pdata);
-		pdev->dev.platform_data = pdata;
-	}
+	pdata = of_get_coresight_platform_data(dev, pdev->dev.of_node);
+	if (IS_ERR(pdata))
+		return PTR_ERR(pdata);
+	pdev->dev.platform_data = pdata;
 
 	drvdata = devm_kzalloc(dev, sizeof(*drvdata), GFP_KERNEL);
 	if (!drvdata)
@@ -843,6 +838,15 @@ static int dbgui_probe(struct platform_device *pdev)
 	if (!drvdata->base)
 		return -ENOMEM;
 
+	ret = clk_prepare_enable(drvdata->clk);
+	if (ret)
+		return ret;
+
+	if (!coresight_authstatus_enabled(drvdata->base))
+		goto err;
+
+	clk_disable_unprepare(drvdata->clk);
+
 	baddr = devm_kzalloc(dev, resource_size(res), GFP_KERNEL);
 	if (baddr) {
 		drvdata->reg_data.addr = virt_to_phys(baddr);
@@ -859,31 +863,29 @@ static int dbgui_probe(struct platform_device *pdev)
 		dev_err(dev, "DBGUI REG dump allocation failed\n");
 	}
 
-	if (pdev->dev.of_node) {
-		ret = of_property_read_u32(pdev->dev.of_node,
-					   "qcom,dbgui-addr-offset",
-					   &drvdata->addr_offset);
-		if (ret)
-			return -EINVAL;
+	ret = of_property_read_u32(pdev->dev.of_node,
+			"qcom,dbgui-addr-offset",
+			&drvdata->addr_offset);
+	if (ret)
+		return -EINVAL;
 
-		ret = of_property_read_u32(pdev->dev.of_node,
-					   "qcom,dbgui-data-offset",
-					   &drvdata->data_offset);
-		if (ret)
-			return -EINVAL;
+	ret = of_property_read_u32(pdev->dev.of_node,
+			"qcom,dbgui-data-offset",
+			&drvdata->data_offset);
+	if (ret)
+		return -EINVAL;
 
-		if (drvdata->addr_offset >= resource_size(res)
-				|| drvdata->data_offset >= resource_size(res)) {
-				dev_err(dev, "Invalid address or data offset\n");
-				return -EINVAL;
-		}
-
-		ret = of_property_read_u32(pdev->dev.of_node,
-					   "qcom,dbgui-size",
-					   &drvdata->size);
-		if (ret || drvdata->size > DBGUI_MAX_ADDR_VAL)
-			return -EINVAL;
+	if (drvdata->addr_offset >= resource_size(res)
+			|| drvdata->data_offset >= resource_size(res)) {
+		dev_err(dev, "Invalid address or data offset\n");
+		return -EINVAL;
 	}
+
+	ret = of_property_read_u32(pdev->dev.of_node,
+			"qcom,dbgui-size",
+			&drvdata->size);
+	if (ret || drvdata->size > DBGUI_MAX_ADDR_VAL)
+		return -EINVAL;
 
 	ret = clk_prepare_enable(drvdata->clk);
 	if (ret)
@@ -913,6 +915,9 @@ static int dbgui_probe(struct platform_device *pdev)
 
 	dev_info(dev, "DebugUI initializaed\n");
 	return 0;
+err:
+	clk_disable_unprepare(drvdata->clk);
+	return -EPERM;
 }
 
 static int dbgui_remove(struct platform_device *pdev)

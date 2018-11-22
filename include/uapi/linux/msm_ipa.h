@@ -239,6 +239,25 @@ enum ipa_client_type {
 	(client) == IPA_CLIENT_Q6_DECOMP_PROD || \
 	(client) == IPA_CLIENT_Q6_DECOMP2_PROD)
 
+#define IPA_CLIENT_IS_Q6_NON_ZIP_CONS(client) \
+	((client) == IPA_CLIENT_Q6_LAN_CONS || \
+	(client) == IPA_CLIENT_Q6_WAN_CONS || \
+	(client) == IPA_CLIENT_Q6_DUN_CONS || \
+	(client) == IPA_CLIENT_Q6_LTE_WIFI_AGGR_CONS)
+
+#define IPA_CLIENT_IS_Q6_ZIP_CONS(client) \
+	((client) == IPA_CLIENT_Q6_DECOMP_CONS || \
+	(client) == IPA_CLIENT_Q6_DECOMP2_CONS)
+
+#define IPA_CLIENT_IS_Q6_NON_ZIP_PROD(client) \
+	((client) == IPA_CLIENT_Q6_LAN_PROD || \
+	(client) == IPA_CLIENT_Q6_WAN_PROD || \
+	(client) == IPA_CLIENT_Q6_CMD_PROD)
+
+#define IPA_CLIENT_IS_Q6_ZIP_PROD(client) \
+	((client) == IPA_CLIENT_Q6_DECOMP_PROD || \
+	(client) == IPA_CLIENT_Q6_DECOMP2_PROD)
+
 #define IPA_CLIENT_IS_MEMCPY_DMA_CONS(client) \
 	((client) == IPA_CLIENT_MEMCPY_DMA_SYNC_CONS || \
 	(client) == IPA_CLIENT_MEMCPY_DMA_ASYNC_CONS)
@@ -254,8 +273,22 @@ enum ipa_client_type {
 	((client) == IPA_CLIENT_MHI_CONS || \
 	(client) == IPA_CLIENT_MHI_PROD)
 
+#define IPA_CLIENT_IS_TEST_PROD(client) \
+	((client) == IPA_CLIENT_TEST_PROD || \
+	(client) == IPA_CLIENT_TEST1_PROD || \
+	(client) == IPA_CLIENT_TEST2_PROD || \
+	(client) == IPA_CLIENT_TEST3_PROD || \
+	(client) == IPA_CLIENT_TEST4_PROD)
 
+#define IPA_CLIENT_IS_TEST_CONS(client) \
+	((client) == IPA_CLIENT_TEST_CONS || \
+	(client) == IPA_CLIENT_TEST1_CONS || \
+	(client) == IPA_CLIENT_TEST2_CONS || \
+	(client) == IPA_CLIENT_TEST3_CONS || \
+	(client) == IPA_CLIENT_TEST4_CONS)
 
+#define IPA_CLIENT_IS_TEST(client) \
+	(IPA_CLIENT_IS_TEST_PROD(client) || IPA_CLIENT_IS_TEST_CONS(client))
 
 /**
  * enum ipa_ip_type - Address family: IPv4 or IPv6
@@ -362,13 +395,14 @@ enum ipa_tethering_stats_event {
 /**
  * enum ipa_rm_resource_name - IPA RM clients identification names
  *
- * Add new mapping to ipa_rm_dep_prod_index() / ipa_rm_dep_cons_index()
+ * Add new mapping to ipa_rm_prod_index() / ipa_rm_cons_index()
  * when adding new entry to this enum.
  */
 enum ipa_rm_resource_name {
 	IPA_RM_RESOURCE_PROD = 0,
 	IPA_RM_RESOURCE_Q6_PROD = IPA_RM_RESOURCE_PROD,
 	IPA_RM_RESOURCE_USB_PROD,
+	IPA_RM_RESOURCE_USB_DPL_DUMMY_PROD,
 	IPA_RM_RESOURCE_HSIC_PROD,
 	IPA_RM_RESOURCE_STD_ECM_PROD,
 	IPA_RM_RESOURCE_RNDIS_PROD,
@@ -380,6 +414,7 @@ enum ipa_rm_resource_name {
 
 	IPA_RM_RESOURCE_Q6_CONS = IPA_RM_RESOURCE_PROD_MAX,
 	IPA_RM_RESOURCE_USB_CONS,
+	IPA_RM_RESOURCE_USB_DPL_CONS,
 	IPA_RM_RESOURCE_HSIC_CONS,
 	IPA_RM_RESOURCE_WLAN_CONS,
 	IPA_RM_RESOURCE_APPS_CONS,
@@ -410,6 +445,7 @@ enum ipa_hw_type {
 	IPA_HW_v2_6 = IPA_HW_v2_5,
 	IPA_HW_v2_6L = 6,
 	IPA_HW_v3_0 = 10,
+	IPA_HW_v3_1 = 11,
 	IPA_HW_MAX
 };
 

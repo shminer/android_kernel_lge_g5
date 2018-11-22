@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2013-2015, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2013-2016, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -99,6 +99,9 @@ struct rmnet_map_header_s *rmnet_map_add_map_header(struct sk_buff *skb,
 
 	padding = ALIGN(map_datalen, 4) - map_datalen;
 
+	if (padding == 0)
+		goto done;
+
 	if (skb_tailroom(skb) < padding)
 		return 0;
 
@@ -106,6 +109,7 @@ struct rmnet_map_header_s *rmnet_map_add_map_header(struct sk_buff *skb,
 	LOGD("pad: %d", padding);
 	memset(padbytes, 0, padding);
 
+done:
 	map_header->pkt_len = htons(map_datalen + padding);
 	map_header->pad_len = padding&0x3F;
 

@@ -1,4 +1,4 @@
-/* Copyright (c) 2012-2015, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2012-2016, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -308,10 +308,6 @@ static void pet_watchdog(struct msm_watchdog_data *wdog_dd)
 	if (slack_ns < wdog_dd->min_slack_ns)
 		wdog_dd->min_slack_ns = slack_ns;
 	wdog_dd->last_pet = time_ns;
-
-#ifdef CONFIG_LGE_HANDLE_PANIC
-	pr_info("%s\n", __func__);
-#endif
 }
 
 static void keep_alive_response(void *info)
@@ -352,7 +348,7 @@ static __ref int watchdog_kthread(void *arg)
 {
 	struct msm_watchdog_data *wdog_dd =
 		(struct msm_watchdog_data *)arg;
-	unsigned long delay_time;
+	unsigned long delay_time = 0;
 	struct sched_param param = {.sched_priority = MAX_RT_PRIO-1};
 
 	sched_setscheduler(current, SCHED_FIFO, &param);
@@ -370,6 +366,9 @@ static __ref int watchdog_kthread(void *arg)
 		/* Check again before scheduling *
 		 * Could have been changed on other cpu */
 		mod_timer(&wdog_dd->pet_timer, jiffies + delay_time);
+#ifdef CONFIG_LGE_HANDLE_PANIC
+		pr_info("pet_watchdog [enable : %d, jiffies : %lu, delay_time : %lu]\n", enable, jiffies, delay_time);
+#endif
 	}
 	return 0;
 }

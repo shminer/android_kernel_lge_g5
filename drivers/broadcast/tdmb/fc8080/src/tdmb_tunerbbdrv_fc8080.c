@@ -31,6 +31,7 @@
 
 #undef FEATURE_FIC_BER
 #define FEATURE_RSSI_DEBUG
+#define FEATURE_CHECK_EEP
 
 // LGE ADD
 #define    FREQ_SEARCH_IN_TABLE        /* Freq conversion in Table Searching */
@@ -62,11 +63,11 @@
 
 #define MAX_MSC_BER            20000
 #define MAX_VA_BER            20000
+#define MAX_VA_PER            100000
 
 #define DMB_SVC_ID 0
 #define DAB_SVC_ID 2
 #define DAT_SVC_ID 1
-#define FEATURE_GET_FIC_POLLING
 
 /* change memcpy mscBuffer -> msc_data -> buffer  to mscBuffer->buffer */
 #define NOT_MSCDATA_MULTIPLE_MEMCPY
@@ -75,6 +76,11 @@ uint32     tp_total_cnt=0;
 uint32  tp_lock_flag = FALSE;
 
 /* LGE_ADD_S, [hyun118.shin@lge.com], TDMB Antenna Leveling */
+#define MAX_ANT_RAW 4
+#define MAX_ANT_COLUMN 3
+#define MIN_ANT_LV 0
+#define MAX_ANT_LV 4
+
 #define START_SYNC_CNT 3
 #define MAX_ANT_BUFF_CNT 2
 /* LGE_ADD_E, [hyun118.shin@lge.com], TDMB Antenna Leveling */
@@ -151,7 +157,7 @@ fci_u8 msc_multi_data[188*8*8];
 *============================================================*/
 //LGE ADD
 #ifdef FREQ_SEARCH_IN_TABLE
-
+//KR
     static int32 gKREnsembleFullFreqTbl[MAX_KRBAND_FULL_CHANNEL][2] =
     {
         {71,175280},{72,177008},{73,178736},{81,181280},{82,183008},{83,184736},
@@ -176,8 +182,8 @@ static uint16 is_tdmb_probe = 0;
 //static uint16 data_sequence_count = 0;
 
 /* LGE_ADD_S, [hyun118.shin@lge.com], TDMB Antenna Leveling */
-static uint32    antBuffIdx = 0;
-static uint16    antBuff[MAX_ANT_BUFF_CNT] = {0, };
+static uint8    antBuffIdx = 0;
+static uint16   antBuff[MAX_ANT_BUFF_CNT] = {0, };
 static uint8    calAntLevel = 0;
 static uint8    syncLockCnt = 0;
 /* LGE_ADD_E, [hyun118.shin@lge.com], TDMB Antenna Leveling */
@@ -196,7 +202,7 @@ static int tunerbb_drv_fc8080_get_nation(void);
 
 void tunerbb_drv_fc8080_isr_control(fci_u8 onoff);
 #ifdef FEATURE_RSSI_DEBUG
-void tunerbb_drv_fc8080_get_dm(fci_u32 *mscber, fci_u32 *tp_err, fci_u16 *tpcnt, fci_u32 *vaber, fci_s8 *rssi);
+void tunerbb_drv_fc8080_get_dm(fci_u32 *mscber, fci_u32 *tp_err, fci_u16 *tpcnt, fci_u32 *vaber, fci_s8 *rssi, fci_u32 *vaper);
 #else
 void tunerbb_drv_fc8080_get_dm(fci_u32 *mscber, fci_u32 *tp_err, fci_u16 *tpcnt, fci_u32 *vaber);
 #endif
@@ -223,7 +229,7 @@ int8 tunerbb_drv_fc8080_select_antenna(unsigned int sel)
 
 int8 tunerbb_drv_fc8080_set_nation(unsigned int nation)
 {
-    printk("[dbg] tunerbb_drv_fc8080_set_nation %d\n", nation);
+    printk("tunerbb_drv_fc8080_set_nation %d\n", nation);
     broadcast_nation = nation;
     return TRUE;
 }
@@ -249,6 +255,10 @@ int8 tunerbb_drv_fc8080_set_channel(int32 freq_num, uint8 subch_id, uint8 op_mod
     /*LGE_ADD_E, [hyun118.shin@lge.com], TDMB Antenna Leveling */
 
     ret_val = tunerbb_drv_fc8080_multi_set_channel(freq_num, 1, &subch_id, &op_mode);
+
+#ifndef FEATURE_GET_FIC_POLLING
+    memset((void*)&fic_buffer, 0x00, sizeof(DATA_BUFFER));
+#endif
 
     return ret_val;
 }
@@ -408,6 +418,7 @@ int tunerbb_drv_fc8080_msc_cb(uint32 userdata, uint8 subChId, uint8 *data, int l
     return FC8080_RESULT_SUCCESS;
 }
 #endif
+
 /*=======================================================
     Function         : tunerbb_drv_fc8080_init
     Description        : Initializing the FC8080 Chip after power on
@@ -630,41 +641,234 @@ int8 tunerbb_drv_fc8080_get_bbinfo(tdmb_status_rsp_type* dmb_bb_info)
 
            These paramters are dependent on Information supplied by Device.
 ---------------------------------------------------------------------------- */
-
 int8    tunerbb_drv_fc8080_get_ber(struct broadcast_tdmb_sig_info *dmb_bb_info)
 {
     uint8 sync_status;
     uint32 tp_err_cnt=0;
+    uint32 vaper=0;
 
     uint16 nframe = 0;
 
     /* LGE_ADD_S, [hyun118.shin@lge.com], TDMB Antenna Leveling */
     uint8 loop;
-    uint16 antTable[4][2] =
-    {
-        {4,    6000},
-        {3,    8000},
-        {2,    9000},
-        {1,    12000},
-    };
-
+    uint16 antTable[MAX_ANT_RAW][MAX_ANT_COLUMN];
+#ifdef FEATURE_CHECK_EEP
+    uint32 eep_info;
+    uint8 eep_pi1, eep_pi2, en_num;
+    uint8 protection_level;
+    uint16 protection_type;
+#endif
     uint16 avgBER;
     uint8 refAntLevel;
+    int nation_info = 0;
     /* LGE_ADD_E, [hyun118.shin@lge.com], TDMB Antenna Leveling */
+
+    uint16 antTable_kr3a[MAX_ANT_RAW][MAX_ANT_COLUMN] =
+    {
+        {4,    6000, 10},
+        {3,    8000, 500},
+        {2,    9000, 1000},
+        {1,    12000, 50000},
+    };
+    uint16 antTable_eudab[MAX_ANT_RAW][MAX_ANT_COLUMN] =
+    {
+        {4,    5000, 10},
+        {3,    6000, 500},
+        {2,    8000, 1000},
+        {1,    12000, 50000},
+    };
+    uint16 antTable_eudmb[MAX_ANT_RAW][MAX_ANT_COLUMN] =
+    {
+        {4,    8000, 10},
+        {3,    9000, 500},
+        {2,    9500, 1000},
+        {1,    10000, 50000},
+    };
+#ifdef FEATURE_CHECK_EEP
+    uint16 antTable_kr3b[MAX_ANT_RAW][MAX_ANT_COLUMN] =
+    {
+        {4,    4000, 10},
+        {3,    4500, 500},
+        {2,    5000, 1000},
+        {1,    6500, 50000},
+    };
+    uint16 antTable_eudabp_eep3a[MAX_ANT_RAW][MAX_ANT_COLUMN] =
+    {
+        {4,    6000, 10},
+        {3,    6500, 500},
+        {2,    7000, 1000},
+        {1,    8000, 50000},
+    };
+    uint16 antTable_eudabp_eep3b[MAX_ANT_RAW][MAX_ANT_COLUMN] =
+    {
+        {4,    3500, 10},
+        {3,    4000, 500},
+        {2,    4500, 1000},
+        {1,    5000, 50000},
+    };
+
+    memset(antTable, 0, sizeof(uint16) * MAX_ANT_RAW * MAX_ANT_COLUMN);
+    if(fc8080_serviceType[0] == FC8080_DMB || fc8080_serviceType[0] == FC8080_VISUAL)
+        en_num = 0;
+    else if(fc8080_serviceType[0] == FC8080_DATA)
+        en_num = 1;
+    else if(fc8080_serviceType[0] == FC8080_DAB || fc8080_serviceType[0] == FC8080_DABP)
+        en_num = 2;
+
+    bbm_com_word_read(NULL, 0x623 + (en_num*12), &protection_type);
+    if(protection_type & 0x80)
+    {
+        protection_level = UEP;
+    }
+    else
+    {
+        bbm_com_long_read(NULL, 0x0624 + (en_num*12), &eep_info);
+        eep_pi1 = (eep_info & 0x0000001f);
+        eep_pi2 = (eep_info & 0x001f0000) >> 16;
+
+        switch(eep_pi1)
+        {
+            case 3:
+                if (eep_pi2 ==2)
+                    protection_level = EEP_4A;
+                else
+                    protection_level = UNKNOWN_PROTECTION_LEVEL;
+                break;
+
+            case 8:
+                if (eep_pi2 ==7)
+                    protection_level = EEP_3A;
+                else
+                    protection_level = UNKNOWN_PROTECTION_LEVEL;
+                break;
+
+            case 13:
+                if (eep_pi2 ==12)
+                    protection_level = EEP_2A;
+                else
+                    protection_level = UNKNOWN_PROTECTION_LEVEL;
+                break;
+
+            case 14:
+                if (eep_pi2 ==13)
+                    protection_level = EEP_2A;
+                else
+                    protection_level = UNKNOWN_PROTECTION_LEVEL;
+                break;
+
+            case 24:
+                if (eep_pi2 ==23)
+                    protection_level = EEP_1A;
+                else
+                    protection_level = UNKNOWN_PROTECTION_LEVEL;
+                break;
+
+            case 2:
+                if (eep_pi2 ==1)
+                    protection_level = EEP_4B;
+                else
+                    protection_level = UNKNOWN_PROTECTION_LEVEL;
+                break;
+
+            case 4:
+                if (eep_pi2 ==3)
+                    protection_level = EEP_3B;
+                else
+                    protection_level = UNKNOWN_PROTECTION_LEVEL;
+                break;
+
+            case 6:
+                if (eep_pi2 ==5)
+                    protection_level = EEP_2B;
+                else
+                    protection_level = UNKNOWN_PROTECTION_LEVEL;
+                break;
+
+            case 10:
+                if (eep_pi2 ==9)
+                    protection_level = EEP_1B;
+                else
+                    protection_level = UNKNOWN_PROTECTION_LEVEL;
+                break;
+            default:
+                protection_level = UNKNOWN_PROTECTION_LEVEL;
+                break;
+        }
+    }
+#endif
+
+    nation_info = tunerbb_drv_fc8080_get_nation();
+
+    //printk("service_type=%d, protection_level=%d, nation_info=%d\n", fc8080_serviceType[0], protection_level, nation_info);
+
+    if(nation_info == KR)
+    {
+        switch(fc8080_serviceType[0])
+        {
+            case FC8080_DAB:
+            case FC8080_DMB:
+            case FC8080_VISUAL:
+#ifdef FEATURE_CHECK_EEP
+                if(protection_level == EEP_3B)
+                {
+                    memcpy(antTable, antTable_kr3b, sizeof(uint16) * MAX_ANT_RAW * MAX_ANT_COLUMN);
+                }
+                else
+                {
+                    memcpy(antTable, antTable_kr3a, sizeof(uint16) * MAX_ANT_RAW * MAX_ANT_COLUMN);
+                }
+#else
+                memcpy(antTable, antTable_kr3a, sizeof(uint16) * MAX_ANT_RAW * MAX_ANT_COLUMN);
+#endif
+                break;
+            default:
+                memcpy(antTable, antTable_kr3a, sizeof(uint16) * MAX_ANT_RAW * MAX_ANT_COLUMN);
+                break;
+        }
+    }
+    else
+    {
+        switch(fc8080_serviceType[0])
+        {
+            case FC8080_DAB:
+#ifdef FEATURE_CHECK_EEP
+                if(protection_level == UEP)
+                {
+                    memcpy(antTable, antTable_eudab, sizeof(uint16) * MAX_ANT_RAW * MAX_ANT_COLUMN);
+                }
+                else
+                {
+                    if(protection_level == EEP_3B)
+                        memcpy(antTable, antTable_eudabp_eep3b, sizeof(uint16) * MAX_ANT_RAW * MAX_ANT_COLUMN);
+                    else
+                        memcpy(antTable, antTable_eudabp_eep3a, sizeof(uint16) * MAX_ANT_RAW * MAX_ANT_COLUMN);
+                }
+#else
+                memcpy(antTable, antTable_eudab, sizeof(uint16) * MAX_ANT_RAW * MAX_ANT_COLUMN);
+#endif
+                break;
+            case FC8080_DATA:
+                memcpy(antTable, antTable_eudmb, sizeof(uint16) * MAX_ANT_RAW * MAX_ANT_COLUMN);
+                break;
+            default:
+                memcpy(antTable, antTable_eudab, sizeof(uint16) * MAX_ANT_RAW * MAX_ANT_COLUMN);
+                break;
+        }
+    }
 
     if(is_tdmb_probe == 0)
     {
-        dmb_bb_info->msc_ber = 20000;
+        dmb_bb_info->msc_ber = MAX_MSC_BER;
         dmb_bb_info->tp_err_cnt = 255;
 
         printk("is_tdmb_probe 0. so msc_ber is 20000, tp_err_cnt = 255. \n");
         return FC8080_RESULT_SUCCESS;
     }
 
-	//tunerbb_drv_fc8080_check_overrun(fc8080_serviceType[0]);
+    //tunerbb_drv_fc8080_check_overrun(fc8080_serviceType[0]);
 
 #ifdef FEATURE_RSSI_DEBUG
-    tunerbb_drv_fc8080_get_dm(&dmb_bb_info->msc_ber, &tp_err_cnt, &nframe, &dmb_bb_info->va_ber, &dmb_bb_info->rssi);
+    tunerbb_drv_fc8080_get_dm(&dmb_bb_info->msc_ber, &tp_err_cnt, &nframe, &dmb_bb_info->va_ber, &dmb_bb_info->rssi, &vaper);
 #else
     tunerbb_drv_fc8080_get_dm(&dmb_bb_info->msc_ber, &tp_err_cnt, &nframe, &dmb_bb_info->va_ber);
 #endif
@@ -673,7 +877,7 @@ int8    tunerbb_drv_fc8080_get_ber(struct broadcast_tdmb_sig_info *dmb_bb_info)
 
     sync_status = tunerbb_drv_fc8080_get_sync_status();
 #ifdef FEATURE_RSSI_DEBUG
-    //printk("[FC8080] sync_status = 0x%x, msc_ber = %d, tp_err_cnt = %d, nframe = %d, va_ber = %d rssi = %d\n", sync_status, dmb_bb_info->msc_ber, tp_err_cnt, nframe, dmb_bb_info->va_ber, dmb_bb_info->rssi);
+    //printk("[FC8080] sync_status = 0x%x, msc_ber = %d, tp_err_cnt = %d, nframe = %d, va_ber = %d rssi = %d vaper = %d\n", sync_status, dmb_bb_info->msc_ber, tp_err_cnt, nframe, dmb_bb_info->va_ber, dmb_bb_info->rssi, vaper);
 #endif
 
     dmb_bb_info->sync_lock = ((sync_status & 0x10) ? 1 : 0);
@@ -753,36 +957,53 @@ int8    tunerbb_drv_fc8080_get_ber(struct broadcast_tdmb_sig_info *dmb_bb_info)
     else
         avgBER /= MAX_ANT_BUFF_CNT;
 
-    for(loop = 0; loop < 4; loop++)
-    {
-        if(avgBER >= antTable[3][1])
+    if((fc8080_serviceType[0] == FC8080_DMB) || (fc8080_serviceType[0] == FC8080_VISUAL)) {
+        for(loop = 0; loop < 4; loop++)
         {
-            refAntLevel = 0;
-            break;
+            if(vaper >= antTable[INDEX_LV1][VA_PER])
+            {
+                refAntLevel = MIN_ANT_LV;
+                break;
+            }
+            if(vaper < antTable[loop][VA_PER])
+            {
+                refAntLevel = antTable[loop][ANT_LEVEL];
+                break;
+            }
         }
-        if(avgBER < antTable[loop][1])
+    }
+    else {
+        for(loop = 0; loop < 4; loop++)
         {
-            refAntLevel = antTable[loop][0];
-            break;
+            if(avgBER >= antTable[INDEX_LV1][MSC_BER])
+            {
+                refAntLevel = MIN_ANT_LV;
+                break;
+            }
+            if(avgBER < antTable[loop][MSC_BER])
+            {
+                refAntLevel = antTable[loop][ANT_LEVEL];
+                break;
+            }
         }
     }
 
     if(!(dmb_bb_info->sync_lock))
     {
         syncLockCnt = 0;
-        refAntLevel = 0;
+        refAntLevel = MIN_ANT_LV;
     }
     else
     {
         if(syncLockCnt != START_SYNC_CNT) // draw after 1.5secs since sync lock
         {
             syncLockCnt++;
-            refAntLevel = 0;
+            refAntLevel = MIN_ANT_LV;
         }
     }
 
-    if((refAntLevel == 1) && (dmb_bb_info->msc_ber >= antTable[3][1]))
-        refAntLevel = 0;
+    if((refAntLevel == 1) && ((dmb_bb_info->msc_ber >= antTable[INDEX_LV1][MSC_BER]) || (vaper >= antTable[INDEX_LV1][VA_PER])))
+        refAntLevel = MIN_ANT_LV;
 
     if(calAntLevel > refAntLevel)
         calAntLevel--;
@@ -791,10 +1012,25 @@ int8    tunerbb_drv_fc8080_get_ber(struct broadcast_tdmb_sig_info *dmb_bb_info)
 
     dmb_bb_info->antenna_level = calAntLevel;
     /* LGE_ADD_E, [hyun118.shin@lge.com], TDMB Antenna Leveling */
+
 #ifdef FEATURE_ISR_REPAIR
-    if (isr_status)
+    if (isr_status) {
         bbm_com_write(0, BBM_MD_INT_EN, BBM_MF_INT);
+        //print_log(0, "======= FC8080 FEATURE_ISR_REPAIR=======\n");
+    }
 #endif
+{
+    u16 overrun;
+    bbm_com_word_read(0, BBM_BUF_OVERRUN, &overrun);
+    if (overrun) {
+        bbm_com_word_write(0, BBM_BUF_OVERRUN, overrun);
+        bbm_com_word_write(0, BBM_BUF_OVERRUN, 0);
+    }
+    if(overrun != 0) {
+        print_log(0, "======= FC8080 BBM_BUF_OVERRUN =====  0x%x\n", overrun);
+    }
+}
+
 #if 0
     //채널은 잡았으나 (sync_status == 0x3f) frame이 들어오지 않는 경우(nframe == 0) - MBN V-Radio
     if((sync_status==0x3f)&&(nframe==0))
@@ -965,7 +1201,9 @@ int8    tunerbb_drv_fc8080_multi_set_channel(int32 freq_num, uint8 subch_cnt, ui
     tot_subch_cnt = subch_cnt;
 
     // Added by somesoo 20100730 for removing green block effect
+#ifdef FEATURE_GET_FIC_POLLING
     if(svcType != FC8080_ENSQUERY)
+#endif
         tunerbb_drv_fc8080_isr_control(1);
 
     if(res)
@@ -1073,7 +1311,15 @@ int8    tunerbb_drv_fc8080_read_data(uint8* buffer, uint32* buffer_size)
     msc_data = buffer;
 #endif
 
-    fc8080_isr(NULL);
+#ifndef FEATURE_GET_FIC_POLLING
+    fic_buffer.valid = 0;
+    fic_buffer.length = 0;
+    fic_buffer.address = 0;
+#endif
+
+	fc8080_isr(NULL);
+
+    //printk("[dbg] msc_valid %d, length %d", msc_buffer.valid, msc_buffer.length);
 
     if(msc_buffer.valid && msc_buffer.length)
     {
@@ -1083,6 +1329,15 @@ int8    tunerbb_drv_fc8080_read_data(uint8* buffer, uint32* buffer_size)
 #endif
         retval = FC8080_RESULT_SUCCESS;
     }
+
+#ifndef FEATURE_GET_FIC_POLLING
+    if(fic_buffer.valid && fic_buffer.length)
+    {
+        *buffer_size = fic_buffer.length;
+        //memcpy(buffer, fic_buffer.address, fic_buffer.length);
+        retval = FC8080_RESULT_SUCCESS;
+    }
+#endif
 
     return retval;
 }
@@ -1383,9 +1638,9 @@ int8    tunerbb_drv_fc8080_check_tii(uint8* main_tii_ptr, uint8* sub_tii_ptr)
 }
 
 #ifdef FEATURE_RSSI_DEBUG
-void tunerbb_drv_fc8080_get_dm(fci_u32 *mscber, fci_u32 *tp_err, fci_u16 *tpcnt, fci_u32 *vaber, fci_s8 *rssi)
+void tunerbb_drv_fc8080_get_dm(fci_u32 *mscber, fci_u32 *tp_err, fci_u16 *tpcnt, fci_u32 *vaber, fci_s8 *rssi, fci_u32 *vaper)
 #else
-void tunerbb_drv_fc8080_get_dm(fci_u32 *mscber, fci_u32 *tp_err, fci_u16 *tpcnt, fci_u32 *vaber)
+void tunerbb_drv_fc8080_get_dm(fci_u32 *mscber, fci_u32 *tp_err, fci_u16 *tpcnt, fci_u32 *vaber, fci_u32 *vaper)
 #endif
 {
 #ifdef FEATURE_RSSI_DEBUG
@@ -1439,22 +1694,27 @@ void tunerbb_drv_fc8080_get_dm(fci_u32 *mscber, fci_u32 *tp_err, fci_u16 *tpcnt,
         *mscber = 1;
     }
 
-    if(dm.ber_rxd_rsps == 0)
+    if(dm.ber_rxd_rsps == 0) {
         *vaber = MAX_VA_BER;
-
-    else if((dm.ber_err_bits == 0) && (dm.ber_err_rsps == 0))
-    {
-        *vaber = 0;
+        *vaper = MAX_VA_PER;
     }
+    else if((dm.ber_err_bits == 0) && (dm.ber_err_rsps == 0))
+        *vaper = *vaber = 0;
     else
     {
         if(dm.ber_err_bits > 42949)
             *vaber = ((dm.ber_err_bits * 1000)/(dm.ber_rxd_rsps * 204 * 8))*100;
         else
-            *vaber = (dm.ber_err_bits*100000)/(dm.ber_rxd_rsps * 204 * 8);
+            *vaber = (dm.ber_err_bits * 100000)/(dm.ber_rxd_rsps * 204 * 8);
+
+        if(dm.ber_err_rsps > 42949)
+            *vaper = ((dm.ber_err_rsps * 1000)/dm.ber_rxd_rsps)*100;
+        else
+            *vaper = (dm.ber_err_rsps * 100000)/dm.ber_rxd_rsps;
     }
 
     *vaber = (*vaber >= MAX_VA_BER) ? MAX_VA_BER : *vaber;
+    *vaper = (*vaper >= MAX_VA_PER) ? MAX_VA_PER : *vaper;
 
     *tp_err = dm.ber_err_rsps;
     *tpcnt = dm.ber_rxd_rsps;
@@ -1603,6 +1863,7 @@ void tunerbb_drv_fc8080_process_polling_data()
     bbm_com_write(hDevice, BBM_COM_STATUS_ENABLE, ENABLE_INT_MASK);
 }
 */
+
 #if 0
 static int8 tunerbb_drv_fc8080_check_overrun(uint8 op_mode)
 {
@@ -1638,6 +1899,7 @@ static int8 tunerbb_drv_fc8080_check_overrun(uint8 op_mode)
     return FC8080_RESULT_SUCCESS;
 }
 #endif
+
 void tunerbb_drv_fc8080_isr_control(fci_u8 onoff)
 {
 #ifdef FEATURE_ISR_REPAIR

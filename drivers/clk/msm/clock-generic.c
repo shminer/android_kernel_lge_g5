@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2013-2015, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2013-2016, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -267,7 +267,7 @@ static long __div_round_rate(struct div_data *data, unsigned long rate,
 	rate = max(rate, 1UL);
 
 	min_div = max(data->min_div, 1U);
-	max_div = min(data->max_div, (unsigned int) (ULONG_MAX / rate));
+	max_div = min(data->max_div, (unsigned int) (ULONG_MAX));
 
 	/*
 	 * div values are doubled for half dividers.
@@ -279,6 +279,8 @@ static long __div_round_rate(struct div_data *data, unsigned long rate,
 		if (data->skip_odd_div && (div & 1))
 			if (!(data->allow_div_one && (div == 1)))
 				continue;
+		if (data->skip_even_div && !(div & 1))
+			continue;
 		req_prate = mult_frac(rate, div, numer);
 		prate = clk_round_rate(parent, req_prate);
 		if (IS_ERR_VALUE(prate))
@@ -349,7 +351,7 @@ static int div_set_rate(struct clk *c, unsigned long rate)
 	struct div_data *data = &d->data;
 
 	rrate = __div_round_rate(data, rate, c->parent, &div, &new_prate);
-	if (rrate != rate)
+	if (rrate < rate || rrate > rate + data->rate_margin)
 		return -EINVAL;
 
 	/*
@@ -780,7 +782,7 @@ static int mux_div_clk_set_rate(struct clk *c, unsigned long rate)
 
 	rrate = __mux_div_round_rate(c, rate, &new_parent, &new_div,
 							&new_prate);
-	if (rrate != rate)
+	if (rrate < rate || rrate > rate + md->data.rate_margin)
 		return -EINVAL;
 
 	old_parent = c->parent;
@@ -863,8 +865,6 @@ static enum handoff mux_div_clk_handoff(struct clk *c)
 	unsigned int numer;
 
 	parent_rate = clk_get_rate(c->parent);
-	if (!parent_rate)
-		return HANDOFF_DISABLED_CLK;
 	/*
 	 * div values are doubled for half dividers.
 	 * Adjust for that by picking a numer of 2.
@@ -878,10 +878,20 @@ static enum handoff mux_div_clk_handoff(struct clk *c)
 		return HANDOFF_DISABLED_CLK;
 	}
 
-	if (!md->ops->is_enabled)
-		return HANDOFF_DISABLED_CLK;
-	if (md->ops->is_enabled(md))
-		return HANDOFF_ENABLED_CLK;
+	if (md->en_mask && md->ops && md->ops->is_enabled)
+		return md->ops->is_enabled(md)
+			? HANDOFF_ENABLED_CLK
+			: HANDOFF_DISABLED_CLK;
+
+	/*
+	 * If this function returns 'enabled' even when the clock downstream
+	 * of this clock is disabled, then handoff code will unnecessarily
+	 * enable the current parent of this clock. If this function always
+	 * returns 'disabled' and a clock downstream is on, the clock handoff
+	 * code will bump up the ref count for this clock and its current
+	 * parent as necessary. So, clocks without an actual HW gate can
+	 * always return disabled.
+	 */
 	return HANDOFF_DISABLED_CLK;
 }
 

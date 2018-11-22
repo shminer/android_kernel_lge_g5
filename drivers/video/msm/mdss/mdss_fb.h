@@ -1,4 +1,4 @@
-/* Copyright (c) 2008-2015, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2008-2016, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -56,7 +56,6 @@
 
 #define MDP_PP_AD_BL_LINEAR	0x0
 #define MDP_PP_AD_BL_LINEAR_INV	0x1
-#define MAX_LAYER_COUNT		0xC
 
 /**
  * enum mdp_notify_event - Different frame events to indicate frame update state
@@ -130,15 +129,15 @@ enum mdp_mmap_type {
  * enum dyn_mode_switch_state - Lists next stage for dynamic mode switch work
  *
  * @MDSS_MDP_NO_UPDATE_REQUESTED: incoming frame is processed normally
- * @MDSS_MDP_WAIT_FOR_PREP: Waiting for OVERLAY_PREPARE to be called
- * @MDSS_MDP_WAIT_FOR_SYNC: Waiting for BUFFER_SYNC to be called
- * @MDSS_MDP_WAIT_FOR_COMMIT: Waiting for COMMIT to be called
+ * @MDSS_MDP_WAIT_FOR_VALIDATE: Waiting for ATOMIC_COMMIT-validate to be called
+ * @MDSS_MDP_WAIT_FOR_COMMIT: Waiting for ATOMIC_COMMIT-commit to be called
+ * @MDSS_MDP_WAIT_FOR_KICKOFF: Waiting for KICKOFF to be called
  */
 enum dyn_mode_switch_state {
 	MDSS_MDP_NO_UPDATE_REQUESTED,
-	MDSS_MDP_WAIT_FOR_PREP,
-	MDSS_MDP_WAIT_FOR_SYNC,
+	MDSS_MDP_WAIT_FOR_VALIDATE,
 	MDSS_MDP_WAIT_FOR_COMMIT,
+	MDSS_MDP_WAIT_FOR_KICKOFF,
 };
 
 /**
@@ -209,6 +208,8 @@ struct msm_mdp_interface {
 					struct mdp_display_commit *data);
 	int (*atomic_validate)(struct msm_fb_data_type *mfd, struct file *file,
 				struct mdp_layer_commit_v1 *commit);
+	bool (*is_config_same)(struct msm_fb_data_type *mfd,
+				struct mdp_output_layer *layer);
 	int (*pre_commit)(struct msm_fb_data_type *mfd, struct file *file,
 				struct mdp_layer_commit_v1 *commit);
 	int (*pre_commit_fnc)(struct msm_fb_data_type *mfd);
@@ -225,9 +226,8 @@ struct msm_mdp_interface {
 		int *bl_out, bool *bl_out_notify);
 	int (*panel_register_done)(struct mdss_panel_data *pdata);
 	u32 (*fb_stride)(u32 fb_index, u32 xres, int bpp);
+	struct mdss_mdp_format_params *(*get_format_params)(u32 format);
 	int (*splash_init_fnc)(struct msm_fb_data_type *mfd);
-	struct msm_sync_pt_data *(*get_sync_fnc)(struct msm_fb_data_type *mfd,
-				const struct mdp_buf_sync *buf_sync);
 	void (*check_dsi_status)(struct work_struct *work, uint32_t interval);
 	int (*configure_panel)(struct msm_fb_data_type *mfd, int mode,
 				int dest_ctrl);
@@ -237,11 +237,24 @@ struct msm_mdp_interface {
 };
 
 #define IS_CALIB_MODE_BL(mfd) (((mfd)->calib_mode) & MDSS_CALIB_MODE_BL)
-#define MDSS_BRIGHT_TO_BL(out, v, bl_max, max_bright) do {\
-					out = (2 * (v) * (bl_max) + max_bright)\
-					/ (2 * max_bright);\
-					} while (0)
 
+#ifdef CONFIG_LGE_DISPLAY_COMMON
+/* TODO: fix it: using local variable mfd in macro function */
+#define MDSS_BRIGHT_TO_BL(out, v, bl_max, max_bright) do {\
+				out = lge_br_to_bl(mfd, v);\
+				} while (0)
+#ifdef CONFIG_LGE_DISPLAY_BL_EXTENDED
+/* TODO: fix it: using local variable mfd in macro function */
+#define MDSS_BRIGHT_TO_BL_EX(out, v, bl_max, max_bright) do {\
+				out = lge_br_to_bl_ex(mfd, v);\
+				} while (0)
+#endif
+#else /* qct original */
+#define MDSS_BRIGHT_TO_BL(out, v, bl_max, max_bright) do {\
+				out = (2 * (v) * (bl_max) + max_bright);\
+				do_div(out, 2 * max_bright);\
+				} while (0)
+#endif
 struct mdss_fb_file_info {
 	struct file *file;
 	struct list_head list;
@@ -256,9 +269,9 @@ struct msm_fb_backup_type {
 #if defined(CONFIG_LGE_PP_AD_SUPPORTED)
 struct msm_fb_ad_info {
     int is_ad_on;
-    int user_bl_lvl;
+    int user_br_lvl;
     int ad_weight;
-    int old_ad_brightness;
+    int old_ad_br_lvl;
 };
 #endif
 
@@ -282,7 +295,7 @@ struct msm_fb_data_type {
 	u32 idle_state;
 	struct delayed_work idle_notify_work;
 
-	bool validate_pending;
+	bool atomic_commit_pending;
 
 	int op_enable;
 	u32 fb_imgType;
@@ -310,15 +323,24 @@ struct msm_fb_data_type {
 	u32 bl_scale;
 	u32 bl_min_lvl;
 	u32 unset_bl_level;
-	u32 bl_updated;
+	bool allow_bl_update;
 	u32 bl_level_scaled;
+#if IS_ENABLED(CONFIG_LGE_DISPLAY_BL_EXTENDED)
+	u32 br_lvl_ex;
+	u32 bl_level_ex;
+	u32 unset_bl_level_ex;
+	bool allow_bl_update_ex;
+	u32 bl_level_scaled_ex;
+	bool keep_aod_pending;
+#endif
 	struct mutex bl_lock;
 	bool ipc_resume;
 
 #if defined(CONFIG_LGE_DISPLAY_AOD_SUPPORTED)
 	struct mutex aod_lock;
+	int bl_isU3_mode;
 #endif
-#if defined(CONFIG_LGE_MIPI_H1_INCELL_QHD_CMD_PANEL)
+#if defined(CONFIG_LGE_DISPLAY_COMMON)
 	bool recovery;
 #endif
 	struct platform_device *pdev;

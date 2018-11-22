@@ -125,6 +125,7 @@ struct mmc_ext_csd {
 	u8			raw_pwr_cl_ddr_52_360;	/* 239 */
 	u8			raw_pwr_cl_ddr_200_360;	/* 253 */
 	u8			cache_flush_policy;	/* 240 */
+#define MMC_BKOPS_URGENCY_MASK 0x3
 	u8			raw_bkops_status;	/* 246 */
 	u8			raw_sectors[4];		/* 212 - 4 bytes */
 	u8			cmdq_depth;		/* 307 */
@@ -324,7 +325,8 @@ struct mmc_bkops_stats {
 struct mmc_bkops_info {
 	struct mmc_bkops_stats stats;
 	bool needs_check;
-	bool needs_manual;
+	bool needs_bkops;
+	u32  retry_counter;
 };
 
 enum mmc_pon_type {
@@ -382,6 +384,11 @@ struct mmc_card {
 #define MMC_QUIRK_BROKEN_HPI (1 << 13)		/* For devices which gets */
 						/* broken due to HPI feature */
 #define MMC_QUIRK_CACHE_DISABLE (1 << 14)	/* prevent cache enable */
+#define MMC_QUIRK_QCA6574_SETTINGS (1 << 15)	/* QCA6574 card settings*/
+#define MMC_QUIRK_QCA9377_SETTINGS (1 << 16)	/* QCA9377 card settings*/
+
+/* Make sure CMDQ is empty before queuing DCMD */
+#define MMC_QUIRK_CMDQ_EMPTY_BEFORE_DCMD (1 << 17)
 
 /* Make sure CMDQ is empty before queuing DCMD */
 #define MMC_QUIRK_CMDQ_EMPTY_BEFORE_DCMD (1 << 17)
@@ -674,6 +681,16 @@ static inline bool mmc_card_configured_manual_bkops(const struct mmc_card *c)
 static inline bool mmc_card_configured_auto_bkops(const struct mmc_card *c)
 {
 	return c->ext_csd.bkops_en & EXT_CSD_BKOPS_AUTO_EN;
+}
+
+static inline bool mmc_enable_qca6574_settings(const struct mmc_card *c)
+{
+	return c->quirks & MMC_QUIRK_QCA6574_SETTINGS;
+}
+
+static inline bool mmc_enable_qca9377_settings(const struct mmc_card *c)
+{
+	return c->quirks & MMC_QUIRK_QCA9377_SETTINGS;
 }
 
 #define mmc_card_name(c)	((c)->cid.prod_name)

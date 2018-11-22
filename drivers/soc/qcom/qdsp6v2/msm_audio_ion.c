@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2013-2015, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2013-2016, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -157,11 +157,11 @@ int msm_audio_ion_alloc(const char *name, struct ion_client **client,
 		pr_err("%s: ION memory mapping for AUDIO failed\n", __func__);
 		goto err_ion_handle;
 	}
-	pr_debug("%s: mapped address = %p, size=%zd\n", __func__,
+	pr_debug("%s: mapped address = %pK, size=%zd\n", __func__,
 		*vaddr, bufsz);
 
 	if (bufsz != 0) {
-		pr_debug("%s: memset to 0 %p %zd\n", __func__, *vaddr, bufsz);
+		pr_debug("%s: memset to 0 %pK %zd\n", __func__, *vaddr, bufsz);
 		memset((void *)*vaddr, 0, bufsz);
 	}
 
@@ -208,7 +208,7 @@ int msm_audio_ion_import(const char *name, struct ion_client **client,
 	bufsz should be 0 and fd shouldn't be 0 as of now
 	*/
 	*handle = ion_import_dma_buf(*client, fd);
-	pr_debug("%s: DMA Buf name=%s, fd=%d handle=%p\n", __func__,
+	pr_debug("%s: DMA Buf name=%s, fd=%d handle=%pK\n", __func__,
 							name, fd, *handle);
 	if (IS_ERR_OR_NULL((void *) (*handle))) {
 		pr_err("%s: ion import dma buffer failed\n",
@@ -239,7 +239,7 @@ int msm_audio_ion_import(const char *name, struct ion_client **client,
 		rc = -ENOMEM;
 		goto err_ion_handle;
 	}
-	pr_debug("%s: mapped address = %p, size=%zd\n", __func__,
+	pr_debug("%s: mapped address = %pK, size=%zd\n", __func__,
 		*vaddr, bufsz);
 
 	return 0;
@@ -321,7 +321,7 @@ int msm_audio_ion_mmap(struct audio_buffer *ab,
 				offset = 0;
 			}
 			len = min(len, remainder);
-			pr_debug("vma=%p, addr=%x len=%ld vm_start=%x vm_end=%x vm_page_prot=%ld\n",
+			pr_debug("vma=%pK, addr=%x len=%ld vm_start=%x vm_end=%x vm_page_prot=%ld\n",
 				vma, (unsigned int)addr, len,
 				(unsigned int)vma->vm_start,
 				(unsigned int)vma->vm_end,
@@ -344,8 +344,8 @@ int msm_audio_ion_mmap(struct audio_buffer *ab,
 				, __func__ , ret);
 			return ret;
 		}
-		pr_debug("phys=%pa len=%zd\n", &phys_addr, phys_len);
-		pr_debug("vma=%p, vm_start=%x vm_end=%x vm_pgoff=%ld vm_page_prot=%ld\n",
+		pr_debug("phys=%pK len=%zd\n", &phys_addr, phys_len);
+		pr_debug("vma=%pK, vm_start=%x vm_end=%x vm_pgoff=%ld vm_page_prot=%ld\n",
 			vma, (unsigned int)vma->vm_start,
 			(unsigned int)vma->vm_end, vma->vm_pgoff,
 			(unsigned long int)vma->vm_page_prot);
@@ -380,7 +380,7 @@ struct ion_client *msm_audio_ion_client_create(const char *name)
 
 void msm_audio_ion_client_destroy(struct ion_client *client)
 {
-	pr_debug("%s: client = %p smmu_enabled = %d\n", __func__,
+	pr_debug("%s: client = %pK smmu_enabled = %d\n", __func__,
 		client, msm_audio_ion_data.smmu_enabled);
 
 	ion_client_destroy(client);
@@ -402,7 +402,7 @@ int msm_audio_ion_import_legacy(const char *name, struct ion_client *client,
 	bufsz should be 0 and fd shouldn't be 0 as of now
 	*/
 	*handle = ion_import_dma_buf(client, fd);
-	pr_debug("%s: DMA Buf name=%s, fd=%d handle=%p\n", __func__,
+	pr_debug("%s: DMA Buf name=%s, fd=%d handle=%pK\n", __func__,
 							name, fd, *handle);
 	if (IS_ERR_OR_NULL((void *)(*handle))) {
 		pr_err("%s: ion import dma buffer failed\n",
@@ -468,7 +468,7 @@ int msm_audio_ion_cache_operations(struct audio_buffer *abuff, int cache_op)
 	int msm_cache_ops = 0;
 
 	if (!abuff) {
-		pr_err("Invalid params: %p, %p\n", __func__, abuff);
+		pr_err("%s: Invalid params: %pK\n", __func__, abuff);
 		return -EINVAL;
 	}
 	rc = ion_handle_get_flags(abuff->client, abuff->handle,
@@ -641,7 +641,7 @@ static int msm_audio_dma_buf_unmap(struct ion_client *client,
 
 	if (!found) {
 		dev_err(cb_dev,
-			"%s: cannot find allocation, ion_handle %p, ion_client %p",
+			"%s: cannot find allocation, ion_handle %pK, ion_client %pK",
 			__func__, handle, client);
 		rc = -EINVAL;
 	}
@@ -671,7 +671,7 @@ static int msm_audio_ion_get_phys(struct ion_client *client,
 		rc = ion_phys(client, handle, addr, len);
 	}
 
-	pr_debug("phys=%pa, len=%zd, rc=%d\n", &(*addr), *len, rc);
+	pr_debug("phys=%pK, len=%zd, rc=%d\n", &(*addr), *len, rc);
 err:
 	return rc;
 }
@@ -685,6 +685,9 @@ static int msm_audio_smmu_init_legacy(struct device *dev)
 	u32 read_val[2];
 
 	cb = devm_kzalloc(dev, sizeof(struct context_bank_info), GFP_KERNEL);
+	if (!cb)
+		return -ENOMEM;
+
 	ctx_node = of_parse_phandle(dev->of_node, "iommus", 0);
 	if (!ctx_node) {
 		dev_err(dev, "%s Could not find any iommus for audio\n",
@@ -775,6 +778,23 @@ static const struct of_device_id msm_audio_ion_dt_match[] = {
 	{ }
 };
 MODULE_DEVICE_TABLE(of, msm_audio_ion_dt_match);
+
+
+u32 msm_audio_ion_get_smmu_sid_mode32(void)
+{
+	if (msm_audio_ion_data.smmu_enabled)
+		return upper_32_bits(msm_audio_ion_data.smmu_sid_bits);
+	else
+		return 0;
+}
+
+u32 msm_audio_populate_upper_32_bits(ion_phys_addr_t pa)
+{
+	if (sizeof(ion_phys_addr_t) == sizeof(u32))
+		return msm_audio_ion_get_smmu_sid_mode32();
+	else
+		return upper_32_bits(pa);
+}
 
 static int msm_audio_ion_probe(struct platform_device *pdev)
 {

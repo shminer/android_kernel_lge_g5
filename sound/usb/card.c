@@ -474,6 +474,11 @@ static int snd_usb_audio_create(struct usb_interface *intf,
 	snd_usb_audio_create_proc(chip);
 
 	*rchip = chip;
+#ifdef CONFIG_LGE_ALICE_FRIENDS
+	if (dev->product)
+		if (!strcmp(dev->product, "HM"))
+			alice_friends_hm_earjack = true;
+#endif
 	return 0;
 }
 
@@ -654,9 +659,14 @@ static int usb_audio_probe(struct usb_interface *intf,
 			   const struct usb_device_id *id)
 {
 	struct snd_usb_audio *chip;
+
+	if (snd_cards[0] == NULL)
+		return -EPROBE_DEFER;
+
 	chip = snd_usb_audio_probe(interface_to_usbdev(intf), intf, id);
 	if (chip) {
 		usb_set_intfdata(intf, chip);
+		usb_enable_autosuspend(chip->dev);
 		return 0;
 	} else
 		return -EIO;
@@ -675,7 +685,7 @@ int snd_usb_autoresume(struct snd_usb_audio *chip)
 	int err = -ENODEV;
 
 	down_read(&chip->shutdown_rwsem);
-	if (chip->probing && chip->in_pm)
+	if (chip->probing || chip->in_pm)
 		err = 0;
 	else if (!chip->shutdown)
 		err = usb_autopm_get_interface(chip->pm_intf);

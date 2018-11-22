@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2015, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2015-2016, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -43,6 +43,9 @@
 
 static u32 locator_status = LOCATOR_UNKNOWN;
 static bool service_inited;
+
+int enable = 0;
+module_param(enable, int, 0);
 
 DECLARE_COMPLETION(locator_status_known);
 
@@ -297,10 +300,9 @@ static int service_locator_send_msg(struct pd_qmi_client_data *pd)
 		if (!domains_read) {
 			db_rev_count = pd->db_rev_count = resp->db_rev_count;
 			pd->total_domains = resp->total_domains;
-			if (!pd->total_domains && resp->domain_list_len) {
-				pr_err("total domains not set\n");
-				pd->total_domains = resp->domain_list_len;
-			}
+			if (!resp->total_domains)
+				pr_info("No matching domains found\n");
+
 			pd->domain_list = kmalloc(
 					sizeof(struct servreg_loc_entry_v01) *
 					resp->total_domains, GFP_KERNEL);
@@ -316,6 +318,10 @@ static int service_locator_send_msg(struct pd_qmi_client_data *pd)
 			kfree(pd->domain_list);
 			rc = -EAGAIN;
 			goto out;
+		}
+		if (resp->domain_list_len >  resp->total_domains) {
+			/* Always read total_domains from the response msg */
+			resp->domain_list_len = resp->total_domains;
 		}
 		/* Copy the response*/
 		store_get_domain_list_response(pd, resp, domains_read);
@@ -506,6 +512,9 @@ static struct dentry *test_servloc_file;
 
 static int __init service_locator_init(void)
 {
+	if (!enable)
+		locator_status = LOCATOR_NOT_PRESENT;
+
 	class_register(&service_locator_class);
 	test_servloc_file = debugfs_create_file("test_servloc",
 				S_IRUGO | S_IWUSR, NULL, NULL,

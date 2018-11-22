@@ -1,4 +1,4 @@
-/* Copyright (c) 2012-2015, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2012-2016, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -30,7 +30,6 @@
 #include <linux/device.h>
 #include <linux/notifier.h>
 #include <linux/slab.h>
-#include <linux/workqueue.h>
 #include <linux/platform_device.h>
 #include <linux/of.h>
 #include <linux/of_platform.h>
@@ -104,8 +103,6 @@ int msm_rpm_unregister_notifier(struct notifier_block *nb)
 {
 	return atomic_notifier_chain_unregister(&msm_rpm_sleep_notifier, nb);
 }
-
-static struct workqueue_struct *msm_rpm_smd_wq;
 
 enum {
 	MSM_RPM_MSG_REQUEST_TYPE = 0,
@@ -531,26 +528,54 @@ static int msm_rpm_read_sleep_ack(void)
 	if (glink_enabled)
 		ret = msm_rpm_glink_rx_poll(glink_data->glink_handle);
 	else {
-		ret = msm_rpm_read_smd_data(buf);
-		if (!ret)
-			ret = smd_is_pkt_avail(msm_rpm_data.ch_info);
-		/* Mimic Glink behavior to ensure that the data is read
-		 * and the msg is removed from the wait list. We should
-		 * have gotten here only when there are no drivers waiting
-		 * on ACKs. msm_rpm_get_entry_from_msg_id() return non-NULL
-		 * only then. So BUG_ON to ensure that we didn't accidentally
-		 * get here.
+		int timeout = 10;
+
+		while (timeout) {
+			if (smd_is_pkt_avail(msm_rpm_data.ch_info))
+				break;
+			/*
+			 * Sleep for 50us at a time before checking
+			 * for packet availability. The 50us is based
+			 * on the the max time rpm could take to process
+			 * and send an ack for sleep set request.
+			 */
+			udelay(50);
+			timeout--;
+		}
+
+		/*
+		 * On timeout return an error and exit the spinlock
+		 * control on this cpu. This will allow any other
+		 * core that has wokenup and trying to acquire the
+		 * spinlock from being locked out.
 		 */
-		msg_id = msm_rpm_get_msg_id_from_ack(buf);
-		msm_rpm_process_ack(msg_id, 0);
+
+		if (!timeout)
+			return -EAGAIN;
+
+		ret = msm_rpm_read_smd_data(buf);
+		if (!ret) {
+			/* Mimic Glink behavior to ensure that the
+			 * data is read and the msg is removed from
+			 * the wait list. We should have gotten here
+			 * only when there are no drivers waiting on
+			 * ACKs. msm_rpm_get_entry_from_msg_id()
+			 * return non-NULL only then.
+			 */
+			msg_id = msm_rpm_get_msg_id_from_ack(buf);
+			msm_rpm_process_ack(msg_id, 0);
+			ret = smd_is_pkt_avail(msm_rpm_data.ch_info);
+		}
 	}
 	return ret;
 }
 
 static void msm_rpm_flush_noack_messages(void)
 {
-	while (!list_empty(&msm_rpm_wait_list))
-		msm_rpm_read_sleep_ack();
+	while (!list_empty(&msm_rpm_wait_list)) {
+		if (!msm_rpm_read_sleep_ack())
+			break;
+	}
 }
 
 static int msm_rpm_flush_requests(bool print)
@@ -598,10 +623,12 @@ static int msm_rpm_flush_requests(bool print)
 		if (count >= MAX_WAIT_ON_ACK) {
 			int ret = msm_rpm_read_sleep_ack();
 
-			if (ret > 0)
+			if (ret >= 0)
 				count--;
-			else
+			else {
+				pr_err("Timed out waiting for RPM ACK\n");
 				return ret;
+			}
 		}
 	}
 	return 0;
@@ -1179,7 +1206,7 @@ static int msm_rpm_glink_send_buffer(char *buf, uint32_t size, bool noirq)
 				spin_lock_irqsave(
 					&msm_rpm_data.smd_lock_write, flags);
 			} else {
-				udelay(5);
+				udelay(100);
 			}
 
 			/* The udelay(50) will affect starting timeout 50 */
@@ -1901,15 +1928,6 @@ static int msm_rpm_dev_probe(struct platform_device *pdev)
 	wait_for_completion(&msm_rpm_data.smd_open);
 
 	smd_disable_read_intr(msm_rpm_data.ch_info);
-
-	msm_rpm_smd_wq = alloc_workqueue("rpm-smd",
-			WQ_UNBOUND | WQ_MEM_RECLAIM | WQ_HIGHPRI, 1);
-	if (!msm_rpm_smd_wq) {
-		pr_err("%s: Unable to alloc rpm-smd workqueue\n", __func__);
-		ret = -EINVAL;
-		goto fail;
-	}
-	queue_work(msm_rpm_smd_wq, &msm_rpm_data.work);
 
 	probe_status = ret;
 skip_init:

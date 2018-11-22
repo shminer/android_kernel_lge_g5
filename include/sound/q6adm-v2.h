@@ -1,4 +1,4 @@
-/* Copyright (c) 2012-2015, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2012-2016, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -65,6 +65,12 @@ struct route_payload {
 	unsigned int session_id;
 };
 
+struct msm_pcm_channel_mux {
+	int out_channel;
+	int input_channel;
+	u16 channel_config[16][16];
+};
+
 int srs_trumedia_open(int port_id, int copp_idx, __s32 srs_tech_id,
 		      void *srs_params);
 
@@ -73,6 +79,8 @@ int adm_dts_eagle_set(int port_id, int copp_idx, int param_id,
 
 int adm_dts_eagle_get(int port_id, int copp_idx, int param_id,
 		      void *data, uint32_t size);
+
+void adm_copp_mfc_cfg(int port_id, int copp_idx, int dst_sample_rate);
 
 int adm_get_params(int port_id, int copp_idx, uint32_t module_id,
 		   uint32_t param_id, uint32_t params_length, char *params);
@@ -99,6 +107,12 @@ int adm_matrix_map(int path, struct route_payload payload_map,
 int adm_connect_afe_port(int mode, int session_id, int port_id);
 
 void adm_ec_ref_rx_id(int  port_id);
+
+void adm_num_ec_ref_rx_chans(int num_chans);
+
+void adm_ec_ref_rx_bit_width(int bit_width);
+
+void adm_ec_ref_rx_sampling_rate(int sampling_rate);
 
 int adm_get_lowlatency_copp_id(int port_id);
 
@@ -128,6 +142,8 @@ int adm_set_volume(int port_id, int copp_idx, int volume);
 int adm_set_softvolume(int port_id, int copp_idx,
 		       struct audproc_softvolume_params *softvol_param);
 
+int adm_set_mic_gain(int port_id, int copp_idx, int volume);
+
 int adm_param_enable(int port_id, int copp_idx, int module_id,  int enable);
 
 int adm_send_calibration(int port_id, int copp_idx, int path, int perf_mode,
@@ -151,4 +167,9 @@ int adm_get_sound_focus(int port_id, int copp_idx,
 			struct sound_focus_param *soundFocusData);
 int adm_get_source_tracking(int port_id, int copp_idx,
 			    struct source_tracking_param *sourceTrackingData);
+				
+int programable_channel_mixer(int port_id, int copp_idx, int session_id,
+		int session_type, struct msm_pcm_channel_mux *ch_mux,
+		int num_ch);
+
 #endif /* __Q6_ADM_V2_H__ */

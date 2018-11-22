@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2015, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2015-2016, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -17,8 +17,6 @@
 /* RPM controlled clocks */
 #define clk_xo 0xf13dfee3
 #define clk_xo_a_clk 0xd939b99b
-#define clk_cxo_clk_src 0x79e95308
-#define clk_cxo_a_clk_src 0x3dba80d6
 #define clk_ce_clk 0xd8bc64e1
 #define clk_ce_a_clk 0x4dfefd47
 #define clk_pcnoc_clk 0xc1296d0f
@@ -71,6 +69,7 @@
 #define clk_gpll0 0x1ebe3bc4
 #define clk_gpll0_ao 0xa1368304
 #define clk_gpll0_out_msscc 0x7d794829
+#define clk_apss_ahb_clk_src 0x36f8495f
 #define clk_usb30_master_clk_src 0xc6262f89
 #define clk_blsp1_qup1_i2c_apps_clk_src 0x17f78f5e
 #define clk_blsp1_qup1_spi_apps_clk_src 0xf534c4fa
@@ -148,5 +147,8 @@
 
 /* clock_debug controlled clocks */
 #define clk_gcc_debug_mux 0x8121ac15
+
+/* Audio External Clocks */
+#define clk_audio_lpass_mclk 0x575ec22b
 
 #endif

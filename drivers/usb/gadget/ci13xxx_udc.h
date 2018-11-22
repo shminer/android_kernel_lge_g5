@@ -118,7 +118,8 @@ struct ci13xxx_ep {
 	struct dma_pool                       *td_pool;
 	struct ci13xxx_td                     *last_zptr;
 	dma_addr_t                            last_zdma;
-	unsigned long dTD_update_fail_count;
+	unsigned long                         dTD_update_fail_count;
+	unsigned long                         dTD_active_re_q_count;
 	unsigned long			      prime_fail_count;
 	int				      prime_timer_count;
 	struct timer_list		      prime_timer;
@@ -149,7 +150,6 @@ struct ci13xxx_udc_driver {
 
 	void	(*notify_event)(struct ci13xxx *udc, unsigned event);
 	bool    (*in_lpm)(struct ci13xxx *udc);
-	struct clk *system_clk;
 };
 
 /* CI13XXX UDC descriptor & global resources */
@@ -178,16 +178,9 @@ struct ci13xxx {
 	int                        softconnect; /* is pull-up enable allowed */
 	unsigned long dTD_update_fail_count;
 	struct usb_phy            *transceiver; /* Transceiver struct */
-	struct clk                *system_clk;
 	bool                      skip_flush; /* skip flushing remaining EP
 						upon flush timeout for the
 						first EP. */
-	u32			  max_nominal_system_clk_rate;	/* max freq to
-						be voted for system clock in
-						streaming mode */;
-	u32			  default_system_clk_rate;	/* max freq at
-						which system clock should run
-						in non streaming mode */;
 };
 
 /******************************************************************************

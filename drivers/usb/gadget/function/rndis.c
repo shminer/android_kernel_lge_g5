@@ -1251,7 +1251,7 @@ static int rndis_proc_show(struct seq_file *m, void *v)
 #endif
 			 param->max_pkt_per_xfer *
 				 (param->dev->mtu + sizeof(struct ethhdr) +
-				  sizeof(struct rndis_packet_msg_type) + 22),
+				 sizeof(struct rndis_packet_msg_type) + 22),
 			 rndis_ul_max_xfer_size_rcvd,
 			 param->max_pkt_per_xfer,
 			 rndis_ul_max_pkt_per_xfer_rcvd,

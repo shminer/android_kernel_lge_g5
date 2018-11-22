@@ -504,6 +504,13 @@ int bdi_set_max_ratio(struct backing_dev_info *bdi, unsigned max_ratio)
 }
 EXPORT_SYMBOL(bdi_set_max_ratio);
 #ifdef CONFIG_MACH_LGE
+/*
+ * "check_and_sync" is changed to "bg_sync" during suspend syncing filesystems.
+ * Although below codes related with "check_and_sync" have to be deleted together,
+ * We can't eliminate this codes because "max_sync_count" variable is using
+ * on another performance patch in 8937 n branch. (90559ec731b80801630051f8db5be5a0c651fb0f)
+ * When the variable will be not using anymore, we would erase this.
+ */
 int bdi_set_max_sync_count(struct backing_dev_info *bdi, unsigned max_sync_count)
 {
 	int ret = 0;
@@ -2363,7 +2370,7 @@ int test_clear_page_writeback(struct page *page)
 		dec_zone_page_state(page, NR_WRITEBACK);
 		inc_zone_page_state(page, NR_WRITTEN);
 	}
-	mem_cgroup_end_page_stat(memcg, locked, memcg_flags);
+	mem_cgroup_end_page_stat(memcg, &locked, &memcg_flags);
 	return ret;
 }
 
@@ -2405,7 +2412,7 @@ int __test_set_page_writeback(struct page *page, bool keep_write)
 		mem_cgroup_inc_page_stat(memcg, MEM_CGROUP_STAT_WRITEBACK);
 		inc_zone_page_state(page, NR_WRITEBACK);
 	}
-	mem_cgroup_end_page_stat(memcg, locked, memcg_flags);
+	mem_cgroup_end_page_stat(memcg, &locked, &memcg_flags);
 	return ret;
 
 }

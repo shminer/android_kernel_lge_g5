@@ -212,6 +212,15 @@ config BATTERY_MAX17042
 	  with MAX17042. This driver also supports max17047/50 chips which are
 	  improved version of max17042.
 
+config BATTERY_MAX17050
+    tristate "Maxim MAX17050 fuel gauge external driver"
+    depends on I2C
+    default n
+    help
+      MAX17050 is fuel-gauge systems for lithium-ion (Li+) batteries
+      in handheld and portable equipment. The MAX17048 is configured
+      to operate with a single lithium cell.
+
 config BATTERY_Z2
 	tristate "Z2 battery driver"
 	depends on I2C && MACH_ZIPIT2
@@ -440,6 +449,17 @@ config SMB1360_CHARGER_FG
 	  The driver reports the status via the power supply framework.
 	  A status change triggers an IRQ via the device STAT pin.
 
+config SMB138X_CHARGER
+	tristate "SMB138X Battery Charger"
+	depends on MFD_I2C_PMIC
+	help
+	  Say Y to include support for SMB138X Battery Charger.
+	  SMB1380 is a dual phase 6A battery charger, and SMB1381 is a single
+	  phase 5A battery charger.
+	  The driver supports charger enable/disable.
+	  The driver reports the charger status via the power supply framework.
+	  A charger status change triggers an IRQ via the device STAT pin.
+
 config SMB358_CHARGER
 	tristate "SMB358 Battery Charger"
 	depends on I2C
@@ -447,6 +467,17 @@ config SMB358_CHARGER
 	  Say Y to include support for SMB358 Battery Charger.
 	  SMB358 is a single path switching mode charger capable of charging
 	  the battery with 2Amps of current.
+	  The driver supports charger enable/disable.
+	  The driver reports the charger status via the power supply framework.
+	  A charger status change triggers an IRQ via the device STAT pin.
+
+config SMB23X_CHARGER
+	tristate "SMB23X Battery Charger"
+	depends on I2C
+	help
+	  Say Y to include support for SMB23X Battery Charger.
+	  SMB23X is a single path linear charger capable of charging
+	  the battery with 1Amps of current.
 	  The driver supports charger enable/disable.
 	  The driver reports the charger status via the power supply framework.
 	  A charger status change triggers an IRQ via the device STAT pin.
@@ -483,6 +514,16 @@ config QPNP_SMBCHARGER
 	  supports USB detection and battery charging up to 3A.
 	  The driver also offers relevant information to userspace via the
 	  power supply framework.
+
+config FUELGAUGE_STC3117
+	tristate "STC3117 fuel gauge driver"
+	default n
+	depends on I2C
+	help
+	  Say Y to include support
+	  for STC3117 fuel gauge driver for batteries.
+	  This driver source code implemented
+	  all functions for STC3117 fuel gauge.
 
 config QPNP_FG
 	tristate "QPNP fuel gauge driver"
@@ -554,6 +595,19 @@ config QPNP_LINEAR_CHARGER
 	  detection and charging. The driver also offers relevant information
 	  to userspace via the power supply framework.
 
+config QPNP_TYPEC
+	tristate "QPNP Type-C driver"
+	depends on SPMI || MSM_SPMI
+	depends on OF_SPMI
+	depends on MSM_QPNP_INT
+	help
+	  Say Y here to enable QPNP Type-C driver.
+	  The QPNP Type-C module supports the USB type-C protocol. It supports type-C
+	  cable detection and other type-C parameters such as current-capability and
+	  CC-orientation. The module does not support USB power-delivery. The driver
+	  adds support to report these type-C parameters via the power-supply
+	  framework.
+
 config MSM_BCL_CTL
 	bool "BCL Framework driver"
 	help
@@ -610,6 +664,23 @@ config LGE_PM_FACTORY_TESTMODE
 	help
 	  Say Y to enable factory testmode in qpnp-smbcharger
 
+config LGE_PM_FG_AGE
+	tristate "QPNP FG battery age mode"
+	depends on LGE_PM
+	default n
+	help
+	  Say Y to enable to battery age mode for DCM.
+	  age value is 1 = very good condition
+	  age value is 2 = good condition
+	  age value is 3 = bad condition
+
+config LGE_PM_FG_ACFA
+	tristate "QPNP FG Adapative Cutoff For Aged"
+	depends on LGE_PM
+	default n
+	help
+	  Say Y to enable to increase cutoff at init & for aged cell.
+
 config LGE_PM_MAXIM_EVP_CONTROL
 	bool "add evp control func."
 	default n
@@ -626,11 +697,24 @@ config LGE_PM_USB_CURRENT_MAX_MODE
 	  Say Y to enable LGE PM USB current max mode
 	  for MST, Auto Testing with USB
 
+config LGE_PM_RESTORE_BATT_INFO
+       bool "Battery Capacity Scaling"
+       depends on LGE_PM
+       help
+         Say Y here to be able to restore the SOC again,
+         if the same battery is removed and inserted again
+
 config LGE_PM_SOC_SCALING
        bool "Battery Capacity Scaling"
        depends on LGE_PM
        help
          Say Y here to enable the battery capacity to be scaled.
+
+config LGE_PM_SOC_RECHARGING_WA
+       bool "LGE_PM Support recharging by SOC"
+       depends on LGE_PM
+       help
+         Say Y here to recharging by SOC
 
 config LGE_PM_VZW_REQ
 	 tristate "Implementation of power requirements of Verizon"
@@ -671,6 +755,55 @@ config LGE_PM_WEAK_BATT_PACK
 	depends on LGE_PM
 	help
 	  support for weak battery pack
+
+config LGE_APPS_PORT_FRIENDS
+	tristate "LGE's friend for detection by detecting gpio"
+	default n
+	depends on LGE_PM
+	help
+	  For the detection of to detect the LGE's friends by irq
+
+config LGE_APPS_PORT_FRIENDS_ONE_WIRE
+	tristate "one wire communication"
+	default n
+	depends on LGE_PM
+	help
+	  For the communication of LGE's friends by one wire
+
+config LGE_PM_BATTERY_SWAP
+	bool "LGE battery swap feature"
+	default n
+	depends on LGE_PM
+	help
+	  lge battery swap feature
+
+config LGE_PM_SUPPORT_LG_POWER_CLASS
+	bool "LG power class driver feature"
+	default n
+	depends on LGE_PM
+	help
+	  Support lge power class for charging scenario on LGE
+
+config LGE_PM_STEP_DECREASING_TAPER_CHARGING
+	bool "LGE taper charging by decreasing per step"
+	default n
+	depends on LGE_PM
+	help
+	  Support taper charging by decreasing per step
+
+config LGE_PM_OTP_SCENARIO_FOR_VZW
+	tristate "LGE OTP SCENARIO FOR VZW"
+	default n
+	depends on LGE_PM
+	help
+	  Support otp scenario for vzw on LGE
+
+config LGE_PM_OTP_SCENARIO_FOR_SPRINT
+	tristate "LGE OTP SCENARIO FOR SPRINT"
+	default n
+	depends on LGE_PM
+	help
+	  Support otp scenario for sprint on LGE
 
 source "drivers/power/reset/Kconfig"
 

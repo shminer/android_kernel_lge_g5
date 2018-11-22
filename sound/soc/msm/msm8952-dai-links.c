@@ -1,4 +1,4 @@
-/* Copyright (c) 2015, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2015-2016, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -19,6 +19,13 @@
 #include "msm8952-slimbus.h"
 #include "qdsp6v2/msm-pcm-routing-v2.h"
 #include "../codecs/wcd9335.h"
+
+#define DEV_NAME_STR_LEN            32
+enum TASHA_LITE_DEVICE {
+	MSM8952_TASHA_LITE = 0,
+	MSM8953_TASHA_LITE,
+	NUM_OF_TASHA_LITE_DEVICE,
+};
 
 static struct snd_soc_card snd_soc_card_msm[MAX_CODECS];
 static struct snd_soc_card snd_soc_card_msm_card;
@@ -54,6 +61,20 @@ static struct snd_soc_ops msm8952_slimbus_2_be_ops = {
 };
 
 static struct snd_soc_dai_link msm8952_tasha_fe_dai[] = {
+	/* tasha_vifeedback for speaker protection */
+	{
+		.name = LPASS_BE_SLIMBUS_4_TX,
+		.stream_name = "Slimbus4 Capture",
+		.cpu_dai_name = "msm-dai-q6-dev.16393",
+		.platform_name = "msm-pcm-hostless",
+		.codec_name = "tasha_codec",
+		.codec_dai_name = "tasha_vifeedback",
+		.be_id = MSM_BACKEND_DAI_SLIMBUS_4_TX,
+		.be_hw_params_fixup = msm_slim_4_tx_be_hw_params_fixup,
+		.ops = &msm8952_slimbus_be_ops,
+		.no_host_mode = SND_SOC_DAI_LINK_NO_HOST,
+		.ignore_suspend = 1,
+	},
 	/* Ultrasound RX DAI Link */
 	{
 		.name = "SLIMBUS_2 Hostless Playback",
@@ -64,7 +85,6 @@ static struct snd_soc_dai_link msm8952_tasha_fe_dai[] = {
 		.codec_dai_name = "tasha_rx2",
 		.ignore_suspend = 1,
 		.dpcm_playback = 1,
-		.dpcm_capture = 1,
 		.no_host_mode = SND_SOC_DAI_LINK_NO_HOST,
 		.ops = &msm8952_slimbus_2_be_ops,
 	},
@@ -96,6 +116,41 @@ static struct snd_soc_dai_link msm8952_tasha_fe_dai[] = {
 		.codec_dai_name = "tasha_mad1",
 		.codec_name = "tasha_codec",
 		.ops = &msm8952_cpe_ops,
+	},
+	/* slimbus rx 6 hostless */
+	{
+		.name = "SLIMBUS_6 Hostless Playback",
+		.stream_name = "SLIMBUS_6 Hostless",
+		.cpu_dai_name = "SLIMBUS6_HOSTLESS",
+		.platform_name = "msm-pcm-hostless",
+		.dynamic = 1,
+		.dpcm_playback = 1,
+		.trigger = {SND_SOC_DPCM_TRIGGER_POST,
+			    SND_SOC_DPCM_TRIGGER_POST},
+		.no_host_mode = SND_SOC_DAI_LINK_NO_HOST,
+		.ignore_suspend = 1,
+		 /* this dailink has playback support */
+		.ignore_pmdown_time = 1,
+		.codec_dai_name = "snd-soc-dummy-dai",
+		.codec_name = "snd-soc-dummy",
+	},
+	/* QCHAT */
+	{/* hw:x,42 */
+		.name = "QCHAT",
+		.stream_name = "QCHAT",
+		.cpu_dai_name = "QCHAT",
+		.platform_name  = "msm-pcm-voice",
+		.dynamic = 1,
+		.dpcm_playback = 1,
+		.dpcm_capture = 1,
+		.trigger = {SND_SOC_DPCM_TRIGGER_POST,
+			SND_SOC_DPCM_TRIGGER_POST},
+		.no_host_mode = SND_SOC_DAI_LINK_NO_HOST,
+		.ignore_suspend = 1,
+		.ignore_pmdown_time = 1,
+		.codec_dai_name = "snd-soc-dummy-dai",
+		.codec_name = "snd-soc-dummy",
+		.be_id = MSM_FRONTEND_DAI_QCHAT,
 	},
 };
 
@@ -154,11 +209,11 @@ static struct snd_soc_dai_link msm8952_tasha_be_dai[] = {
 		.cpu_dai_name = "msm-dai-q6-dev.16387",
 		.platform_name = "msm-pcm-routing",
 		.codec_name = "tasha_codec",
-		.codec_dai_name = "tasha_tx1",
+		.codec_dai_name = "tasha_tx3",
 		.no_pcm = 1,
 		.dpcm_capture = 1,
 		.be_id = MSM_BACKEND_DAI_SLIMBUS_1_TX,
-		.be_hw_params_fixup = msm_slim_0_tx_be_hw_params_fixup,
+		.be_hw_params_fixup = msm_slim_1_tx_be_hw_params_fixup,
 		.ops = &msm8952_slimbus_be_ops,
 		.ignore_suspend = 1,
 	},
@@ -187,7 +242,6 @@ static struct snd_soc_dai_link msm8952_tasha_be_dai[] = {
 		.codec_dai_name = "tasha_tx1",
 		.no_pcm = 1,
 		.dpcm_capture = 1,
-		.dpcm_playback = 1,
 		.be_id = MSM_BACKEND_DAI_SLIMBUS_3_TX,
 		.be_hw_params_fixup = msm_slim_0_tx_be_hw_params_fixup,
 		.ops = &msm8952_slimbus_be_ops,
@@ -238,6 +292,22 @@ static struct snd_soc_dai_link msm8952_tasha_be_dai[] = {
 		.be_id = MSM_BACKEND_DAI_SLIMBUS_5_TX,
 		.be_hw_params_fixup = msm_slim_5_tx_be_hw_params_fixup,
 		.ops = &msm8952_slimbus_be_ops,
+		.ignore_suspend = 1,
+	},
+	{
+		.name = LPASS_BE_SLIMBUS_6_RX,
+		.stream_name = "Slimbus6 Playback",
+		.cpu_dai_name = "msm-dai-q6-dev.16396",
+		.platform_name = "msm-pcm-routing",
+		.codec_name = "tasha_codec",
+		.codec_dai_name = "tasha_rx4",
+		.no_pcm = 1,
+		.dpcm_playback = 1,
+		.be_id = MSM_BACKEND_DAI_SLIMBUS_6_RX,
+		.be_hw_params_fixup = msm_slim_6_rx_be_hw_params_fixup,
+		.ops = &msm8952_slimbus_be_ops,
+		/* dai link has playback support */
+		.ignore_pmdown_time = 1,
 		.ignore_suspend = 1,
 	},
 };
@@ -697,12 +767,13 @@ static struct snd_soc_dai_link msm8952_common_fe_dai[] = {
 		.codec_name = "snd-soc-dummy",
 	},
 	{/* hw:x,18 */
-		.name = "MSM8916 HFP TX",
+		.name = "MSM8916 HFP",
 		.stream_name = "MultiMedia6",
 		.cpu_dai_name = "MultiMedia6",
 		.platform_name  = "msm-pcm-loopback",
 		.dynamic = 1,
 		.dpcm_capture = 1,
+		.dpcm_playback = 1,
 		.codec_dai_name = "snd-soc-dummy-dai",
 		.codec_name = "snd-soc-dummy",
 		.trigger = {SND_SOC_DPCM_TRIGGER_POST,
@@ -800,7 +871,6 @@ static struct snd_soc_dai_link msm8952_common_fe_dai[] = {
 		.cpu_dai_name   = "MultiMedia7",
 		.platform_name  = "msm-compress-dsp",
 		.dynamic = 1,
-		.dpcm_capture = 1,
 		.dpcm_playback = 1,
 		.codec_dai_name = "snd-soc-dummy-dai",
 		.codec_name = "snd-soc-dummy",
@@ -849,7 +919,6 @@ static struct snd_soc_dai_link msm8952_common_fe_dai[] = {
 		.cpu_dai_name = "QUAT_MI2S_RX_HOSTLESS",
 		.platform_name = "msm-pcm-hostless",
 		.dynamic = 1,
-		.dpcm_capture = 1,
 		.dpcm_playback = 1,
 		.trigger = {SND_SOC_DPCM_TRIGGER_POST,
 			SND_SOC_DPCM_TRIGGER_POST},
@@ -866,7 +935,6 @@ static struct snd_soc_dai_link msm8952_common_fe_dai[] = {
 		.cpu_dai_name	= "MultiMedia10",
 		.platform_name  = "msm-compress-dsp",
 		.dynamic = 1,
-		.dpcm_capture = 1,
 		.dpcm_playback = 1,
 		.trigger = {SND_SOC_DPCM_TRIGGER_POST,
 			 SND_SOC_DPCM_TRIGGER_POST},
@@ -883,7 +951,6 @@ static struct snd_soc_dai_link msm8952_common_fe_dai[] = {
 		.cpu_dai_name	= "MultiMedia11",
 		.platform_name  = "msm-compress-dsp",
 		.dynamic = 1,
-		.dpcm_capture = 1,
 		.dpcm_playback = 1,
 		.trigger = {SND_SOC_DPCM_TRIGGER_POST,
 			 SND_SOC_DPCM_TRIGGER_POST},
@@ -900,7 +967,6 @@ static struct snd_soc_dai_link msm8952_common_fe_dai[] = {
 		.cpu_dai_name	= "MultiMedia12",
 		.platform_name  = "msm-compress-dsp",
 		.dynamic = 1,
-		.dpcm_capture = 1,
 		.dpcm_playback = 1,
 		.trigger = {SND_SOC_DPCM_TRIGGER_POST,
 			 SND_SOC_DPCM_TRIGGER_POST},
@@ -917,7 +983,6 @@ static struct snd_soc_dai_link msm8952_common_fe_dai[] = {
 		.cpu_dai_name	= "MultiMedia13",
 		.platform_name  = "msm-compress-dsp",
 		.dynamic = 1,
-		.dpcm_capture = 1,
 		.dpcm_playback = 1,
 		.trigger = {SND_SOC_DPCM_TRIGGER_POST,
 			 SND_SOC_DPCM_TRIGGER_POST},
@@ -934,7 +999,6 @@ static struct snd_soc_dai_link msm8952_common_fe_dai[] = {
 		.cpu_dai_name	= "MultiMedia14",
 		.platform_name  = "msm-compress-dsp",
 		.dynamic = 1,
-		.dpcm_capture = 1,
 		.dpcm_playback = 1,
 		.trigger = {SND_SOC_DPCM_TRIGGER_POST,
 			 SND_SOC_DPCM_TRIGGER_POST},
@@ -951,7 +1015,6 @@ static struct snd_soc_dai_link msm8952_common_fe_dai[] = {
 		.cpu_dai_name	= "MultiMedia15",
 		.platform_name  = "msm-compress-dsp",
 		.dynamic = 1,
-		.dpcm_capture = 1,
 		.dpcm_playback = 1,
 		.trigger = {SND_SOC_DPCM_TRIGGER_POST,
 			 SND_SOC_DPCM_TRIGGER_POST},
@@ -968,7 +1031,6 @@ static struct snd_soc_dai_link msm8952_common_fe_dai[] = {
 		.cpu_dai_name	= "MultiMedia16",
 		.platform_name  = "msm-compress-dsp",
 		.dynamic = 1,
-		.dpcm_capture = 1,
 		.dpcm_playback = 1,
 		.trigger = {SND_SOC_DPCM_TRIGGER_POST,
 			 SND_SOC_DPCM_TRIGGER_POST},
@@ -1183,7 +1245,7 @@ static struct snd_soc_dai_link msm8952_common_be_dai[] = {
 		.codec_name     = "msm-stub-codec.1",
 		.codec_dai_name = "msm-stub-tx",
 		.no_pcm = 1,
-		.dpcm_playback = 1,
+		.dpcm_capture = 1,
 		.be_id = MSM_BACKEND_DAI_INCALL_RECORD_RX,
 		.be_hw_params_fixup = msm_be_hw_params_fixup,
 		.ignore_suspend = 1,
@@ -1197,7 +1259,7 @@ static struct snd_soc_dai_link msm8952_common_be_dai[] = {
 		.codec_name     = "msm-stub-codec.1",
 		.codec_dai_name = "msm-stub-rx",
 		.no_pcm = 1,
-		.dpcm_capture = 1,
+		.dpcm_playback = 1,
 		.be_id = MSM_BACKEND_DAI_VOICE_PLAYBACK_TX,
 		.be_hw_params_fixup = msm_be_hw_params_fixup,
 		.ignore_suspend = 1,
@@ -1211,11 +1273,46 @@ static struct snd_soc_dai_link msm8952_common_be_dai[] = {
 		.codec_name     = "msm-stub-codec.1",
 		.codec_dai_name = "msm-stub-rx",
 		.no_pcm = 1,
-		.dpcm_capture = 1,
+		.dpcm_playback = 1,
 		.be_id = MSM_BACKEND_DAI_VOICE2_PLAYBACK_TX,
 		.be_hw_params_fixup = msm_be_hw_params_fixup,
 		.ignore_suspend = 1,
 	},
+
+	{
+		.name = LPASS_BE_QUIN_MI2S_TX,
+		.stream_name = "Quinary MI2S Capture",
+		.cpu_dai_name = "msm-dai-q6-mi2s.5",
+		.platform_name = "msm-pcm-routing",
+		.codec_dai_name = "snd-soc-dummy-dai",
+		.codec_name = "snd-soc-dummy",
+		.no_pcm = 1,
+		.dpcm_capture = 1,
+		.be_id = MSM_BACKEND_DAI_QUINARY_MI2S_TX,
+		.be_hw_params_fixup = msm_be_hw_params_fixup,
+		.ops = &msm8952_quin_mi2s_be_ops,
+		.ignore_suspend = 1,
+	},
+};
+
+static struct snd_soc_dai_link msm8952_hdmi_dba_dai_link[] = {
+	{
+		.name = LPASS_BE_QUIN_MI2S_RX,
+		.stream_name = "Quinary MI2S Playback",
+		.cpu_dai_name = "msm-dai-q6-mi2s.5",
+		.platform_name = "msm-pcm-routing",
+		.codec_dai_name = "msm_hdmi_dba_codec_rx_dai",
+		.codec_name = "msm-hdmi-dba-codec-rx",
+		.no_pcm = 1,
+		.dpcm_playback = 1,
+		.be_id = MSM_BACKEND_DAI_QUINARY_MI2S_RX,
+		.be_hw_params_fixup = msm_quin_be_hw_params_fixup,
+		.ops = &msm8952_quin_mi2s_be_ops,
+		.ignore_pmdown_time = 1, /* dai link has playback support */
+		.ignore_suspend = 1,
+	},
+};
+static struct snd_soc_dai_link msm8952_quin_dai_link[] = {
 	{
 		.name = LPASS_BE_QUIN_MI2S_RX,
 		.stream_name = "Quinary MI2S Playback",
@@ -1233,53 +1330,201 @@ static struct snd_soc_dai_link msm8952_common_be_dai[] = {
 	},
 };
 
-static struct snd_soc_aux_dev msm895x_aux_dev[] = {
-	{
-		.name = "wsa881x.0",
-		.codec_name =  NULL,
-		.init = msm895x_wsa881x_init,
-	},
-	{
-		.name = "wsa881x.1",
-		.codec_name = NULL,
-		.init = msm895x_wsa881x_init,
-	},
+struct msm895x_wsa881x_dev_info {
+	struct device_node *of_node;
+	u32 index;
 };
 
-static struct snd_soc_codec_conf msm895x_codec_conf[] = {
-	{
-		.dev_name = NULL,
-		.name_prefix = NULL,
-	},
-	{
-		.dev_name = NULL,
-		.name_prefix = NULL,
-	},
-};
+static struct snd_soc_aux_dev *msm895x_aux_dev;
+static struct snd_soc_codec_conf *msm895x_codec_conf;
 
 static struct snd_soc_dai_link msm8952_tomtom_dai_links[
 ARRAY_SIZE(msm8952_common_fe_dai) +
 ARRAY_SIZE(msm8952_tomtom_fe_dai) +
 ARRAY_SIZE(msm8952_common_be_dai) +
-ARRAY_SIZE(msm8952_tomtom_be_dai)];
+ARRAY_SIZE(msm8952_tomtom_be_dai) +
+ARRAY_SIZE(msm8952_quin_dai_link)];
 
 static struct snd_soc_dai_link msm8952_tasha_dai_links[
 ARRAY_SIZE(msm8952_common_fe_dai) +
 ARRAY_SIZE(msm8952_tasha_fe_dai) +
 ARRAY_SIZE(msm8952_common_be_dai) +
-ARRAY_SIZE(msm8952_tasha_be_dai)];
+ARRAY_SIZE(msm8952_tasha_be_dai) +
+ARRAY_SIZE(msm8952_hdmi_dba_dai_link)];
+
+int msm8952_init_wsa_dev(struct platform_device *pdev,
+			struct snd_soc_card *card)
+{
+	struct device_node *wsa_of_node;
+	u32 wsa_max_devs;
+	u32 wsa_dev_cnt;
+	char *dev_name_str = NULL;
+	struct msm895x_wsa881x_dev_info *wsa881x_dev_info;
+	const char *wsa_auxdev_name_prefix[1];
+	int found = 0;
+	int i;
+	int ret;
+
+	/* Get maximum WSA device count for this platform */
+	ret = of_property_read_u32(pdev->dev.of_node,
+					"qcom,wsa-max-devs", &wsa_max_devs);
+	if (ret) {
+		dev_dbg(&pdev->dev,
+			"%s: wsa-max-devs property missing in DT %s, ret = %d\n",
+			__func__, pdev->dev.of_node->full_name, ret);
+		return 0;
+	}
+	if (wsa_max_devs == 0) {
+		dev_warn(&pdev->dev,
+			"%s: Max WSA devices is 0 for this target?\n",
+			__func__);
+		return 0;
+				}
+
+	/* Get count of WSA device phandles for this platform */
+	wsa_dev_cnt = of_count_phandle_with_args(pdev->dev.of_node,
+						"qcom,wsa-devs", NULL);
+	if (wsa_dev_cnt == -ENOENT) {
+		dev_warn(&pdev->dev, "%s: No wsa device defined in DT.\n",
+			__func__);
+		return 0;
+	} else if (wsa_dev_cnt <= 0) {
+		dev_err(&pdev->dev,
+			"%s: Error reading wsa device from DT. wsa_dev_cnt = %d\n",
+			__func__, wsa_dev_cnt);
+		return -EINVAL;
+	}
+
+	/*
+	 * Expect total phandles count to be NOT less than maximum possible
+	 * WSA count. However, if it is less, then assign same value to
+	 * max count as well.
+	 */
+
+	if (wsa_dev_cnt < wsa_max_devs) {
+		dev_dbg(&pdev->dev,
+			"%s: wsa_max_devs = %d cannot exceed wsa_dev_cnt = %d\n",
+			__func__, wsa_max_devs, wsa_dev_cnt);
+		wsa_max_devs = wsa_dev_cnt;
+	}
+
+	/* Make sure prefix string passed for each WSA device */
+	ret = of_property_count_strings(pdev->dev.of_node,
+			"qcom,wsa-aux-dev-prefix");
+	if (ret != wsa_dev_cnt) {
+		dev_err(&pdev->dev,
+				"%s: expecting %d wsa prefix. Defined only %d in DT\n",
+				__func__, wsa_dev_cnt, ret);
+		return -EINVAL;
+	}
+
+	/*
+	 * Alloc mem to store phandle and index info of WSA device, if already
+	 * registered with ALSA core
+	 */
+	wsa881x_dev_info = devm_kcalloc(&pdev->dev, wsa_max_devs,
+			sizeof(struct msm895x_wsa881x_dev_info),
+			GFP_KERNEL);
+	if (!wsa881x_dev_info)
+		return -ENOMEM;
+
+	/*
+	 * search and check whether all WSA devices are already
+	 * registered with ALSA core or not. If found a node, store
+	 * the node and the index in a local array of struct for later
+	 * use.
+	 */
+	for (i = 0; i < wsa_dev_cnt; i++) {
+		wsa_of_node = of_parse_phandle(pdev->dev.of_node,
+				"qcom,wsa-devs", i);
+		if (unlikely(!wsa_of_node)) {
+			/* we should not be here */
+			dev_err(&pdev->dev,
+					"%s: wsa dev node is not present\n",
+					__func__);
+			return -EINVAL;
+		}
+		if (soc_find_component(wsa_of_node, NULL)) {
+			/* WSA device registered with ALSA core */
+			wsa881x_dev_info[found].of_node = wsa_of_node;
+			wsa881x_dev_info[found].index = i;
+			found++;
+			if (found == wsa_max_devs)
+				break;
+		}
+	}
+
+	if (found < wsa_max_devs) {
+		dev_dbg(&pdev->dev,
+				"%s: failed to find %d components. Found only %d\n",
+				__func__, wsa_max_devs, found);
+		return -EPROBE_DEFER;
+	}
+	dev_info(&pdev->dev,
+			"%s: found %d wsa881x devices registered with ALSA core\n",
+			__func__, found);
+
+	card->num_aux_devs = wsa_max_devs;
+	card->num_configs = wsa_max_devs;
+
+	/* Alloc array of AUX devs struct */
+	msm895x_aux_dev = devm_kcalloc(&pdev->dev, card->num_aux_devs,
+			sizeof(struct snd_soc_aux_dev),
+			GFP_KERNEL);
+	if (!msm895x_aux_dev)
+		return -ENOMEM;
+
+	/* Alloc array of codec conf struct */
+	msm895x_codec_conf = devm_kcalloc(&pdev->dev, card->num_aux_devs,
+			sizeof(struct snd_soc_codec_conf),
+			GFP_KERNEL);
+	if (!msm895x_codec_conf)
+		return -ENOMEM;
+
+	for (i = 0; i < card->num_aux_devs; i++) {
+		dev_name_str = devm_kzalloc(&pdev->dev, DEV_NAME_STR_LEN,
+				GFP_KERNEL);
+		if (!dev_name_str)
+			return -ENOMEM;
+
+		ret = of_property_read_string_index(pdev->dev.of_node,
+				"qcom,wsa-aux-dev-prefix",
+				wsa881x_dev_info[i].index,
+				wsa_auxdev_name_prefix);
+		if (ret) {
+			dev_err(&pdev->dev,
+					"%s: failed to read wsa aux dev prefix, ret = %d\n",
+					__func__, ret);
+			return -EINVAL;
+		}
+
+		snprintf(dev_name_str, strlen("wsa881x.%d"), "wsa881x.%d", i);
+		msm895x_aux_dev[i].name = dev_name_str;
+		msm895x_aux_dev[i].codec_name = NULL;
+		msm895x_aux_dev[i].codec_of_node =
+			wsa881x_dev_info[i].of_node;
+		msm895x_aux_dev[i].init = msm895x_wsa881x_init;
+		msm895x_codec_conf[i].dev_name = NULL;
+		msm895x_codec_conf[i].name_prefix = wsa_auxdev_name_prefix[0];
+		msm895x_codec_conf[i].of_node =
+			wsa881x_dev_info[i].of_node;
+	}
+	card->codec_conf = msm895x_codec_conf;
+	card->aux_dev = msm895x_aux_dev;
+
+	return 0;
+}
 
 struct snd_soc_card *populate_snd_card_dailinks(struct device *dev)
 {
 	struct snd_soc_card *card = &snd_soc_card_msm_card;
 	struct snd_soc_dai_link *msm8952_dai_links = NULL;
-	int num_links, ret, len1, len2, len3, i;
-	const char *wsa = "asoc-wsa-codec-names";
-	const char *wsa_prefix = "asoc-wsa-codec-prefixes";
-	int num_strings;
-	char *temp_str = NULL;
-	const char *wsa_str = NULL;
-	const char *wsa_prefix_str = NULL;
+	int num_links, ret, len1, len2, len3, len4 = 0;
+	enum codec_variant codec_ver = 0;
+	const char *tasha_lite[NUM_OF_TASHA_LITE_DEVICE] = {
+		"msm8952-tashalite-snd-card",
+		"msm8953-tashalite-snd-card"
+	};
 
 	card->dev = dev;
 	ret = snd_soc_of_parse_card_name(card, "qcom,model");
@@ -1305,8 +1550,14 @@ struct snd_soc_card *populate_snd_card_dailinks(struct device *dev)
 		memcpy(msm8952_tomtom_dai_links + len3,
 			msm8952_tomtom_be_dai, sizeof(msm8952_tomtom_be_dai));
 		msm8952_dai_links = msm8952_tomtom_dai_links;
-	} else if (!strcmp(card->name, "msm8976-tasha-snd-card") ||
-			!strcmp(card->name, "msm8976-tasha-skun-snd-card")) {
+	} else if (strnstr(card->name, "tasha", strlen(card->name))) {
+		codec_ver = tasha_codec_ver();
+		if (codec_ver == WCD9326) {
+			if (!strcmp(card->name, "msm8952-tasha-snd-card"))
+				card->name = tasha_lite[MSM8952_TASHA_LITE];
+			else if (!strcmp(card->name, "msm8953-tasha-snd-card"))
+				card->name = tasha_lite[MSM8953_TASHA_LITE];
+		}
 
 		len1 = ARRAY_SIZE(msm8952_common_fe_dai);
 		len2 = len1 + ARRAY_SIZE(msm8952_tasha_fe_dai);
@@ -1323,70 +1574,26 @@ struct snd_soc_card *populate_snd_card_dailinks(struct device *dev)
 		memcpy(msm8952_tasha_dai_links + len3,
 			msm8952_tasha_be_dai, sizeof(msm8952_tasha_be_dai));
 		msm8952_dai_links = msm8952_tasha_dai_links;
-
-		num_strings = of_property_count_strings(dev->of_node,
-				wsa);
-		card->aux_dev = msm895x_aux_dev;
-		card->num_aux_devs	= num_strings;
-		card->codec_conf	= msm895x_codec_conf;
-		card->num_configs	= num_strings;
-
-		for (i = 0; i < num_strings; i++) {
-			ret = of_property_read_string_index(
-					dev->of_node, wsa,
-					i, &wsa_str);
-			if (ret) {
-				dev_err(dev,
-					"%s:of read string %s i %d error %d\n",
-					__func__, wsa, i, ret);
-				goto err;
-			}
-
-			temp_str = kstrdup(wsa_str, GFP_KERNEL);
-			if (!temp_str)
-				goto err;
-			msm895x_aux_dev[i].codec_name = temp_str;
-			temp_str = NULL;
-
-			temp_str = kstrdup(wsa_str, GFP_KERNEL);
-			if (!temp_str)
-				goto err;
-			msm895x_codec_conf[i].dev_name = temp_str;
-			temp_str = NULL;
-
-			ret = of_property_read_string_index(
-					dev->of_node, wsa_prefix,
-					i, &wsa_prefix_str);
-			if (ret) {
-				dev_err(dev,
-					"%s:of read string %s i %d error %d\n",
-					__func__, wsa_prefix, i, ret);
-				goto err;
-			}
-
-			temp_str = kstrdup(wsa_prefix_str, GFP_KERNEL);
-			if (!temp_str)
-				goto err;
-			msm895x_codec_conf[i].name_prefix = temp_str;
-
-			temp_str = NULL;
-		}
+		len4 = len3 + ARRAY_SIZE(msm8952_tasha_be_dai);
 	}
-
+	if (of_property_read_bool(dev->of_node, "qcom,hdmi-dba-codec-rx")) {
+		dev_dbg(dev, "%s(): hdmi dba audio support present\n",
+				__func__);
+		memcpy(msm8952_dai_links + len4, msm8952_hdmi_dba_dai_link,
+			sizeof(msm8952_hdmi_dba_dai_link));
+		len4 += ARRAY_SIZE(msm8952_hdmi_dba_dai_link);
+	} else {
+		dev_dbg(dev, "%s(): No hdmi dba present, add quin dai\n",
+				__func__);
+		memcpy(msm8952_dai_links + len4, msm8952_quin_dai_link,
+			sizeof(msm8952_quin_dai_link));
+		len4 += ARRAY_SIZE(msm8952_quin_dai_link);
+	}
 	card->dai_link = msm8952_dai_links;
-	card->num_links = num_links;
+	card->num_links = len4;
 	card->dev = dev;
 
 	return card;
-err:
-	if (card->num_aux_devs > 0) {
-		for (i = 0; i < card->num_aux_devs; i++) {
-			kfree(msm895x_aux_dev[i].codec_name);
-			kfree(msm895x_codec_conf[i].dev_name);
-			kfree(msm895x_codec_conf[i].name_prefix);
-		}
-	}
-	return NULL;
 }
 
 void msm895x_free_auxdev_mem(struct platform_device *pdev)

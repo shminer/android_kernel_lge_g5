@@ -1,4 +1,4 @@
-/* Copyright (c) 2014-2015, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2014-2016, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -25,8 +25,8 @@
 
 /* CONSTANTS */
 #define HDMI_BIT_CLK_TO_PIX_CLK_RATIO            10
-#define HDMI_HIGH_FREQ_BIT_CLK_THRESHOLD         3400000000
-#define HDMI_DIG_FREQ_BIT_CLK_THRESHOLD          1500000000
+#define HDMI_HIGH_FREQ_BIT_CLK_THRESHOLD         3400000000UL
+#define HDMI_DIG_FREQ_BIT_CLK_THRESHOLD          1500000000UL
 #define HDMI_MID_FREQ_BIT_CLK_THRESHOLD          750000000
 #define HDMI_CLKS_PLL_DIVSEL                     0
 #define HDMI_CORECLK_DIV                         5
@@ -35,16 +35,17 @@
 #define HDMI_VERSION_8996_V1                     1
 #define HDMI_VERSION_8996_V2                     2
 #define HDMI_VERSION_8996_V3                     3
+#define HDMI_VERSION_8996_V3_1_8                 4
 
 #define HDMI_VCO_MAX_FREQ                        12000000000
 #define HDMI_VCO_MIN_FREQ                        8000000000
-#define HDMI_2400MHZ_BIT_CLK_HZ                  2400000000
-#define HDMI_2250MHZ_BIT_CLK_HZ                  2250000000
-#define HDMI_2000MHZ_BIT_CLK_HZ                  2000000000
-#define HDMI_1700MHZ_BIT_CLK_HZ                  1700000000
-#define HDMI_1200MHZ_BIT_CLK_HZ                  1200000000
-#define HDMI_1334MHZ_BIT_CLK_HZ                  1334000000
-#define HDMI_1000MHZ_BIT_CLK_HZ                  1000000000
+#define HDMI_2400MHZ_BIT_CLK_HZ                  2400000000UL
+#define HDMI_2250MHZ_BIT_CLK_HZ                  2250000000UL
+#define HDMI_2000MHZ_BIT_CLK_HZ                  2000000000UL
+#define HDMI_1700MHZ_BIT_CLK_HZ                  1700000000UL
+#define HDMI_1200MHZ_BIT_CLK_HZ                  1200000000UL
+#define HDMI_1334MHZ_BIT_CLK_HZ                  1334000000UL
+#define HDMI_1000MHZ_BIT_CLK_HZ                  1000000000UL
 #define HDMI_850MHZ_BIT_CLK_HZ                   850000000
 #define HDMI_667MHZ_BIT_CLK_HZ                   667000000
 #define HDMI_600MHZ_BIT_CLK_HZ                   600000000
@@ -54,6 +55,7 @@
 #define HDMI_300MHZ_BIT_CLK_HZ                   300000000
 #define HDMI_282MHZ_BIT_CLK_HZ                   282000000
 #define HDMI_250MHZ_BIT_CLK_HZ                   250000000
+#define HDMI_KHZ_TO_HZ                           1000
 
 /* PLL REGISTERS */
 #define QSERDES_COM_ATB_SEL1                     (0x000)
@@ -317,8 +319,8 @@
 #define HDMI_PHY_PHY_REVISION_ID2             (0xC0)
 #define HDMI_PHY_PHY_REVISION_ID3             (0xC4)
 
-#define HDMI_PLL_POLL_MAX_READS                2500
-#define HDMI_PLL_POLL_TIMEOUT_US               150000
+#define HDMI_PLL_POLL_MAX_READS                100
+#define HDMI_PLL_POLL_TIMEOUT_US               1500
 
 enum hdmi_pll_freqs {
 	HDMI_PCLK_25200_KHZ,
@@ -489,13 +491,13 @@ static inline u64 hdmi_8996_get_coreclk_div_ratio(u64 clks_pll_divsel,
 
 static inline u64 hdmi_8996_v1_get_tx_band(u64 bclk)
 {
-	if (bclk >= 2400000000)
+	if (bclk >= 2400000000UL)
 		return 0;
-	if (bclk >= 1200000000)
+	if (bclk >= 1200000000UL)
 		return 1;
-	if (bclk >= 600000000)
+	if (bclk >= 600000000UL)
 		return 2;
-	if (bclk >= 300000000)
+	if (bclk >= 300000000UL)
 		return 3;
 
 	return HDMI_64B_ERR_VAL;
@@ -517,13 +519,13 @@ static inline u64 hdmi_8996_v2_get_tx_band(u64 bclk, u64 vco_range)
 
 static inline u64 hdmi_8996_v1_get_hsclk(u64 fdata)
 {
-	if (fdata >= 9600000000)
+	if (fdata >= 9600000000UL)
 		return 0;
-	else if (fdata >= 4800000000)
+	else if (fdata >= 4800000000UL)
 		return 1;
-	else if (fdata >= 3200000000)
+	else if (fdata >= 3200000000UL)
 		return 2;
-	else if (fdata >= 2400000000)
+	else if (fdata >= 2400000000UL)
 		return 3;
 
 	return HDMI_64B_ERR_VAL;
@@ -1412,7 +1414,7 @@ static int hdmi_8996_v3_calculate(u32 pix_clk,
 	cfg->com_lock_cmp1_mode0 = (pll_cmp & 0xFF);
 	cfg->com_lock_cmp2_mode0 = ((pll_cmp & 0xFF00) >> 8);
 	cfg->com_lock_cmp3_mode0 = ((pll_cmp & 0x30000) >> 16);
-	cfg->com_lock_cmp_en = 0x0;
+	cfg->com_lock_cmp_en = 0x04;
 	cfg->com_core_clk_en = 0x2C;
 	cfg->com_coreclk_div = HDMI_CORECLK_DIV;
 	cfg->phy_mode = (bclk > HDMI_HIGH_FREQ_BIT_CLK_THRESHOLD) ? 0x10 : 0x0;
@@ -1544,6 +1546,7 @@ static int hdmi_8996_calculate(u32 pix_clk,
 {
 	switch (ver) {
 	case HDMI_VERSION_8996_V3:
+	case HDMI_VERSION_8996_V3_1_8:
 		return hdmi_8996_v3_calculate(pix_clk, cfg);
 	case HDMI_VERSION_8996_V2:
 		return hdmi_8996_v2_calculate(pix_clk, cfg);
@@ -1574,6 +1577,7 @@ static int hdmi_8996_phy_pll_set_clk_rate(struct clk *c, u32 tmds_clk, u32 ver)
 	switch (ver) {
 	case HDMI_VERSION_8996_V2:
 	case HDMI_VERSION_8996_V3:
+	case HDMI_VERSION_8996_V3_1_8:
 		MDSS_PLL_REG_W(io->pll_base, QSERDES_COM_BG_CTRL, 0x04);
 		break;
 	};
@@ -1680,34 +1684,58 @@ static int hdmi_8996_phy_pll_set_clk_rate(struct clk *c, u32 tmds_clk, u32 ver)
 		       cfg.com_coreclk_div);
 	MDSS_PLL_REG_W(io->pll_base, QSERDES_COM_CMN_CONFIG, 0x02);
 
-	if (ver == HDMI_VERSION_8996_V3)
+	if (ver == HDMI_VERSION_8996_V3 || ver == HDMI_VERSION_8996_V3_1_8)
 		MDSS_PLL_REG_W(io->pll_base, QSERDES_COM_RESCODE_DIV_NUM, 0x15);
 
 	/* TX lanes setup (TX 0/1/2/3) */
-	MDSS_PLL_REG_W(io->pll_base + HDMI_TX_L0_BASE_OFFSET,
-		       QSERDES_TX_L0_TX_DRV_LVL,
-		       cfg.tx_l0_tx_drv_lvl);
+	if (ver == HDMI_VERSION_8996_V3_1_8) {
+		MDSS_PLL_REG_W(io->pll_base + HDMI_TX_L0_BASE_OFFSET,
+				QSERDES_TX_L0_TX_DRV_LVL,
+				0x00000023);
+	} else {
+		MDSS_PLL_REG_W(io->pll_base + HDMI_TX_L0_BASE_OFFSET,
+				QSERDES_TX_L0_TX_DRV_LVL,
+				cfg.tx_l0_tx_drv_lvl);
+	}
 	MDSS_PLL_REG_W(io->pll_base + HDMI_TX_L0_BASE_OFFSET,
 		       QSERDES_TX_L0_TX_EMP_POST1_LVL,
 		       cfg.tx_l0_tx_emp_post1_lvl);
 
-	MDSS_PLL_REG_W(io->pll_base + HDMI_TX_L1_BASE_OFFSET,
-		       QSERDES_TX_L0_TX_DRV_LVL,
-		       cfg.tx_l1_tx_drv_lvl);
+	if (ver == HDMI_VERSION_8996_V3_1_8) {
+		MDSS_PLL_REG_W(io->pll_base + HDMI_TX_L1_BASE_OFFSET,
+				QSERDES_TX_L0_TX_DRV_LVL,
+				0x00000023);
+	} else {
+		MDSS_PLL_REG_W(io->pll_base + HDMI_TX_L1_BASE_OFFSET,
+				QSERDES_TX_L0_TX_DRV_LVL,
+				cfg.tx_l1_tx_drv_lvl);
+	}
 	MDSS_PLL_REG_W(io->pll_base + HDMI_TX_L1_BASE_OFFSET,
 		       QSERDES_TX_L0_TX_EMP_POST1_LVL,
 		       cfg.tx_l1_tx_emp_post1_lvl);
 
-	MDSS_PLL_REG_W(io->pll_base + HDMI_TX_L2_BASE_OFFSET,
-		       QSERDES_TX_L0_TX_DRV_LVL,
-		       cfg.tx_l2_tx_drv_lvl);
+	if (ver == HDMI_VERSION_8996_V3_1_8) {
+		MDSS_PLL_REG_W(io->pll_base + HDMI_TX_L2_BASE_OFFSET,
+				QSERDES_TX_L0_TX_DRV_LVL,
+				0x00000023);
+	} else {
+		MDSS_PLL_REG_W(io->pll_base + HDMI_TX_L2_BASE_OFFSET,
+				QSERDES_TX_L0_TX_DRV_LVL,
+				cfg.tx_l2_tx_drv_lvl);
+	}
 	MDSS_PLL_REG_W(io->pll_base + HDMI_TX_L2_BASE_OFFSET,
 		       QSERDES_TX_L0_TX_EMP_POST1_LVL,
 		       cfg.tx_l2_tx_emp_post1_lvl);
 
-	MDSS_PLL_REG_W(io->pll_base + HDMI_TX_L3_BASE_OFFSET,
-		       QSERDES_TX_L0_TX_DRV_LVL,
-		       cfg.tx_l3_tx_drv_lvl);
+	if (ver == HDMI_VERSION_8996_V3_1_8) {
+		MDSS_PLL_REG_W(io->pll_base + HDMI_TX_L3_BASE_OFFSET,
+				QSERDES_TX_L0_TX_DRV_LVL,
+				0x00000020);
+	} else {
+		MDSS_PLL_REG_W(io->pll_base + HDMI_TX_L3_BASE_OFFSET,
+				QSERDES_TX_L0_TX_DRV_LVL,
+				cfg.tx_l3_tx_drv_lvl);
+	}
 	MDSS_PLL_REG_W(io->pll_base + HDMI_TX_L3_BASE_OFFSET,
 		       QSERDES_TX_L0_TX_EMP_POST1_LVL,
 		       cfg.tx_l3_tx_emp_post1_lvl);
@@ -1730,15 +1758,21 @@ static int hdmi_8996_phy_pll_set_clk_rate(struct clk *c, u32 tmds_clk, u32 ver)
 		       QSERDES_TX_L0_VMODE_CTRL1,
 		       cfg.tx_l2_vmode_ctrl1);
 	MDSS_PLL_REG_W(io->pll_base + HDMI_TX_L2_BASE_OFFSET,
-		       QSERDES_TX_L0_VMODE_CTRL2,
-		       cfg.tx_l2_vmode_ctrl2);
+			QSERDES_TX_L0_VMODE_CTRL2,
+			cfg.tx_l2_vmode_ctrl2);
 
 	MDSS_PLL_REG_W(io->pll_base + HDMI_TX_L3_BASE_OFFSET,
 		       QSERDES_TX_L0_VMODE_CTRL1,
 		       cfg.tx_l3_vmode_ctrl1);
-	MDSS_PLL_REG_W(io->pll_base + HDMI_TX_L3_BASE_OFFSET,
-		       QSERDES_TX_L0_VMODE_CTRL2,
-		       cfg.tx_l3_vmode_ctrl2);
+	if (ver == HDMI_VERSION_8996_V3_1_8) {
+		MDSS_PLL_REG_W(io->pll_base + HDMI_TX_L3_BASE_OFFSET,
+				QSERDES_TX_L0_VMODE_CTRL2,
+				0x0000000D);
+	} else {
+		MDSS_PLL_REG_W(io->pll_base + HDMI_TX_L3_BASE_OFFSET,
+				QSERDES_TX_L0_VMODE_CTRL2,
+				cfg.tx_l3_vmode_ctrl2);
+	}
 
 	MDSS_PLL_REG_W(io->pll_base + HDMI_TX_L0_BASE_OFFSET,
 		       QSERDES_TX_L0_TX_DRV_LVL_OFFSET, 0x00);
@@ -1822,9 +1856,10 @@ static int hdmi_8996_phy_pll_set_clk_rate(struct clk *c, u32 tmds_clk, u32 ver)
 
 static int hdmi_8996_phy_ready_status(struct mdss_pll_resources *io)
 {
-	u32 status;
+	u32 status = 0;
 	int phy_ready = 0;
 	int rc;
+	u32 read_count = 0;
 
 	rc = mdss_pll_resource_enable(io, true);
 	if (rc) {
@@ -1835,16 +1870,20 @@ static int hdmi_8996_phy_ready_status(struct mdss_pll_resources *io)
 	DEV_DBG("%s: Waiting for PHY Ready\n", __func__);
 
 	/* Poll for PHY read status */
-	if (!readl_poll_timeout_atomic(
-		(io->phy_base + HDMI_PHY_STATUS),
-		status, ((status & BIT(0)) == 1),
-		HDMI_PLL_POLL_MAX_READS,
-		HDMI_PLL_POLL_TIMEOUT_US)) {
-		DEV_DBG("%s: PHY READY\n", __func__);
-		phy_ready = 1;
-	} else {
-		DEV_ERR("%s: PHY READY TIMEOUT\n", __func__);
+	while (read_count < HDMI_PLL_POLL_MAX_READS) {
+		status = MDSS_PLL_REG_R(io->phy_base, HDMI_PHY_STATUS);
+		if ((status & BIT(0)) == 1) {
+			phy_ready = 1;
+			DEV_DBG("%s: PHY READY\n", __func__);
+			break;
+		}
+		udelay(HDMI_PLL_POLL_TIMEOUT_US);
+		read_count++;
+	}
+
+	if (read_count == HDMI_PLL_POLL_MAX_READS) {
 		phy_ready = 0;
+		DEV_DBG("%s: PHY READY TIMEOUT\n", __func__);
 	}
 
 	mdss_pll_resource_enable(io, false);
@@ -1857,6 +1896,7 @@ static int hdmi_8996_pll_lock_status(struct mdss_pll_resources *io)
 	u32 status;
 	int pll_locked = 0;
 	int rc;
+	u32 read_count = 0;
 
 	rc = mdss_pll_resource_enable(io, true);
 	if (rc) {
@@ -1866,16 +1906,21 @@ static int hdmi_8996_pll_lock_status(struct mdss_pll_resources *io)
 
 	DEV_DBG("%s: Waiting for PLL lock\n", __func__);
 
-	if (!readl_poll_timeout_atomic(
-		(io->pll_base + QSERDES_COM_C_READY_STATUS),
-		status, ((status & BIT(0)) == 1),
-		HDMI_PLL_POLL_MAX_READS,
-		HDMI_PLL_POLL_TIMEOUT_US)) {
-		DEV_DBG("%s: C READY\n", __func__);
-		pll_locked = 1;
-	} else {
-		DEV_ERR("%s: C READY TIMEOUT\n", __func__);
+	while (read_count < HDMI_PLL_POLL_MAX_READS) {
+		status = MDSS_PLL_REG_R(io->pll_base,
+				QSERDES_COM_C_READY_STATUS);
+		if ((status & BIT(0)) == 1) {
+			pll_locked = 1;
+			DEV_DBG("%s: C READY\n", __func__);
+			break;
+		}
+		udelay(HDMI_PLL_POLL_TIMEOUT_US);
+		read_count++;
+	}
+
+	if (read_count == HDMI_PLL_POLL_MAX_READS) {
 		pll_locked = 0;
+		DEV_DBG("%s: C READY TIMEOUT\n", __func__);
 	}
 
 	mdss_pll_resource_enable(io, false);
@@ -2029,20 +2074,25 @@ static int hdmi_8996_v2_perform_sw_calibration(struct clk *c)
 	struct hdmi_pll_vco_clk *vco = to_hdmi_8996_vco_clk(c);
 	struct mdss_pll_resources *io = vco->priv;
 	u32 vco_code1, vco_code2, integral_loop, ready_poll;
+	u32 read_count = 0;
 
-	if (!readl_poll_timeout_atomic(
-		(io->pll_base + QSERDES_COM_C_READY_STATUS),
-		ready_poll, ((ready_poll & BIT(0)) == 1),
-		HDMI_PLL_POLL_MAX_READS,
-		HDMI_PLL_POLL_TIMEOUT_US << 1)) {
-		DEV_DBG("%s: C READY\n", __func__);
-		ready_poll = 1;
-	} else {
-		DEV_DBG("%s: C READY TIMEOUT, TRYING SW CALIBRATION\n",
-								__func__);
-		ready_poll = 0;
+	while (read_count < (HDMI_PLL_POLL_MAX_READS << 1)) {
+		ready_poll = MDSS_PLL_REG_R(io->pll_base,
+				QSERDES_COM_C_READY_STATUS);
+		if ((ready_poll & BIT(0)) == 1) {
+			ready_poll = 1;
+			DEV_DBG("%s: C READY\n", __func__);
+			break;
+		}
+		udelay(HDMI_PLL_POLL_TIMEOUT_US);
+		read_count++;
 	}
 
+	if (read_count == (HDMI_PLL_POLL_MAX_READS << 1)) {
+		ready_poll = 0;
+		DEV_DBG("%s: C READY TIMEOUT, TRYING SW CALIBRATION\n",
+								__func__);
+	}
 
 	vco_code1 = MDSS_PLL_REG_R(io->pll_base,
 				QSERDES_COM_PLLCAL_CODE1_STATUS);
@@ -2153,14 +2203,87 @@ static int hdmi_8996_v3_vco_enable(struct clk *c)
 	return hdmi_8996_vco_enable(c, HDMI_VERSION_8996_V3);
 }
 
+static int hdmi_8996_v3_1p8_vco_enable(struct clk *c)
+{
+	return hdmi_8996_vco_enable(c, HDMI_VERSION_8996_V3_1_8);
+}
+
+static int hdmi_8996_vco_get_lock_range(struct clk *c, unsigned long pixel_clk)
+{
+	u32 rng = 64, cmp_cnt = 1024;
+	u32 coreclk_div = 5, clks_pll_divsel = 2;
+	u32 vco_freq, vco_ratio, ppm_range;
+	u64 bclk;
+	struct hdmi_8996_v3_post_divider pd;
+
+	bclk = ((u64)pixel_clk) * HDMI_BIT_CLK_TO_PIX_CLK_RATIO;
+
+	DEV_DBG("%s: rate=%ld\n", __func__, pixel_clk);
+
+	if (hdmi_8996_v3_get_post_div(&pd, bclk) ||
+		pd.vco_ratio <= 0 || pd.vco_freq <= 0) {
+		DEV_ERR("%s: couldn't get post div\n", __func__);
+		return -EINVAL;
+	}
+
+	do_div(pd.vco_freq, HDMI_KHZ_TO_HZ * HDMI_KHZ_TO_HZ);
+
+	vco_freq  = (u32) pd.vco_freq;
+	vco_ratio = (u32) pd.vco_ratio;
+
+	DEV_DBG("%s: freq %d, ratio %d\n", __func__,
+		vco_freq, vco_ratio);
+
+	ppm_range = (rng * HDMI_REF_CLOCK) / cmp_cnt;
+	ppm_range /= vco_freq / vco_ratio;
+	ppm_range *= coreclk_div * clks_pll_divsel;
+
+	DEV_DBG("%s: ppm range: %d\n", __func__, ppm_range);
+
+	return ppm_range;
+}
+
+static int hdmi_8996_vco_rate_atomic_update(struct clk *c,
+	unsigned long rate, u32 ver)
+{
+	struct hdmi_pll_vco_clk *vco = to_hdmi_8996_vco_clk(c);
+	struct mdss_pll_resources *io = vco->priv;
+	void __iomem *pll;
+	struct hdmi_8996_phy_pll_reg_cfg cfg = {0};
+	int rc = 0;
+
+	rc = hdmi_8996_calculate(rate, &cfg, ver);
+	if (rc) {
+		DEV_ERR("%s: PLL calculation failed\n", __func__);
+		goto end;
+	}
+
+	pll = io->pll_base;
+
+	MDSS_PLL_REG_W(pll, QSERDES_COM_DEC_START_MODE0,
+		       cfg.com_dec_start_mode0);
+	MDSS_PLL_REG_W(pll, QSERDES_COM_DIV_FRAC_START1_MODE0,
+		       cfg.com_div_frac_start1_mode0);
+	MDSS_PLL_REG_W(pll, QSERDES_COM_DIV_FRAC_START2_MODE0,
+		       cfg.com_div_frac_start2_mode0);
+	MDSS_PLL_REG_W(pll, QSERDES_COM_DIV_FRAC_START3_MODE0,
+		       cfg.com_div_frac_start3_mode0);
+
+	MDSS_PLL_REG_W(pll, QSERDES_COM_FREQ_UPDATE, 0x01);
+	MDSS_PLL_REG_W(pll, QSERDES_COM_FREQ_UPDATE, 0x00);
+
+	DEV_DBG("%s: updated to rate %ld\n", __func__, rate);
+end:
+	return rc;
+}
+
 static int hdmi_8996_vco_set_rate(struct clk *c, unsigned long rate, u32 ver)
 {
 	struct hdmi_pll_vco_clk *vco = to_hdmi_8996_vco_clk(c);
 	struct mdss_pll_resources *io = vco->priv;
-	void __iomem		*pll_base;
-	void __iomem		*phy_base;
 	unsigned int set_power_dwn = 0;
-	int rc;
+	bool atomic_update = false;
+	int rc, pll_lock_range;
 
 	rc = mdss_pll_resource_enable(io, true);
 	if (rc) {
@@ -2168,17 +2291,36 @@ static int hdmi_8996_vco_set_rate(struct clk *c, unsigned long rate, u32 ver)
 		return rc;
 	}
 
-	if (io->pll_on)
+	DEV_DBG("%s: rate %ld\n", __func__, rate);
+
+	if (MDSS_PLL_REG_R(io->pll_base, QSERDES_COM_C_READY_STATUS) & BIT(0) &&
+		MDSS_PLL_REG_R(io->phy_base, HDMI_PHY_STATUS) & BIT(0)) {
+		pll_lock_range = hdmi_8996_vco_get_lock_range(c, vco->rate);
+
+		if (pll_lock_range > 0 && vco->rate) {
+			u32 range_limit;
+
+			range_limit  = vco->rate *
+				(pll_lock_range / HDMI_KHZ_TO_HZ);
+			range_limit /= HDMI_KHZ_TO_HZ;
+
+			DEV_DBG("%s: range limit %d\n", __func__, range_limit);
+
+			if (abs(rate - vco->rate) < range_limit)
+				atomic_update = true;
+		}
+	}
+
+	if (io->pll_on && !atomic_update)
 		set_power_dwn = 1;
 
-	pll_base = io->pll_base;
-	phy_base = io->phy_base;
-
-	DEV_DBG("HDMI PIXEL CLK rate=%ld\n", rate);
-
-	rc = hdmi_8996_phy_pll_set_clk_rate(c, rate, ver);
-	if (rc)
-		DEV_ERR("%s: Failed to set clk rate\n", __func__);
+	if (atomic_update) {
+		hdmi_8996_vco_rate_atomic_update(c, rate, ver);
+	} else {
+		rc = hdmi_8996_phy_pll_set_clk_rate(c, rate, ver);
+		if (rc)
+			DEV_ERR("%s: Failed to set clk rate\n", __func__);
+	}
 
 	mdss_pll_resource_enable(io, false);
 
@@ -2206,9 +2348,107 @@ static int hdmi_8996_v3_vco_set_rate(struct clk *c, unsigned long rate)
 	return hdmi_8996_vco_set_rate(c, rate, HDMI_VERSION_8996_V3);
 }
 
+static int hdmi_8996_v3_1p8_vco_set_rate(struct clk *c, unsigned long rate)
+{
+	return hdmi_8996_vco_set_rate(c, rate, HDMI_VERSION_8996_V3_1_8);
+}
+
+static unsigned long hdmi_get_hsclk_sel_divisor(unsigned long hsclk_sel)
+{
+	unsigned long divisor;
+
+	switch (hsclk_sel) {
+	case 0:
+		divisor = 2;
+		break;
+	case 1:
+		divisor = 6;
+		break;
+	case 2:
+		divisor = 10;
+		break;
+	case 3:
+		divisor = 14;
+		break;
+	case 4:
+		divisor = 3;
+		break;
+	case 5:
+		divisor = 9;
+		break;
+	case 6:
+	case 13:
+		divisor = 15;
+		break;
+	case 7:
+		divisor = 21;
+		break;
+	case 8:
+		divisor = 4;
+		break;
+	case 9:
+		divisor = 12;
+		break;
+	case 10:
+		divisor = 20;
+		break;
+	case 11:
+		divisor = 28;
+		break;
+	case 12:
+		divisor = 5;
+		break;
+	case 14:
+		divisor = 25;
+		break;
+	case 15:
+		divisor = 35;
+		break;
+	default:
+		divisor = 1;
+		DEV_ERR("%s: invalid hsclk_sel value = %lu",
+				__func__, hsclk_sel);
+		break;
+	}
+
+	return divisor;
+}
+
 static unsigned long hdmi_8996_vco_get_rate(struct clk *c)
 {
-	unsigned long freq = 0;
+	unsigned long freq = 0, hsclk_sel = 0, tx_band = 0, dec_start = 0,
+		      div_frac_start = 0, vco_clock_freq = 0;
+	struct hdmi_pll_vco_clk *vco = to_hdmi_8996_vco_clk(c);
+	struct mdss_pll_resources *io = vco->priv;
+
+	if (mdss_pll_resource_enable(io, true)) {
+		DEV_ERR("%s: pll resource can't be enabled\n", __func__);
+		return freq;
+	}
+
+	dec_start = MDSS_PLL_REG_R(io->pll_base, QSERDES_COM_DEC_START_MODE0);
+
+	div_frac_start =
+		MDSS_PLL_REG_R(io->pll_base,
+				QSERDES_COM_DIV_FRAC_START1_MODE0) |
+		MDSS_PLL_REG_R(io->pll_base,
+				QSERDES_COM_DIV_FRAC_START2_MODE0) << 8 |
+		MDSS_PLL_REG_R(io->pll_base,
+				QSERDES_COM_DIV_FRAC_START3_MODE0) << 16;
+
+	vco_clock_freq = (dec_start + (div_frac_start / (1 << 20)))
+		* 4 * (HDMI_REF_CLOCK);
+
+	hsclk_sel = MDSS_PLL_REG_R(io->pll_base, QSERDES_COM_HSCLK_SEL) & 0x15;
+	hsclk_sel = hdmi_get_hsclk_sel_divisor(hsclk_sel);
+	tx_band = MDSS_PLL_REG_R(io->pll_base + HDMI_TX_L0_BASE_OFFSET,
+			QSERDES_TX_L0_TX_BAND) & 0x3;
+
+	freq = vco_clock_freq / (10 * hsclk_sel * (1 << tx_band));
+
+	mdss_pll_resource_enable(io, false);
+
+	DEV_DBG("%s: freq = %lu\n", __func__, freq);
 
 	return freq;
 }
@@ -2257,6 +2497,11 @@ static int hdmi_8996_v3_vco_prepare(struct clk *c)
 	return hdmi_8996_vco_prepare(c, HDMI_VERSION_8996_V3);
 }
 
+static int hdmi_8996_v3_1p8_vco_prepare(struct clk *c)
+{
+	return hdmi_8996_vco_prepare(c, HDMI_VERSION_8996_V3_1_8);
+}
+
 static void hdmi_8996_vco_unprepare(struct clk *c)
 {
 	struct hdmi_pll_vco_clk *vco = to_hdmi_8996_vco_clk(c);
@@ -2296,10 +2541,11 @@ static enum handoff hdmi_8996_vco_handoff(struct clk *c)
 
 	io->handoff_resources = true;
 
-	if (hdmi_8996_pll_lock_status(io)) {
-		if (hdmi_8996_phy_ready_status(io)) {
+	if (MDSS_PLL_REG_R(io->pll_base, QSERDES_COM_C_READY_STATUS) & BIT(0)) {
+		if (MDSS_PLL_REG_R(io->phy_base, HDMI_PHY_STATUS) & BIT(0)) {
 			io->pll_on = true;
 			c->rate = hdmi_8996_vco_get_rate(c);
+			vco->rate = c->rate;
 			ret = HANDOFF_ENABLED_CLK;
 		} else {
 			io->handoff_resources = false;
@@ -2346,10 +2592,22 @@ static struct clk_ops hdmi_8996_v3_vco_clk_ops = {
 	.handoff = hdmi_8996_vco_handoff,
 };
 
+static struct clk_ops hdmi_8996_v3_1p8_vco_clk_ops = {
+	.enable = hdmi_8996_v3_1p8_vco_enable,
+	.set_rate = hdmi_8996_v3_1p8_vco_set_rate,
+	.get_rate = hdmi_8996_vco_get_rate,
+	.round_rate = hdmi_8996_vco_round_rate,
+	.prepare = hdmi_8996_v3_1p8_vco_prepare,
+	.unprepare = hdmi_8996_vco_unprepare,
+	.handoff = hdmi_8996_vco_handoff,
+};
+
+
 static struct hdmi_pll_vco_clk hdmi_vco_clk = {
 	.c = {
 		.dbg_name = "hdmi_8996_vco_clk",
 		.ops = &hdmi_8996_v1_vco_clk_ops,
+		.flags = CLKFLAG_NO_RATE_CACHE,
 		CLK_INIT(hdmi_vco_clk.c),
 	},
 };
@@ -2376,6 +2634,9 @@ int hdmi_8996_pll_clock_register(struct platform_device *pdev,
 		break;
 	case HDMI_VERSION_8996_V3:
 		hdmi_vco_clk.c.ops = &hdmi_8996_v3_vco_clk_ops;
+		break;
+	case HDMI_VERSION_8996_V3_1_8:
+		hdmi_vco_clk.c.ops = &hdmi_8996_v3_1p8_vco_clk_ops;
 		break;
 	default:
 		hdmi_vco_clk.c.ops = &hdmi_8996_v1_vco_clk_ops;
@@ -2413,4 +2674,11 @@ int hdmi_8996_v3_pll_clock_register(struct platform_device *pdev,
 {
 	return hdmi_8996_pll_clock_register(pdev, pll_res,
 						HDMI_VERSION_8996_V3);
+}
+
+int hdmi_8996_v3_1p8_pll_clock_register(struct platform_device *pdev,
+				 struct mdss_pll_resources *pll_res)
+{
+	return hdmi_8996_pll_clock_register(pdev, pll_res,
+						HDMI_VERSION_8996_V3_1_8);
 }

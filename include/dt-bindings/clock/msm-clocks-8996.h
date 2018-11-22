@@ -1,4 +1,4 @@
-/* Copyright (c) 2014-2015, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2014-2016, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -504,6 +504,17 @@
 #define clk_mdss_dsi1_vco_clk_src	0xfcd15658
 #define clk_hdmi_vco_clk		0x66003284
 
+#define clk_dsi0pll_shadow_byte_clk_src	0x177c029c
+#define clk_dsi0pll_shadow_pixel_clk_src	0x98ae3c92
+#define clk_dsi0pll_shadow_n2_div_clk	0xd5f0dad9
+#define clk_dsi0pll_shadow_post_n1_div_clk	0x1f7c8cf8
+#define clk_dsi0pll_shadow_vco_clk	0xb100ca83
+#define clk_dsi1pll_shadow_byte_clk_src	0xfc021ce5
+#define clk_dsi1pll_shadow_pixel_clk_src	0xdcca3ffc
+#define clk_dsi1pll_shadow_n2_div_clk		0x189541bf
+#define clk_dsi1pll_shadow_post_n1_div_clk	0x1637020e
+#define clk_dsi1pll_shadow_vco_clk		0x68d8b6f7
+
 /* CPU clocks */
 #define clk_pwrcl_clk 0xc554130e
 #define clk_pwrcl_pll 0x25454ca1
@@ -520,6 +531,7 @@
 #define clk_perfcl_hf_mux 0x9e8bbe59
 #define clk_perfcl_lf_mux 0x2f9c278d
 #define clk_cbf_pll 0xfe2e96a3
+#define clk_cbf_pll_main 0x2b05cf95
 #define clk_cbf_hf_mux 0x71244f73
 #define clk_cbf_clk 0x48e9e16b
 #define clk_xo_ao 0x428c856d
@@ -530,4 +542,5 @@
 #define clk_audio_ap_clk 0x312ac429
 #define clk_audio_pmi_clk 0xb7ba2274
 #define clk_audio_ap_clk2 0xf0fbaf5b
+#define clk_audio_lpass_mclk2 0x0122abee
 #endif

@@ -1417,7 +1417,6 @@ static int media_not_present(struct scsi_disk *sdkp,
 }
 
 #ifdef CONFIG_MACH_LGE
-#ifdef CONFIG_USB_HOST_NOTIFY
 /**
  *	sd_check_events - check media events
  *	@disk: kernel device descriptor
@@ -1494,7 +1493,6 @@ out:
 	sdp->changed = 0;
 	return retval;
 }
-#endif // CONFIG_USB_HOST_NOTIFY
 #endif
 
 static int sd_sync_cache(struct scsi_disk *sdkp)
@@ -1610,7 +1608,7 @@ static const struct block_device_operations sd_fops = {
 #ifdef CONFIG_COMPAT
 	.compat_ioctl		= sd_compat_ioctl,
 #endif
-#ifndef CONFIG_MACH_LGE
+#ifdef CONFIG_MACH_LGE
 	.check_events           = sd_check_events,
 #endif
 	.revalidate_disk	= sd_revalidate_disk,
@@ -2827,9 +2825,9 @@ static int sd_revalidate_disk(struct gendisk *disk)
 	max_xfer = sdkp->max_xfer_blocks;
 	max_xfer <<= ilog2(sdp->sector_size) - 9;
 
-	max_xfer = min_not_zero(queue_max_hw_sectors(sdkp->disk->queue),
-				max_xfer);
-	blk_queue_max_hw_sectors(sdkp->disk->queue, max_xfer);
+	sdkp->disk->queue->limits.max_sectors =
+		min_not_zero(queue_max_hw_sectors(sdkp->disk->queue), max_xfer);
+
 	set_capacity(disk, sdkp->capacity);
 	sd_config_write_same(sdkp);
 	kfree(buffer);
@@ -3341,8 +3339,8 @@ static int sd_suspend_common(struct device *dev, bool ignore_stop_errors)
 	struct scsi_disk *sdkp = scsi_disk_get_from_dev(dev);
 	int ret = 0;
 
-	if (!sdkp)
-		return 0;	/* this can happen */
+	if (!sdkp)	/* E.g.: runtime suspend following sd_remove() */
+		return 0;
 
 	if (sdkp->WCE && sdkp->media_present) {
 		ret = sd_sync_cache(sdkp);

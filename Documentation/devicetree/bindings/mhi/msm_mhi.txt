@@ -11,7 +11,6 @@ Required properties:
     below properties:
 	- esoc-names
 	- esoc-0
-  - wakeup-gpios: gpio used to wake device from low power mode.
   - Refer to "Documentation/devicetree/bindings/arm/msm/msm_bus.txt" for
     below optional properties:
 	- qcom,msm-bus,name
@@ -21,6 +20,7 @@ Required properties:
   - mhi-chan-cfg-#: mhi channel configuration parameters for platform
   - mhi-event-cfg-#: mhi event ring configuration parameters for platform
   - mhi-event-rings: number of event rings supported by platform
+  - mhi-dev-address-win-size: size of the MHI device addressing window
 
 Example:
 
@@ -28,8 +28,6 @@ Example:
 		compatible = "qcom,mhi";
 		esoc-names = "mdm";
 		esoc-0 = <&mdm1>;
-		mhi-device-wake-gpio =
-			<&msmgpio 108 0>;
 		qcom,msm-bus,name = "mhi";
 		qcom,msm-bus,num-cases = <2>;
 		qcom,msm-bus,num-paths = <1>;
@@ -39,4 +37,5 @@ Example:
 		mhi-event-rings = <6>;
 		mhi-chan-cfg-102 = <0x66 0x80 0x5 0x62>;
 		mhi-event-cfg-0 = <0x80 0x0 0x0 0x11>;
+		mhi-dev-address-win-size= <0x10 0x00000000>;
 	};

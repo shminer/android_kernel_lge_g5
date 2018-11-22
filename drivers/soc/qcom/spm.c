@@ -1,4 +1,4 @@
-/* Copyright (c) 2011-2015, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2011-2016, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -94,6 +94,33 @@ static uint32_t msm_spm_reg_offsets_saw2_v3_0[MSM_SPM_REG_NR] = {
 	[MSM_SPM_REG_SAW_VERSION]		= 0xFD0,
 };
 
+static uint32_t msm_spm_reg_offsets_saw2_v4_1[MSM_SPM_REG_NR] = {
+	[MSM_SPM_REG_SAW_SECURE]		= 0xC00,
+	[MSM_SPM_REG_SAW_ID]			= 0xC04,
+	[MSM_SPM_REG_SAW_STS2]			= 0xC10,
+	[MSM_SPM_REG_SAW_SPM_STS]		= 0xC0C,
+	[MSM_SPM_REG_SAW_AVS_STS]		= 0xC14,
+	[MSM_SPM_REG_SAW_PMIC_STS]		= 0xC18,
+	[MSM_SPM_REG_SAW_RST]			= 0xC1C,
+	[MSM_SPM_REG_SAW_VCTL]			= 0x900,
+	[MSM_SPM_REG_SAW_AVS_CTL]		= 0x904,
+	[MSM_SPM_REG_SAW_AVS_LIMIT]		= 0x908,
+	[MSM_SPM_REG_SAW_AVS_DLY]		= 0x90C,
+	[MSM_SPM_REG_SAW_SPM_CTL]		= 0x0,
+	[MSM_SPM_REG_SAW_SPM_DLY]		= 0x4,
+	[MSM_SPM_REG_SAW_CFG]			= 0x0C,
+	[MSM_SPM_REG_SAW_PMIC_DATA_0]		= 0x40,
+	[MSM_SPM_REG_SAW_PMIC_DATA_1]		= 0x44,
+	[MSM_SPM_REG_SAW_PMIC_DATA_2]		= 0x48,
+	[MSM_SPM_REG_SAW_PMIC_DATA_3]		= 0x4C,
+	[MSM_SPM_REG_SAW_PMIC_DATA_4]		= 0x50,
+	[MSM_SPM_REG_SAW_PMIC_DATA_5]		= 0x54,
+	[MSM_SPM_REG_SAW_PMIC_DATA_6]		= 0x58,
+	[MSM_SPM_REG_SAW_PMIC_DATA_7]		= 0x5C,
+	[MSM_SPM_REG_SAW_SEQ_ENTRY]		= 0x400,
+	[MSM_SPM_REG_SAW_VERSION]		= 0xFD0,
+};
+
 static struct saw2_data saw2_info[] = {
 	[0] = {
 		"SAW_v2.1",
@@ -112,6 +139,12 @@ static struct saw2_data saw2_info[] = {
 		0x1,
 		0x0,
 		msm_spm_reg_offsets_saw2_v3_0,
+	},
+	[3] = {
+		"SAW_v4.0",
+		0x4,
+		0x1,
+		msm_spm_reg_offsets_saw2_v4_1,
 	},
 };
 
@@ -200,7 +233,7 @@ uint32_t msm_spm_drv_get_sts_curr_pmic_data(
 		struct msm_spm_driver_data *dev)
 {
 	msm_spm_drv_load_shadow(dev, MSM_SPM_REG_SAW_PMIC_STS);
-	return dev->reg_shadow[MSM_SPM_REG_SAW_PMIC_STS] & 0xFF;
+	return dev->reg_shadow[MSM_SPM_REG_SAW_PMIC_STS] & 0x300FF;
 }
 
 static inline void msm_spm_drv_get_saw2_ver(struct msm_spm_driver_data *dev,
@@ -501,10 +534,12 @@ int msm_spm_drv_set_vdd(struct msm_spm_driver_data *dev, unsigned int vlevel)
 	timeout_us = dev->vctl_timeout_us;
 	/* Confirm the voltage we set was what hardware sent */
 	do {
-		new_level = msm_spm_drv_get_sts_curr_pmic_data(dev);
-		if (new_level == vlevel)
-			break;
 		udelay(1);
+		new_level = msm_spm_drv_get_sts_curr_pmic_data(dev);
+		/* FSM is idle */
+		if (((new_level & 0x30000) == 0) &&
+				((new_level & 0xFF) == vlevel))
+			break;
 	} while (--timeout_us);
 	if (!timeout_us) {
 		pr_info("Wrong level %#x\n", new_level);

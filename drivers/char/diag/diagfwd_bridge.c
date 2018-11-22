@@ -1,4 +1,4 @@
-/* Copyright (c) 2012-2015, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2012-2016, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -18,11 +18,15 @@
 #include <linux/workqueue.h>
 #include <linux/ratelimit.h>
 #include <linux/platform_device.h>
+#ifdef USB_QCOM_DIAG_BRIDGE
 #include <linux/smux.h>
+#endif
 #include "diag_mux.h"
 #include "diagfwd_bridge.h"
+#ifdef USB_QCOM_DIAG_BRIDGE
 #include "diagfwd_hsic.h"
 #include "diagfwd_smux.h"
+#endif
 #include "diagfwd_mhi.h"
 #include "diag_dci.h"
 
@@ -138,7 +142,7 @@ int diagfwd_bridge_register(int id, int ctxt, struct diag_remote_dev_ops *ops)
 	char wq_name[DIAG_BRIDGE_NAME_SZ + 10];
 
 	if (!ops) {
-		pr_err("diag: Invalid pointers ops: %p ctxt: %d\n", ops, ctxt);
+		pr_err("diag: Invalid pointers ops: %pK ctxt: %d\n", ops, ctxt);
 		return -EINVAL;
 	}
 
@@ -256,9 +260,11 @@ int diagfwd_bridge_init()
 	err = diag_mdm_init();
 	if (err)
 		goto fail;
+	#ifdef USB_QCOM_DIAG_BRIDGE
 	err = diag_smux_init();
 	if (err)
 		goto fail;
+	#endif
 	return 0;
 
 fail:
@@ -268,8 +274,10 @@ fail:
 
 void diagfwd_bridge_exit()
 {
+	#ifdef USB_QCOM_DIAG_BRIDGE
 	diag_hsic_exit();
 	diag_smux_exit();
+	#endif
 }
 
 int diagfwd_bridge_close(int id)

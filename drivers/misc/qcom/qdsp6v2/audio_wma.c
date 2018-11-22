@@ -2,7 +2,7 @@
  *
  * Copyright (C) 2008 Google, Inc.
  * Copyright (C) 2008 HTC Corporation
- * Copyright (c) 2009-2015, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2009-2016, The Linux Foundation. All rights reserved.
  *
  * This software is licensed under the terms of the GNU General Public
  * License version 2, as published by the Free Software Foundation, and
@@ -19,6 +19,9 @@
 #include <linux/msm_audio_wma.h>
 #include <linux/compat.h>
 #include "audio_utils_aio.h"
+
+static struct miscdevice audio_wma_misc;
+static struct ws_mgr audio_wma_ws_mgr;
 
 #ifdef CONFIG_DEBUG_FS
 static const struct file_operations audio_wma_debug_fops = {
@@ -163,6 +166,8 @@ static long audio_compat_ioctl(struct file *file, unsigned int cmd,
 		struct msm_audio_wma_config_v2 *wma_config;
 		struct msm_audio_wma_config_v2_32 wma_config_32;
 
+		memset(&wma_config_32, 0, sizeof(wma_config_32));
+
 		wma_config = (struct msm_audio_wma_config_v2 *)audio->codec_cfg;
 		wma_config_32.format_tag = wma_config->format_tag;
 		wma_config_32.numchannels = wma_config->numchannels;
@@ -244,6 +249,11 @@ static int audio_open(struct inode *inode, struct file *file)
 	}
 
 	audio->pcm_cfg.buffer_size = PCM_BUFSZ_MIN;
+	audio->miscdevice = &audio_wma_misc;
+	audio->wakelock_voted = false;
+	audio->audio_ws_mgr = &audio_wma_ws_mgr;
+
+	init_waitqueue_head(&audio->event_wait);
 
 	audio->ac = q6asm_audio_client_alloc((app_cb) q6_audio_cb,
 					     (void *)audio);
@@ -318,7 +328,7 @@ static const struct file_operations audio_wma_fops = {
 	.compat_ioctl = audio_compat_ioctl
 };
 
-struct miscdevice audio_wma_misc = {
+static struct miscdevice audio_wma_misc = {
 	.minor = MISC_DYNAMIC_MINOR,
 	.name = "msm_wma",
 	.fops = &audio_wma_fops,
@@ -326,7 +336,14 @@ struct miscdevice audio_wma_misc = {
 
 static int __init audio_wma_init(void)
 {
-	return misc_register(&audio_wma_misc);
+	int ret = misc_register(&audio_wma_misc);
+
+	if (ret == 0)
+		device_init_wakeup(audio_wma_misc.this_device, true);
+	audio_wma_ws_mgr.ref_cnt = 0;
+	mutex_init(&audio_wma_ws_mgr.ws_lock);
+
+	return ret;
 }
 
 device_initcall(audio_wma_init);

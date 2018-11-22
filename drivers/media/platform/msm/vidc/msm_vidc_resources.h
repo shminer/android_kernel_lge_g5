@@ -1,4 +1,4 @@
-/* Copyright (c) 2013-2015, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2013-2016, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -19,11 +19,27 @@
 #include <media/msm_vidc.h>
 #define MAX_BUFFER_TYPES 32
 
+struct platform_version_table {
+	u32 version_mask;
+	u32 version_shift;
+};
 
 struct load_freq_table {
 	u32 load;
 	u32 freq;
 	u32 supported_codecs;
+};
+
+struct dcvs_table {
+	u32 load;
+	u32 load_low;
+	u32 load_high;
+	u32 supported_codecs;
+};
+
+struct dcvs_limit {
+	u32 min_mbpf;
+	u32 fps;
 };
 
 struct imem_ab_table {
@@ -86,8 +102,8 @@ struct clock_info {
 	const char *name;
 	struct clk *clk;
 	struct load_freq_table *load_freq_tbl;
-	u32 count; /* == has_scaling iff count != 0 */
-	bool has_gating;
+	u32 count;
+	bool has_scaling;
 };
 
 struct clock_set {
@@ -119,13 +135,35 @@ enum imem_type {
 	IMEM_MAX,
 };
 
+struct allowed_clock_rates_table {
+	u32 clock_rate;
+};
+
+struct clock_profile_entry {
+	u32 codec_mask;
+	u32 cycles;
+	u32 low_power_factor;
+};
+
+struct clock_freq_table {
+	struct clock_profile_entry *clk_prof_entries;
+	u32 count;
+};
+
 struct msm_vidc_platform_resources {
 	phys_addr_t firmware_base;
 	phys_addr_t register_base;
 	uint32_t register_size;
 	uint32_t irq;
+	struct platform_version_table *pf_ver_tbl;
+	struct allowed_clock_rates_table *allowed_clks_tbl;
+	u32 allowed_clks_tbl_size;
+	struct clock_freq_table clock_freq_tbl;
 	struct load_freq_table *load_freq_tbl;
 	uint32_t load_freq_tbl_size;
+	struct dcvs_table *dcvs_tbl;
+	uint32_t dcvs_tbl_size;
+	struct dcvs_limit *dcvs_limit;
 	struct imem_ab_table *imem_ab_tbl;
 	u32 imem_ab_tbl_size;
 	struct reg_set reg_set;
@@ -141,6 +179,7 @@ struct msm_vidc_platform_resources {
 	bool use_non_secure_pil;
 	bool sw_power_collapsible;
 	bool sys_idle_indicator;
+	bool slave_side_cp;
 	struct list_head context_banks;
 	bool thermal_mitigable;
 	const char *fw_name;

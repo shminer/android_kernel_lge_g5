@@ -1781,7 +1781,7 @@ static ssize_t fwu_sysfs_image_name_show(struct device *dev,
 static ssize_t fwu_sysfs_image_name_store(struct device *dev,
 		struct device_attribute *attr, const char *buf, size_t count)
 {
-	if (sscanf(buf, "%s", fwu->image_name) != 1)
+	if (sscanf(buf, "%49s", fwu->image_name) != 1)
 		return -EINVAL;
 
 	return count;

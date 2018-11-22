@@ -1,4 +1,4 @@
-/* Copyright (c) 2013-2015, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2013-2016, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -364,7 +364,6 @@ static bool _add_to_assignments_list(struct adreno_profile *profile,
 static bool results_available(struct adreno_device *adreno_dev,
 		struct adreno_profile *profile, unsigned int *shared_buf_tail)
 {
-	struct kgsl_device *device = &adreno_dev->dev;
 	unsigned int global_eop;
 	unsigned int off = profile->shared_tail;
 	unsigned int *shared_ptr = (unsigned int *)
@@ -379,7 +378,7 @@ static bool results_available(struct adreno_device *adreno_dev,
 	if (shared_buf_empty(profile))
 		return false;
 
-	if (adreno_rb_readtimestamp(device,
+	if (adreno_rb_readtimestamp(adreno_dev,
 			adreno_dev->cur_rb,
 			KGSL_TIMESTAMP_RETIRED, &global_eop))
 		return false;
@@ -538,8 +537,10 @@ static int profile_enable_set(void *data, u64 val)
 	if (val && profile->log_buffer == NULL) {
 		/* allocate profile_log_buffer the first time enabled */
 		profile->log_buffer = vmalloc(ADRENO_PROFILE_LOG_BUF_SIZE);
-		if (profile->log_buffer == NULL)
+		if (profile->log_buffer == NULL) {
+			mutex_unlock(&device->mutex);
 			return -ENOMEM;
+		}
 		profile->log_tail = profile->log_buffer;
 		profile->log_head = profile->log_buffer;
 	}
@@ -982,7 +983,7 @@ static ssize_t profile_pipe_print(struct file *filep, char __user *ubuf,
 
 		mutex_unlock(&device->mutex);
 		set_current_state(TASK_INTERRUPTIBLE);
-		schedule_timeout(HZ / 10);
+		schedule_timeout(msecs_to_jiffies(100));
 		mutex_lock(&device->mutex);
 
 		if (signal_pending(current)) {
@@ -1060,7 +1061,7 @@ DEFINE_SIMPLE_ATTRIBUTE(profile_enable_fops,
 
 void adreno_profile_init(struct adreno_device *adreno_dev)
 {
-	struct kgsl_device *device = &adreno_dev->dev;
+	struct kgsl_device *device = KGSL_DEVICE(adreno_dev);
 	struct adreno_profile *profile = &adreno_dev->profile;
 	struct dentry *profile_dir;
 	int ret;
@@ -1106,7 +1107,7 @@ void adreno_profile_close(struct adreno_device *adreno_dev)
 	profile->log_tail = NULL;
 	profile->shared_head = 0;
 	profile->shared_tail = 0;
-	kgsl_free_global(&profile->shared_buffer);
+	kgsl_free_global(KGSL_DEVICE(adreno_dev), &profile->shared_buffer);
 	profile->shared_size = 0;
 
 	profile->assignment_count = 0;

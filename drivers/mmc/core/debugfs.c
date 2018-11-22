@@ -338,6 +338,11 @@ void mmc_add_host_debugfs(struct mmc_host *host)
 		&host->clk_scaling.skip_clk_scale_freq_update))
 		goto err_node;
 
+	if (!debugfs_create_bool("cmdq_task_history",
+		S_IRUSR | S_IWUSR, root,
+		&host->cmdq_thist_enabled))
+		goto err_node;
+
 #ifdef CONFIG_MMC_CLKGATE
 	if (!debugfs_create_u32("clk_delay", (S_IRUSR | S_IWUSR),
 				root, &host->clk_delay))
@@ -453,7 +458,6 @@ static int mmc_ext_csd_open(struct inode *inode, struct file *filp)
 		}
 	}
 	err = mmc_send_ext_csd(card, ext_csd);
-	mmc_put_card(card);
 	if (err)
 		goto out_free;
 #ifdef CONFIG_MACH_LGE
@@ -473,6 +477,7 @@ static int mmc_ext_csd_open(struct inode *inode, struct file *filp)
 			       mmc_hostname(card->host), __func__);
 	}
 
+	mmc_put_card(card);
 	kfree(ext_csd);
 	return 0;
 #endif
@@ -626,6 +631,8 @@ static int mmc_ext_csd_open(struct inode *inode, struct file *filp)
        seq_printf(s, "[189] Command set revision, cmd_set_rev: 0x%02x\n", ext_csd[189]);
        seq_printf(s, "[187] Power class, power_class: 0x%02x\n", ext_csd[187]);
        seq_printf(s, "[185] High-speed interface timing, hs_timing: 0x%02x\n", ext_csd[185]);
+       if(ext_csd_rev >= 7)
+		seq_printf(s, "[184] Enhanced strobe support, strobe_support: 0x%02x\n", ext_csd[184]);
        seq_printf(s, "[181] Erased memory content, erased_mem_cont: 0x%02x\n", ext_csd[181]);
        seq_printf(s, "[179] Partition configuration, partition_config: 0x%02x\n", ext_csd[179]);
        seq_printf(s, "[178] Boot config protection, boot_config_prot: 0x%02x\n", ext_csd[178]);
@@ -700,6 +707,7 @@ out_free:
 			pr_err("%s: %s: cmdq unhalt failed\n",
 			       mmc_hostname(card->host), __func__);
 	}
+	mmc_put_card(card);
 out_free_halt:
 #ifndef CONFIG_MACH_LGE
 	kfree(buf);

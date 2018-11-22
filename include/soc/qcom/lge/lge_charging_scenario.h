@@ -28,16 +28,29 @@
 #define DC_CURRENT_DEF   -1
 
 /* Battery temperature states */
+#ifdef CONFIG_LGE_PM_OTP_SCENARIO_FOR_SPRINT
 enum lge_battemp_states {
-	CHG_BATTEMP_BL_M11,
+	CHG_BATTEMP_BL_UT,
+	CHG_BATTEMP_M5_M3,
+	CHG_BATTEMP_M2_39,
+	CHG_BATTEMP_40_42,
+	CHG_BATTEMP_43_50,
+	CHG_BATTEMP_51_OT,
+	CHG_BATTEMP_AB_OT,
+
+};
+#else
+enum lge_battemp_states {
+	CHG_BATTEMP_BL_UT,
 	CHG_BATTEMP_M10_M5,
-	CHG_BATTEMP_M4_42,
-	CHG_BATTEMP_43_45,
-	CHG_BATTEMP_46_51,
+	CHG_BATTEMP_M4_39,
+	CHG_BATTEMP_40_42,
+	CHG_BATTEMP_43_51,
 	CHG_BATTEMP_52_OT,
 	CHG_BATTEMP_AB_OT,
 
 };
+#endif
 
 /* LGE charging states */
 enum lge_charging_states {

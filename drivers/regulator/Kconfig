@@ -252,6 +252,16 @@ config REGULATOR_FAN53555
 	  input voltage supply of 2.5V to 5.5V. The output voltage is
 	  programmed through an I2C interface.
 
+config REGULATOR_MSM_GFX_LDO
+	tristate "MSM GFX LDO Regulator"
+	depends on OF
+	help
+	  This driver supports the MSM GFX (Graphics) LDO regulator. The
+	  GFU core is either powered by an internal MSM LDO or by BHS.
+	  Typically the lower voltage corners are powered by LDO and
+	  the higher ones by BHS. This driver allows for configuration of
+	  the rail between the LDO/BHS as well as the LDO voltage.
+
 config REGULATOR_GPIO
 	tristate "GPIO regulator support"
 	depends on GPIOLIB
@@ -852,6 +862,31 @@ config REGULATOR_CPR3_MMSS
 	  thread to monitor the MMSS voltage requirements.  This driver reads
 	  initial voltage values out of hardware fuses and CPR target quotient
 	  values out of device tree.
+
+config REGULATOR_CPR4_APSS
+	bool "CPR4 regulator for APSS"
+	depends on OF
+	select REGULATOR_CPR3
+	help
+	  This driver supports Qualcomm Technologies, Inc. APSS application
+	  processor specific features including memory array power mux (APM)
+	  switching, one CPR4 thread which monitor the two APSS clusters that
+	  are both powered by a shared supply, hardware closed-loop auto
+	  voltage stepping, voltage adjustments based on online core count,
+	  voltage adjustments based on temperature readings, and voltage
+	  adjustments for performance boost mode. This driver reads both initial
+	  voltage and CPR target quotient values out of hardware fuses.
+
+config REGULATOR_CPRH_KBSS
+	bool "CPRH regulator for KBSS"
+	depends on OF
+	select REGULATOR_CPR3
+	help
+	  This driver supports Qualcomm Technologies, Inc. KBSS application
+	  processor specific features including CPR hardening (CPRh) and two
+	  CPRh controllers which monitor the two KBSS clusters each powered by
+	  independent voltage supplies. This driver reads both initial voltage
+	  and CPR target quotient values out of hardware fuses.
 
 config REGULATOR_KRYO
 	bool "Kryo regulator driver"

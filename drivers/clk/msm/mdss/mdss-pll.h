@@ -1,4 +1,4 @@
-/* Copyright (c) 2013-2015, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2013-2016, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -21,25 +21,32 @@
 #define MDSS_PLL_REG_R(base, offset)	readl_relaxed((base) + (offset))
 
 #define PLL_CALC_DATA(addr0, addr1, data0, data1)      \
-	(((data1) << 24) | (((addr1)/4) << 16) | ((data0) << 8) | ((addr0)/4))
+	(((data1) << 24) | ((((addr1) / 4) & 0xFF) << 16) | \
+	 ((data0) << 8) | (((addr0) / 4) & 0xFF))
 
 #define MDSS_DYN_PLL_REG_W(base, offset, addr0, addr1, data0, data1)   \
 		writel_relaxed(PLL_CALC_DATA(addr0, addr1, data0, data1), \
 			(base) + (offset))
 
 enum {
+	MDSS_DSI_PLL_LPM,
 	MDSS_DSI_PLL_8996,
 	MDSS_HDMI_PLL_8996,
 	MDSS_HDMI_PLL_8996_V2,
 	MDSS_HDMI_PLL_8996_V3,
+	MDSS_HDMI_PLL_8996_V3_1_8,
 	MDSS_UNKNOWN_PLL,
 };
 
 enum {
 	MDSS_PLL_TARGET_8996,
+	MDSS_PLL_TARGET_8952,
+	MDSS_PLL_TARGET_8937,
+	MDSS_PLL_TARGET_8953,
+	MDSS_PLL_TARGET_8909,
 };
 
-#define DFPS_MAX_NUM_OF_FRAME_RATES 10
+#define DFPS_MAX_NUM_OF_FRAME_RATES 20
 
 struct dfps_panel_info {
 	uint32_t enabled;
@@ -127,8 +134,14 @@ struct mdss_pll_resources {
 
 	/*
 	 * caching the pll trim codes in the case of dynamic refresh
+	 * or cmd mode idle screen.
 	 */
 	int		cache_pll_trim_codes[2];
+
+	/*
+	 * caching the pll trim codes rate
+	 */
+	s64		cache_pll_trim_codes_rate;
 
 	/*
 	 * for maintaining the status of saving trim codes
@@ -153,6 +166,8 @@ struct mdss_pll_resources {
 
 	bool ssc_en;	/* share pll with master */
 	bool ssc_center;	/* default is down spread */
+	u32 ssc_freq;
+	u32 ssc_ppm;
 
 	struct mdss_pll_resources *slave;
 

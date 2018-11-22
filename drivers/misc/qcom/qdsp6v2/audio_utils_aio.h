@@ -1,6 +1,6 @@
 /* Copyright (C) 2008 Google, Inc.
  * Copyright (C) 2008 HTC Corporation
- * Copyright (c) 2009-2015, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2009-2016, The Linux Foundation. All rights reserved.
  *
  * This software is licensed under the terms of the GNU General Public
  * License version 2, as published by the Free Software Foundation, and
@@ -20,6 +20,7 @@
 #include <linux/sched.h>
 #include <linux/uaccess.h>
 #include <linux/wait.h>
+#include <linux/wakelock.h>
 #include <linux/msm_audio.h>
 #include <linux/debugfs.h>
 #include <linux/list.h>
@@ -104,6 +105,12 @@ union  meta_data {
 	struct dec_meta_in meta_in;
 } __packed;
 
+/* per device wakeup source manager */
+struct ws_mgr {
+	struct mutex       ws_lock;
+	uint32_t           ref_cnt;
+};
+
 #define PCM_BUF_COUNT           (2)
 /* Buffer with meta */
 #define PCM_BUFSZ_MIN           ((4*1024) + sizeof(struct dec_meta_out))
@@ -165,6 +172,10 @@ struct q6audio_aio {
 	spinlock_t dsp_lock;
 	spinlock_t event_queue_lock;
 
+	struct miscdevice *miscdevice;
+	uint32_t wakelock_voted;
+	struct ws_mgr *audio_ws_mgr;
+
 #ifdef CONFIG_DEBUG_FS
 	struct dentry *dentry;
 #endif
@@ -188,6 +199,7 @@ struct q6audio_aio {
 	int feedback;
 	int rflush;             /* Read  flush */
 	int wflush;             /* Write flush */
+	bool reset_event;
 	long (*codec_ioctl)(struct file *, unsigned int, unsigned long);
 	long (*codec_compat_ioctl)(struct file *, unsigned int, unsigned long);
 };

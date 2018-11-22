@@ -1,4 +1,4 @@
-/* Copyright (c) 2010-2015, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2010-2016, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -154,6 +154,7 @@ static void ci13xxx_msm_reset(void)
 	/* workaround for rx buffer collision issue */
 	temp = readl_relaxed(USB_GENCONFIG);
 	temp &= ~GENCONFIG_TXFIFO_IDLE_FORCE_DISABLE;
+	temp &= ~GENCONFIG_ULPI_SERIAL_EN;
 	writel_relaxed(temp, USB_GENCONFIG);
 
 	if (udc->gadget.l1_supported)
@@ -223,7 +224,11 @@ static void ci13xxx_msm_notify_event(struct ci13xxx *udc, unsigned event)
 		dev_info(dev, "CI13XXX_CONTROLLER_ERROR_EVENT received\n");
 		ci13xxx_msm_mark_err_event();
 		break;
-
+	case CI13XXX_CONTROLLER_UDC_STARTED_EVENT:
+		dev_info(dev,
+			 "CI13XXX_CONTROLLER_UDC_STARTED_EVENT received\n");
+		udc->gadget.interrupt_num = _udc_ctxt.irq;
+		break;
 	default:
 		dev_dbg(dev, "unknown ci13xxx_udc event\n");
 		break;

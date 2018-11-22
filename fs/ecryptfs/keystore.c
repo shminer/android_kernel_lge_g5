@@ -33,6 +33,11 @@
 #include <linux/scatterlist.h>
 #include <linux/slab.h>
 #include "ecryptfs_kernel.h"
+#ifdef CONFIG_CRYPTO_CCMODE
+#include <linux/cc_mode.h>
+#include <crypto/rng.h>
+#include <crypto/hash.h>
+#endif // CONFIG_CRYPTO_CCMODE
 
 /**
  * request_key returned an error instead of a valid key address;
@@ -1680,9 +1685,10 @@ decrypt_passphrase_encrypted_session_key(struct ecryptfs_auth_tok *auth_tok,
 	};
 	int rc = 0;
 	u32 decrypted_key_size = 0;
-    #ifdef CONFIG_CRYPTO_CCMODE
-    char iv[ECRYPTFS_DEFAULT_IV_BYTES];
-    #endif
+#ifdef CONFIG_CRYPTO_CCMODE
+	char iv[ECRYPTFS_DEFAULT_IV_BYTES];
+#endif
+
 
 	if (unlikely(ecryptfs_verbosity > 0)) {
 		ecryptfs_printk(
@@ -1732,14 +1738,14 @@ decrypt_passphrase_encrypted_session_key(struct ecryptfs_auth_tok *auth_tok,
 		rc = -EINVAL;
 		goto out;
 	}
-    #ifdef CONFIG_CRYPTO_CCMODE
-    crypto_blkcipher_get_iv(desc.tfm, iv, ECRYPTFS_DEFAULT_IV_BYTES);
-    #endif
+#ifdef CONFIG_CRYPTO_CCMODE
+	crypto_blkcipher_get_iv(desc.tfm, iv, ECRYPTFS_DEFAULT_IV_BYTES);
+#endif
 	rc = crypto_blkcipher_decrypt(&desc, dst_sg, src_sg,
 				      auth_tok->session_key.encrypted_key_size);
-    #ifdef CONFIG_CRYPTO_CCMODE
-    crypto_blkcipher_set_iv(desc.tfm, iv, ECRYPTFS_DEFAULT_IV_BYTES);
-    #endif
+#ifdef CONFIG_CRYPTO_CCMODE
+	crypto_blkcipher_set_iv(desc.tfm, iv, ECRYPTFS_DEFAULT_IV_BYTES);
+#endif
 	mutex_unlock(tfm_mutex);
 	if (unlikely(rc)) {
 		printk(KERN_ERR "Error decrypting; rc = [%d]\n", rc);
@@ -1797,6 +1803,18 @@ int ecryptfs_parse_packet_set(struct ecryptfs_crypt_stat *crypt_stat,
 	struct key *auth_tok_key = NULL;
 	int rc = 0;
 
+#ifdef CONFIG_CRYPTO_CCMODE
+#ifdef CONFIG_CRYPTO_DEV_KEY_INTEGRITY_CHECK
+	int cc_flag;
+	size_t body_size;
+	size_t length_size;
+	struct hash_desc desc;
+	struct scatterlist sg;
+	u8 hmac[SHA256_DIGEST_SIZE];
+	int create_file = 0;
+#endif
+#endif
+
 	INIT_LIST_HEAD(&auth_tok_list);
 	/* Parse the header to find as many packets as we can; these will be
 	 * added the our &auth_tok_list */
@@ -1847,6 +1865,35 @@ int ecryptfs_parse_packet_set(struct ecryptfs_crypt_stat *crypt_stat,
 					sig_tmp_space, tag_11_contents_size);
 			new_auth_tok->token.password.signature[
 				ECRYPTFS_PASSWORD_SIG_SIZE] = '\0';
+#ifdef CONFIG_CRYPTO_CCMODE
+#ifdef CONFIG_CRYPTO_DEV_KEY_INTEGRITY_CHECK
+			packet_size = 0;
+			cc_flag = get_cc_mode_state();
+
+			if ((cc_flag & FLAG_CC_MODE) == FLAG_CC_MODE) {
+				if (src[(i)++] != ECRYPTFS_TAG_90_PACKET_TYPE) {
+					printk(KERN_ERR "First byte != 0x%.2x; invalid packet\n", ECRYPTFS_TAG_90_PACKET_TYPE);
+					i--;
+					goto out_integrity;
+				}
+
+				rc = ecryptfs_parse_packet_length(&src[(i)], &body_size,  &length_size);
+
+				if (rc) {
+					printk(KERN_WARNING "Error parsing packet length; rc = [%d]\n", rc);
+					goto out_integrity;
+				}
+
+				i += length_size;
+				memcpy(crypt_stat->key_hash, &src[i], SHA256_HASH_SIZE);
+				i+=body_size;
+				create_file = 1;
+			}
+
+out_integrity:
+#endif
+#endif
+
 			crypt_stat->flags |= ECRYPTFS_ENCRYPTED;
 			break;
 		case ECRYPTFS_TAG_1_PACKET_TYPE:
@@ -1978,6 +2025,53 @@ found_matching_auth_tok:
 				"context for cipher [%s]; rc = [%d]\n",
 				crypt_stat->cipher, rc);
 	}
+#ifdef CONFIG_CRYPTO_CCMODE
+#ifdef CONFIG_CRYPTO_DEV_KEY_INTEGRITY_CHECK
+	cc_flag = get_cc_mode_state();
+
+	if ((cc_flag & FLAG_CC_MODE) == FLAG_CC_MODE) {
+		desc.tfm = crypto_alloc_hash("hmac(sha256)", 0, 0);
+
+		if (IS_ERR(desc.tfm)) {
+			printk(KERN_ERR "failed to allocate tfm %ld\n",
+			PTR_ERR(desc.tfm));
+			rc = -EINVAL;
+			goto out_wipe_list;
+		}
+
+		crypto_hash_setkey(desc.tfm, candidate_auth_tok->token.password.session_key_encryption_key, crypt_stat->key_size);
+
+		rc = crypto_hash_init(&desc);
+		if (rc) {
+			printk(KERN_INFO "failed at crypto_hash_init\n");
+			goto out_wipe_list;
+		}
+
+		sg_init_one(&sg, crypt_stat->key, crypt_stat->key_size);
+		rc = crypto_hash_update(&desc, &sg, crypt_stat->key_size);
+		if (rc) {
+			printk(KERN_INFO "failed at crypto_hash_update\n");
+			crypto_free_hash(desc.tfm);
+			goto out_wipe_list;
+		}
+
+		rc = crypto_hash_final(&desc, hmac);
+		if (rc) {
+			printk(KERN_INFO "failed at crypto_hash_final\n");
+			crypto_free_hash(desc.tfm);
+			goto out_wipe_list;
+		}
+
+		crypto_free_hash(desc.tfm);
+
+		if (create_file && memcmp(hmac, crypt_stat->key_hash, SHA256_DIGEST_SIZE)) {
+			printk("[CCAudit] Failure to verify integrity of stored key\n");
+			rc = -1;
+		}
+	}
+#endif
+#endif
+
 out_wipe_list:
 	wipe_auth_tok_list(&auth_tok_list);
 out:
@@ -2219,9 +2313,9 @@ write_tag_3_packet(char *dest, size_t *remaining_bytes,
 		.flags = CRYPTO_TFM_REQ_MAY_SLEEP
 	};
 	int rc = 0;
-    #ifdef CONFIG_CRYPTO_CCMODE
-    char iv[ECRYPTFS_DEFAULT_IV_BYTES];
-    #endif
+#ifdef CONFIG_CRYPTO_CCMODE
+	char iv[ECRYPTFS_DEFAULT_IV_BYTES];
+#endif
 	size_t enc_key_size = 0;
 
 	(*packet_size) = 0;
@@ -2322,14 +2416,11 @@ write_tag_3_packet(char *dest, size_t *remaining_bytes,
 	rc = 0;
 	ecryptfs_printk(KERN_DEBUG, "Encrypting [%zd] bytes of the key\n",
 			crypt_stat->key_size);
-    #ifdef CONFIG_CRYPTO_CCMODE
-    crypto_blkcipher_get_iv(desc.tfm, iv, ECRYPTFS_DEFAULT_IV_BYTES);
-    #endif
 	rc = crypto_blkcipher_encrypt(&desc, dst_sg, src_sg,
 				      (*key_rec).enc_key_size);
-    #ifdef CONFIG_CRYPTO_CCMODE
-    crypto_blkcipher_set_iv(desc.tfm, iv, ECRYPTFS_DEFAULT_IV_BYTES);
-    #endif
+#ifdef CONFIG_CRYPTO_CCMODE
+	crypto_blkcipher_set_iv(desc.tfm, iv, ECRYPTFS_DEFAULT_IV_BYTES);
+#endif
 	mutex_unlock(tfm_mutex);
 	if (rc) {
 		printk(KERN_ERR "Error encrypting; rc = [%d]\n", rc);
@@ -2439,7 +2530,17 @@ ecryptfs_generate_key_packet_set(char *dest_base,
 	struct ecryptfs_key_record *key_rec;
 	struct ecryptfs_key_sig *key_sig;
 	int rc = 0;
-
+#ifdef CONFIG_CRYPTO_CCMODE
+#ifdef CONFIG_CRYPTO_DEV_KEY_INTEGRITY_CHECK
+	int cc_flag;
+	size_t max_packet_size;
+	size_t packet_size_length;
+	struct hash_desc desc;
+	struct scatterlist sg;
+	int err = 0;
+	u8 hmac[SHA256_DIGEST_SIZE];
+#endif
+#endif
 	(*len) = 0;
 	mutex_lock(&crypt_stat->keysig_list_mutex);
 	key_rec = kmem_cache_alloc(ecryptfs_key_record_cache, GFP_KERNEL);
@@ -2483,6 +2584,61 @@ ecryptfs_generate_key_packet_set(char *dest_base,
 				goto out_free;
 			}
 			(*len) += written;
+#ifdef CONFIG_CRYPTO_CCMODE
+#ifdef CONFIG_CRYPTO_DEV_KEY_INTEGRITY_CHECK
+			cc_flag = get_cc_mode_state();
+			if ((cc_flag & FLAG_CC_MODE) == FLAG_CC_MODE) {
+			    max_packet_size = (1                         /* Tag 90 identifier */
+									+ 3                       /* Max Tag 20 packet size */
+									+ SHA256_DIGEST_SIZE);      /* Hash size */
+
+				dest_base[(*len)++] = ECRYPTFS_TAG_90_PACKET_TYPE;
+				rc = ecryptfs_write_packet_length(&dest_base[(*len)], max_packet_size, &packet_size_length);
+				if (rc) {
+					printk(KERN_ERR "%s: Error generating tag 90 packet "
+		    	   "header; cannot generate packet length; rc = [%d]\n",
+		      		 __func__, rc);
+					goto out_free;
+				}
+				(*len) += packet_size_length;
+
+                desc.tfm = crypto_alloc_hash("hmac(sha256)", 0, 0);
+				if (IS_ERR(desc.tfm)) {
+					printk(KERN_ERR "failed to allocate tfm %ld\n",
+					PTR_ERR(desc.tfm));
+					goto out_free;
+				}
+
+				crypto_hash_setkey(desc.tfm, auth_tok->token.password.session_key_encryption_key, crypt_stat->key_size);
+
+				err = crypto_hash_init(&desc);
+				if (err) {
+					printk(KERN_INFO "failed at crypto_hash_init\n");
+					goto out_free;
+				}
+
+				sg_init_one(&sg, crypt_stat->key, crypt_stat->key_size);
+				err = crypto_hash_update(&desc, &sg, crypt_stat->key_size);
+				if (err) {
+					printk(KERN_INFO "failed at crypto_hash_update\n");
+					crypto_free_hash(desc.tfm);
+					goto out_free;
+				}
+
+				err = crypto_hash_final(&desc, hmac);
+				if (err) {
+					printk(KERN_INFO "failed at crypto_hash_final\n");
+					crypto_free_hash(desc.tfm);
+					goto out_free;
+				}
+
+				crypto_free_hash(desc.tfm);
+
+				memcpy(&dest_base[(*len)], hmac, SHA256_DIGEST_SIZE);
+    			(*len) += SHA256_DIGEST_SIZE;
+			}
+#endif
+#endif
 		} else if (auth_tok->token_type == ECRYPTFS_PRIVATE_KEY) {
 			rc = write_tag_1_packet(dest_base + (*len), &max,
 						auth_tok_key, auth_tok,

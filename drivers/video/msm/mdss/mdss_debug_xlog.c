@@ -1,4 +1,4 @@
-/* Copyright (c) 2014-2015, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2014-2016, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -28,7 +28,7 @@
 #define XLOG_DEFAULT_ENABLE 0
 #endif
 
-#if defined(CONFIG_LGE_MIPI_H1_INCELL_QHD_CMD_PANEL)
+#if defined(CONFIG_LGE_DISPLAY_COMMON)
 #define XLOG_DEFAULT_PANIC 0
 #define XLOG_DEFAULT_REGDUMP_ENABLE 0
 #else
@@ -89,7 +89,7 @@ struct mdss_dbg_xlog {
 	u32 *nrt_vbif_dbgbus_dump; /* address for the nrt vbif debug bus dump */
 } mdss_dbg_xlog;
 
-#if defined(CONFIG_LGE_MIPI_H1_INCELL_QHD_CMD_PANEL)
+#if defined(CONFIG_LGE_DISPLAY_COMMON)
 unsigned int reg_dump_enable;
 #endif
 
@@ -406,7 +406,8 @@ static void mdss_dump_vbif_debug_bus(u32 bus_dump_flag,
 		wmb();
 
 		__vbif_debug_bus(head, vbif_base, dump_addr, in_log);
-		dump_addr += (head->block_cnt * head->test_pnt_cnt * 4);
+		if (dump_addr)
+			dump_addr += (head->block_cnt * head->test_pnt_cnt * 4);
 	}
 
 	mdss_mdp_clk_ctrl(MDP_BLOCK_POWER_OFF);
@@ -414,8 +415,8 @@ static void mdss_dump_vbif_debug_bus(u32 bus_dump_flag,
 	pr_info("========End VBIF Debug bus=========\n");
 }
 
-static void mdss_dump_reg(const char *dump_name, u32 reg_dump_flag,
-	char *addr, int len, u32 **dump_mem)
+void mdss_dump_reg(const char *dump_name, u32 reg_dump_flag, char *addr,
+	int len, u32 **dump_mem, bool from_isr)
 {
 	struct mdss_data_type *mdata = mdss_mdp_get_mdata();
 	bool in_log, in_mem;
@@ -449,7 +450,9 @@ static void mdss_dump_reg(const char *dump_name, u32 reg_dump_flag,
 		}
 	}
 
-	mdss_mdp_clk_ctrl(MDP_BLOCK_POWER_ON);
+	if (!from_isr)
+		mdss_mdp_clk_ctrl(MDP_BLOCK_POWER_ON);
+
 	for (i = 0; i < len; i++) {
 		u32 x0, x4, x8, xc;
 
@@ -471,7 +474,9 @@ static void mdss_dump_reg(const char *dump_name, u32 reg_dump_flag,
 
 		addr += 16;
 	}
-	mdss_mdp_clk_ctrl(MDP_BLOCK_POWER_OFF);
+
+	if (!from_isr)
+		mdss_mdp_clk_ctrl(MDP_BLOCK_POWER_OFF);
 }
 
 static void mdss_dump_reg_by_ranges(struct mdss_debug_base *dbg,
@@ -500,7 +505,8 @@ static void mdss_dump_reg_by_ranges(struct mdss_debug_base *dbg,
 				addr, xlog_node->offset.start,
 				xlog_node->offset.end);
 			mdss_dump_reg((const char *)xlog_node->range_name,
-				reg_dump_flag, addr, len, &xlog_node->reg_dump);
+				reg_dump_flag, addr, len, &xlog_node->reg_dump,
+				false);
 		}
 	} else {
 		/* If there is no list to dump ranges, dump all registers */
@@ -509,7 +515,7 @@ static void mdss_dump_reg_by_ranges(struct mdss_debug_base *dbg,
 		addr = dbg->base;
 		len = dbg->max_offset;
 		mdss_dump_reg((const char *)dbg->name, reg_dump_flag, addr,
-			len, &dbg->reg_dump);
+			len, &dbg->reg_dump, false);
 	}
 }
 
@@ -614,7 +620,7 @@ static void xlog_debug_work(struct work_struct *work)
 		mdss_dbg_xlog.work_vbif_dbgbus);
 }
 
-#if defined(CONFIG_LGE_MIPI_H1_INCELL_QHD_CMD_PANEL)
+#if defined(CONFIG_LGE_DISPLAY_COMMON)
 extern int panel_not_connected;
 #endif
 
@@ -629,7 +635,7 @@ void mdss_xlog_tout_handler_default(bool queue, const char *name, ...)
 	struct mdss_debug_base **blk_arr;
 	u32 blk_len;
 
-#if defined(CONFIG_LGE_MIPI_H1_INCELL_QHD_CMD_PANEL)
+#if defined(CONFIG_LGE_DISPLAY_COMMON)
 	if(!reg_dump_enable)
 		return;
 
@@ -760,7 +766,7 @@ int mdss_create_xlog_debug(struct mdss_debug_data *mdd)
 	debugfs_create_u32("vbif_dbgbus_dump", 0644, mdss_dbg_xlog.xlog,
 			    &mdss_dbg_xlog.enable_vbif_dbgbus_dump);
 
-#if defined(CONFIG_LGE_MIPI_H1_INCELL_QHD_CMD_PANEL)
+#if defined(CONFIG_LGE_DISPLAY_COMMON)
 	debugfs_create_bool("reg_dump_enable", 0644, mdss_dbg_xlog.xlog,
 				&reg_dump_enable);
 

@@ -87,6 +87,8 @@ static inline int is_device_dma_capable(struct device *dev)
 #else
 #include <asm-generic/dma-mapping-broken.h>
 #endif
+
+#ifndef CONFIG_NO_DMA
 static inline void *dma_remap(struct device *dev, void *cpu_addr,
 		dma_addr_t dma_handle, size_t size, struct dma_attrs *attrs)
 {
@@ -117,6 +119,7 @@ static inline void dma_unremap(struct device *dev, void *remapped_addr,
 
 	return ops->unremap(dev, remapped_addr, size);
 }
+#endif
 
 
 static inline u64 dma_get_mask(struct device *dev)
@@ -164,11 +167,14 @@ static inline int dma_coerce_mask_and_coherent(struct device *dev, u64 mask)
 
 extern u64 dma_get_required_mask(struct device *dev);
 
-#ifndef set_arch_dma_coherent_ops
-static inline int set_arch_dma_coherent_ops(struct device *dev)
-{
-	return 0;
-}
+#ifndef arch_setup_dma_ops
+static inline void arch_setup_dma_ops(struct device *dev, u64 dma_base,
+				      u64 size, struct iommu_ops *iommu,
+				      bool coherent) { }
+#endif
+
+#ifndef arch_teardown_dma_ops
+static inline void arch_teardown_dma_ops(struct device *dev) { }
 #endif
 
 static inline unsigned int dma_get_max_seg_size(struct device *dev)

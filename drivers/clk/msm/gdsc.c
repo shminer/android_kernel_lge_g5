@@ -33,6 +33,8 @@
 #define HW_CONTROL_MASK		BIT(1)
 #define SW_COLLAPSE_MASK	BIT(0)
 #define GMEM_CLAMP_IO_MASK	BIT(0)
+#define GMEM_RESET_MASK		BIT(4)
+#define BCR_BLK_ARES_BIT	BIT(0)
 
 /* Wait 2^n CXO cycles between all states. Here, n=2 (4 cycles). */
 #define EN_REST_WAIT_VAL	(0x2 << 20)
@@ -56,8 +58,11 @@ struct gdsc {
 	int			root_clk_idx;
 	bool			no_status_check_on_disable;
 	bool			is_gdsc_enabled;
+	bool			allow_clear;
+	bool			reset_aon;
 	void __iomem		*domain_addr;
 	void __iomem		*hw_ctrl_addr;
+	void __iomem		*sw_reset_addr;
 	u32			gds_timeout;
 };
 
@@ -65,6 +70,16 @@ enum gdscr_status {
 	ENABLED,
 	DISABLED,
 };
+
+static DEFINE_MUTEX(gdsc_seq_lock);
+
+void gdsc_allow_clear_retention(struct regulator *regulator)
+{
+	struct gdsc *sc = regulator_get_drvdata(regulator);
+
+	if (sc)
+		sc->allow_clear = true;
+}
 
 static int poll_gdsc_status(struct gdsc *sc, enum gdscr_status status)
 {
@@ -127,13 +142,53 @@ static int gdsc_enable(struct regulator_dev *rdev)
 {
 	struct gdsc *sc = rdev_get_drvdata(rdev);
 	uint32_t regval, hw_ctrl_regval = 0x0;
-	int i, ret;
+	int i, ret = 0;
+
+	mutex_lock(&gdsc_seq_lock);
 
 	if (sc->root_en || sc->force_root_en)
 		clk_prepare_enable(sc->clocks[sc->root_clk_idx]);
 
 	if (sc->toggle_logic) {
+		if (sc->sw_reset_addr) {
+			regval = readl_relaxed(sc->sw_reset_addr);
+			regval |= BCR_BLK_ARES_BIT;
+			writel_relaxed(regval, sc->sw_reset_addr);
+			/*
+			 * BLK_ARES should be kept asserted for 1us before
+			 * being de-asserted.
+			 */
+			wmb();
+			udelay(1);
+
+			regval &= ~BCR_BLK_ARES_BIT;
+			writel_relaxed(regval, sc->sw_reset_addr);
+
+			/* Make sure de-assert goes through before continuing */
+			wmb();
+		}
+
 		if (sc->domain_addr) {
+			if (sc->reset_aon) {
+				regval = readl_relaxed(sc->domain_addr);
+				regval |= GMEM_RESET_MASK;
+				writel_relaxed(regval, sc->domain_addr);
+				/*
+				 * Keep reset asserted for at-least 1us before
+				 * continuing.
+				 */
+				wmb();
+				udelay(1);
+
+				regval &= ~GMEM_RESET_MASK;
+				writel_relaxed(regval, sc->domain_addr);
+				/*
+				 * Make sure GMEM_RESET is de-asserted before
+				 * continuing.
+				 */
+				wmb();
+			}
+
 			regval = readl_relaxed(sc->domain_addr);
 			regval &= ~GMEM_CLAMP_IO_MASK;
 			writel_relaxed(regval, sc->domain_addr);
@@ -147,6 +202,7 @@ static int gdsc_enable(struct regulator_dev *rdev)
 		if (regval & HW_CONTROL_MASK) {
 			dev_warn(&rdev->dev, "Invalid enable while %s is under HW control\n",
 				 sc->rdesc.name);
+			mutex_unlock(&gdsc_seq_lock);
 			return -EBUSY;
 		}
 
@@ -174,6 +230,7 @@ static int gdsc_enable(struct regulator_dev *rdev)
 					readl_relaxed(sc->gdscr),
 					readl_relaxed(sc->hw_ctrl_addr));
 
+					mutex_unlock(&gdsc_seq_lock);
 					return ret;
 				}
 			} else {
@@ -185,6 +242,7 @@ static int gdsc_enable(struct regulator_dev *rdev)
 				dev_err(&rdev->dev, "%s final state: 0x%x (%d us after timeout)\n",
 					sc->rdesc.name, regval,
 					sc->gds_timeout);
+				mutex_unlock(&gdsc_seq_lock);
 				return ret;
 			}
 		}
@@ -218,7 +276,10 @@ static int gdsc_enable(struct regulator_dev *rdev)
 	if (sc->force_root_en)
 		clk_disable_unprepare(sc->clocks[sc->root_clk_idx]);
 	sc->is_gdsc_enabled = true;
-	return 0;
+
+	mutex_unlock(&gdsc_seq_lock);
+
+	return ret;
 }
 
 static int gdsc_disable(struct regulator_dev *rdev)
@@ -227,15 +288,17 @@ static int gdsc_disable(struct regulator_dev *rdev)
 	uint32_t regval;
 	int i, ret = 0;
 
+	mutex_lock(&gdsc_seq_lock);
+
 	if (sc->force_root_en)
 		clk_prepare_enable(sc->clocks[sc->root_clk_idx]);
 
 	for (i = sc->clock_count-1; i >= 0; i--) {
 		if (unlikely(i == sc->root_clk_idx))
 			continue;
-		if (sc->toggle_mem)
+		if (sc->toggle_mem && sc->allow_clear)
 			clk_set_flags(sc->clocks[i], CLKFLAG_NORETAIN_MEM);
-		if (sc->toggle_periph)
+		if (sc->toggle_periph && sc->allow_clear)
 			clk_set_flags(sc->clocks[i], CLKFLAG_NORETAIN_PERIPH);
 	}
 
@@ -247,6 +310,7 @@ static int gdsc_disable(struct regulator_dev *rdev)
 		if (regval & HW_CONTROL_MASK) {
 			dev_warn(&rdev->dev, "Invalid disable while %s is under HW control\n",
 				 sc->rdesc.name);
+			mutex_unlock(&gdsc_seq_lock);
 			return -EBUSY;
 		}
 
@@ -289,6 +353,9 @@ static int gdsc_disable(struct regulator_dev *rdev)
 	if ((sc->is_gdsc_enabled && sc->root_en) || sc->force_root_en)
 		clk_disable_unprepare(sc->clocks[sc->root_clk_idx]);
 	sc->is_gdsc_enabled = false;
+
+	mutex_unlock(&gdsc_seq_lock);
+
 	return ret;
 }
 
@@ -297,7 +364,9 @@ static unsigned int gdsc_get_mode(struct regulator_dev *rdev)
 	struct gdsc *sc = rdev_get_drvdata(rdev);
 	uint32_t regval;
 
+	mutex_lock(&gdsc_seq_lock);
 	regval = readl_relaxed(sc->gdscr);
+	mutex_unlock(&gdsc_seq_lock);
 	if (regval & HW_CONTROL_MASK)
 		return REGULATOR_MODE_FAST;
 	return REGULATOR_MODE_NORMAL;
@@ -307,7 +376,9 @@ static int gdsc_set_mode(struct regulator_dev *rdev, unsigned int mode)
 {
 	struct gdsc *sc = rdev_get_drvdata(rdev);
 	uint32_t regval;
-	int ret;
+	int ret = 0;
+
+	mutex_lock(&gdsc_seq_lock);
 
 	regval = readl_relaxed(sc->gdscr);
 
@@ -317,6 +388,7 @@ static int gdsc_set_mode(struct regulator_dev *rdev, unsigned int mode)
 	 */
 	if (regval & SW_COLLAPSE_MASK) {
 		dev_err(&rdev->dev, "can't enable hw collapse now\n");
+		mutex_unlock(&gdsc_seq_lock);
 		return -EBUSY;
 	}
 
@@ -351,18 +423,20 @@ static int gdsc_set_mode(struct regulator_dev *rdev, unsigned int mode)
 		 */
 		mb();
 		udelay(1);
+
 		ret = poll_gdsc_status(sc, ENABLED);
-		if (ret) {
+		if (ret)
 			dev_err(&rdev->dev, "%s set_mode timed out: 0x%x\n",
 				sc->rdesc.name, regval);
-			return ret;
-		}
 		break;
 	default:
-		return -EINVAL;
+		ret = -EINVAL;
+		break;
 	}
 
-	return 0;
+	mutex_unlock(&gdsc_seq_lock);
+
+	return ret;
 }
 
 static struct regulator_ops gdsc_ops = {
@@ -414,6 +488,18 @@ static int gdsc_probe(struct platform_device *pdev)
 		sc->domain_addr = devm_ioremap(&pdev->dev, res->start,
 							resource_size(res));
 		if (sc->domain_addr == NULL)
+			return -ENOMEM;
+	}
+
+	sc->reset_aon = of_property_read_bool(pdev->dev.of_node,
+						"qcom,reset-aon-logic");
+
+	res = platform_get_resource_byname(pdev, IORESOURCE_MEM,
+							"sw_reset");
+	if (res) {
+		sc->sw_reset_addr = devm_ioremap(&pdev->dev, res->start,
+							resource_size(res));
+		if (sc->sw_reset_addr == NULL)
 			return -ENOMEM;
 	}
 
@@ -527,13 +613,17 @@ static int gdsc_probe(struct platform_device *pdev)
 		}
 	}
 
+	sc->allow_clear = of_property_read_bool(pdev->dev.of_node,
+							"qcom,disallow-clear");
+	sc->allow_clear = !sc->allow_clear;
+
 	for (i = 0; i < sc->clock_count; i++) {
-		if (retain_mem || (regval & PWR_ON_MASK))
+		if (retain_mem || (regval & PWR_ON_MASK) || !sc->allow_clear)
 			clk_set_flags(sc->clocks[i], CLKFLAG_RETAIN_MEM);
 		else
 			clk_set_flags(sc->clocks[i], CLKFLAG_NORETAIN_MEM);
 
-		if (retain_periph || (regval & PWR_ON_MASK))
+		if (retain_periph || (regval & PWR_ON_MASK) || !sc->allow_clear)
 			clk_set_flags(sc->clocks[i], CLKFLAG_RETAIN_PERIPH);
 		else
 			clk_set_flags(sc->clocks[i], CLKFLAG_NORETAIN_PERIPH);
@@ -579,11 +669,7 @@ static int __init gdsc_init(void)
 {
 	return platform_driver_register(&gdsc_driver);
 }
-#ifdef CONFIG_MACH_LGE
-arch_initcall_sync(gdsc_init);
-#else
 subsys_initcall(gdsc_init);
-#endif
 
 static void __exit gdsc_exit(void)
 {

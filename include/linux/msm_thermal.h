@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012-2015, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2012-2016, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -59,6 +59,7 @@ struct msm_thermal_data {
 	int32_t vdd_rstr_temp_degC;
 	int32_t vdd_rstr_temp_hyst_degC;
 	int32_t vdd_mx_min;
+	int32_t vdd_cx_min;
 	int32_t psm_temp_degC;
 	int32_t psm_temp_hyst_degC;
 	int32_t ocr_temp_degC;
@@ -77,6 +78,7 @@ struct msm_thermal_data {
 	int32_t cx_phase_request_key;
 	int32_t vdd_mx_temp_degC;
 	int32_t vdd_mx_temp_hyst_degC;
+	int32_t vdd_mx_sensor_id;
 	int32_t therm_reset_temp_degC;
 };
 
@@ -94,6 +96,7 @@ struct therm_threshold {
 	int32_t                     trip_triggered;
 	void (*notify)(struct therm_threshold *);
 	struct threshold_info       *parent;
+	int32_t                     cur_state;
 };
 
 struct threshold_info {
@@ -269,22 +272,22 @@ static inline int msm_thermal_set_frequency(uint32_t cpu, uint32_t freq,
 	return -ENOSYS;
 }
 static inline int msm_thermal_set_cluster_freq(uint32_t cluster, uint32_t freq,
-	bool is_max);
+	bool is_max)
 {
 	return -ENOSYS;
 }
 static inline int msm_thermal_get_freq_plan_size(uint32_t cluster,
-	unsigned int *table_len);
+	unsigned int *table_len)
 {
 	return -ENOSYS;
 }
 static inline int msm_thermal_get_cluster_freq_plan(uint32_t cluster,
-	unsigned int *table_ptr);
+	unsigned int *table_ptr)
 {
 	return -ENOSYS;
 }
 static inline int msm_thermal_get_cluster_voltage_plan(uint32_t cluster,
-	uint32_t *table_ptr);
+	uint32_t *table_ptr)
 {
 	return -ENOSYS;
 }

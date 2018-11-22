@@ -2,7 +2,7 @@
  *
  * Copyright (C) 2008 Google, Inc.
  * Author: Brian Swetland <swetland@google.com>
- * Copyright (c) 2009-2015, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2009-2016, The Linux Foundation. All rights reserved.
  *
  * This software is licensed under the terms of the GNU General Public
  * License version 2, as published by the Free Software Foundation, and
@@ -55,6 +55,19 @@ enum usb_bus_vote {
 	USB_NO_PERF_VOTE = 0,
 	USB_MAX_PERF_VOTE,
 	USB_MIN_PERF_VOTE,
+};
+
+/**
+ * Requested USB votes for NOC frequency
+ *
+ * USB_NOC_NOM_VOTE    Vote for NOM set of NOC frequencies
+ * USB_NOC_SVS_VOTE    Vote for SVS set of NOC frequencies
+ *
+ */
+enum usb_noc_mode {
+	USB_NOC_NOM_VOTE = 0,
+	USB_NOC_SVS_VOTE,
+	USB_NOC_NUM_VOTE,
 };
 
 /**
@@ -258,6 +271,8 @@ enum usb_id_state {
  *		mode with controller in device mode.
  * @bool disable_retention_with_vdd_min: Indicates whether to enable
 		allowing VDDmin without putting PHY into retention.
+ * @bool enable_phy_id_pullup: Indicates whether phy id pullup is
+		enabled or not.
  * @usb_id_gpio: Gpio used for USB ID detection.
  * @hub_reset_gpio: Gpio used for hub reset.
  * @switch_sel_gpio: Gpio used for controlling switch that
@@ -268,6 +283,8 @@ enum usb_id_state {
  * @bool enable_streaming: Indicates whether streaming to be enabled by default.
  * @bool enable_axi_prefetch: Indicates whether AXI Prefetch interface is used
 		for improving data performance.
+ * @bool enable_sdp_typec_current_limit: Indicates whether type-c current for
+		sdp charger to be limited.
  */
 struct msm_otg_platform_data {
 	int *phy_init_seq;
@@ -301,6 +318,7 @@ struct msm_otg_platform_data {
 	int vddmin_gpio;
 	bool enable_ahb2ahb_bypass;
 	bool disable_retention_with_vdd_min;
+	bool enable_phy_id_pullup;
 	int usb_id_gpio;
 	int hub_reset_gpio;
 	int switch_sel_gpio;
@@ -308,7 +326,7 @@ struct msm_otg_platform_data {
 	bool emulation;
 	bool enable_streaming;
 	bool enable_axi_prefetch;
-	struct clk *system_clk;
+	bool enable_sdp_typec_current_limit;
 };
 
 /* phy related flags */
@@ -317,10 +335,10 @@ struct msm_otg_platform_data {
 #define PHY_HOST_MODE			BIT(2)
 #define PHY_CHARGER_CONNECTED		BIT(3)
 #define PHY_VBUS_VALID_OVERRIDE		BIT(4)
+#define DEVICE_IN_SS_MODE		BIT(5)
 #ifdef CONFIG_LGE_USB_G_ANDROID
-#define PHY_OTG_MODE			BIT(5)
+#define PHY_OTG_MODE			BIT(6)
 #endif
-
 #define USB_NUM_BUS_CLOCKS      3
 
 /**
@@ -343,6 +361,7 @@ struct msm_otg_platform_data {
  * @phy_csr_clk: clock struct of phy_csr_clk for USB PHY. This clock is
 		required to access PHY CSR registers via AHB2PHY interface.
  * @bus_clks: bimc/snoc/pcnoc clock struct.
+ * @default_noc_mode: default frequency for NOC clocks - SVS or NOM
  * @core_clk_rate: core clk max frequency
  * @regs: ioremapped register base address.
  * @usb_phy_ctrl_reg: relevant PHY_CTRL_REG register base address.
@@ -405,6 +424,9 @@ struct msm_otg {
 	struct clk *bus_clks[USB_NUM_BUS_CLOCKS];
 	struct clk *phy_ref_clk;
 	long core_clk_rate;
+	long core_clk_svs_rate;
+	long core_clk_nominal_rate;
+	enum usb_noc_mode default_noc_mode;
 	struct resource *io_res;
 	void __iomem *regs;
 	void __iomem *phy_csr_regs;
@@ -526,12 +548,17 @@ struct msm_otg {
 	rwlock_t dbg_lock;
 
 	char (buf[DEBUG_MAX_MSG])[DEBUG_MSG_LEN];   /* buffer */
-	u32 max_nominal_system_clk_rate;
 	unsigned int vbus_state;
+	unsigned int usb_irq_count;
+	int pm_qos_latency;
+	struct pm_qos_request pm_qos_req_dma;
+	struct delayed_work perf_vote_work;
 };
 
 struct ci13xxx_platform_data {
 	u8 usb_core_id;
+	int *tlmm_init_seq;
+	int tlmm_seq_count;
 	/*
 	 * value of 2^(log2_itc-1) will be used as the interrupt threshold
 	 * (ITC), when log2_itc is between 1 to 7.
@@ -541,9 +568,6 @@ struct ci13xxx_platform_data {
 	bool l1_supported;
 	bool enable_ahb2ahb_bypass;
 	bool enable_streaming;
-	struct clk *system_clk;
-	u32 max_nominal_system_clk_rate;
-	u32 default_system_clk_rate;
 	bool enable_axi_prefetch;
 };
 
@@ -577,6 +601,8 @@ struct msm_hsic_host_platform_data {
 
 	/* gpio used to resume peripheral */
 	unsigned resume_gpio;
+	int *tlmm_init_seq;
+	int tlmm_seq_count;
 
 	/*swfi latency is required while driving resume on to the bus */
 	u32 swfi_latency;
@@ -603,36 +629,6 @@ struct msm_usb_host_platform_data {
 	int pm_qos_latency;
 };
 
-/**
- * struct msm_hsic_peripheral_platform_data: HSIC peripheral
- * platform data.
- * @core_clk_always_on_workaround: Don't disable core_clk when
- *                                 HSIC enters LPM.
- */
-struct msm_hsic_peripheral_platform_data {
-	bool core_clk_always_on_workaround;
-};
-
-/**
- * struct usb_ext_notification: event notification structure
- * @notify: pointer to client function to call when ID event is detected.
- *          The function parameter is provided by driver to be called back when
- *          external client indicates it is done using the USB. This function
- *          should return 0 if handled successfully, otherise an error code.
- * @ctxt: client-specific context pointer
- *
- * This structure should be used by clients wishing to register (via
- * msm_register_usb_ext_notification) for event notification whenever a USB
- * cable is plugged in and ID pin status changes. Clients must provide a
- * callback function pointer. If this callback returns 0, the USB driver will
- * assume the client is "taking over" the connection, and will relinquish any
- * further processing until its callback (passed via the third parameter) is
- * called with the online parameter set to false.
- */
-struct usb_ext_notification {
-	int (*notify)(void *, int, void (*)(void *, int online), void *);
-	void *ctxt;
-};
 #ifdef CONFIG_USB_BAM
 void msm_bam_set_usb_host_dev(struct device *dev);
 void msm_bam_set_hsic_host_dev(struct device *dev);
@@ -643,6 +639,7 @@ void msm_bam_usb_host_notify_on_resume(void);
 void msm_bam_hsic_host_notify_on_resume(void);
 bool msm_bam_hsic_host_pipe_empty(void);
 bool msm_usb_bam_enable(enum usb_ctrl ctrl, bool bam_enable);
+int msm_do_bam_disable_enable(enum usb_ctrl ctrl);
 #else
 static inline void msm_bam_set_usb_host_dev(struct device *dev) {}
 static inline void msm_bam_set_hsic_host_dev(struct device *dev) {}
@@ -656,6 +653,7 @@ static inline bool msm_usb_bam_enable(enum usb_ctrl ctrl, bool bam_enable)
 {
 	return true;
 }
+int msm_do_bam_disable_enable(enum usb_ctrl ctrl) { return true; }
 #endif
 #ifdef CONFIG_USB_CI13XXX_MSM
 void msm_hw_bam_disable(bool bam_disable);
@@ -680,7 +678,7 @@ static inline int get_pm_runtime_counter(struct device *dev) { return -ENOSYS; }
 #endif
 
 #ifdef CONFIG_USB_DWC3_MSM
-int msm_ep_config(struct usb_ep *ep);
+int msm_ep_config(struct usb_ep *ep, struct usb_request *request);
 int msm_ep_unconfig(struct usb_ep *ep);
 void dwc3_tx_fifo_resize_request(struct usb_ep *ep, bool qdss_enable);
 int msm_data_fifo_config(struct usb_ep *ep, phys_addr_t addr, u32 size,
@@ -688,9 +686,6 @@ int msm_data_fifo_config(struct usb_ep *ep, phys_addr_t addr, u32 size,
 bool msm_dwc3_reset_ep_after_lpm(struct usb_gadget *gadget);
 int msm_dwc3_reset_dbm_ep(struct usb_ep *ep);
 
-void msm_dwc3_restart_usb_session(struct usb_gadget *gadget);
-
-int msm_register_usb_ext_notification(struct usb_ext_notification *info);
 #else
 static inline int msm_data_fifo_config(struct usb_ep *ep, phys_addr_t addr,
 	u32 size, u8 dst_pipe_idx)
@@ -698,7 +693,7 @@ static inline int msm_data_fifo_config(struct usb_ep *ep, phys_addr_t addr,
 	return -ENODEV;
 }
 
-static inline int msm_ep_config(struct usb_ep *ep)
+static inline int msm_ep_config(struct usb_ep *ep, struct usb_request *request)
 {
 	return -ENODEV;
 }
@@ -711,17 +706,6 @@ static inline int msm_ep_unconfig(struct usb_ep *ep)
 static inline void dwc3_tx_fifo_resize_request(
 					struct usb_ep *ep, bool qdss_enable)
 {
-}
-
-static inline void msm_dwc3_restart_usb_session(struct usb_gadget *gadget)
-{
-	return;
-}
-
-static inline int msm_register_usb_ext_notification(
-					struct usb_ext_notification *info)
-{
-	return -ENODEV;
 }
 
 static inline bool msm_dwc3_reset_ep_after_lpm(struct usb_gadget *gadget)

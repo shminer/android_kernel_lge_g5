@@ -1,4 +1,4 @@
-/* Copyright (c) 2015, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2015-2016, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -58,13 +58,10 @@
 
 		qcom,initial-pwrlevel = <3>;
 
-		qcom,idle-timeout = <8>; //<HZ/12>
+		qcom,idle-timeout = <80>; //msecs
 		qcom,strtstp-sleepwake;
 
-		/* Clocks = KGSL_CLK_CORE | KGSL_CLK_IFACE | KGSL_CLK_MEM |
-		KGSL_CLK_MEM_IFACE | KGSL_CLK_ALT_MEM_IFACE
-		KGSL_CLK_RBBMTIMER */
-		qcom,clk-map = <0x000001DE>;
+		qcom,highest-bank-bit = <14>;
 
 		clocks = <&clock_gcc clk_gcc_oxili_gfx3d_clk>,
 			<&clock_gcc clk_gcc_oxili_ahb_clk>,

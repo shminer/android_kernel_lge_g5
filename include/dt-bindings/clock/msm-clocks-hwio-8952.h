@@ -1,4 +1,4 @@
-/* Copyright (c) 2014-2015, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2014-2016, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -13,11 +13,13 @@
 #ifndef __MSM_CLOCKS_8952_HWIO_H
 #define __MSM_CLOCKS_8952_HWIO_H
 
+#define GPLL0_MODE			0x21000
 #define GPLL0_STATUS			0x2101C
 #define GPLL6_STATUS			0x3701C
 #define GPLL3_MODE			0x22000
 #define GPLL4_MODE			0x24000
 #define GPLL4_STATUS			0x24024
+#define GX_DOMAIN_MISC			0x5B00C
 #define SYS_MM_NOC_AXI_CBCR		0x3D008
 #define BIMC_GFX_CBCR			0x59034
 #define MSS_CFG_AHB_CBCR		0x49000
@@ -210,6 +212,7 @@
 #define SYSTEM_MM_NOC_CMD_RCGR		0x3D000
 #define USB_FS_BCR			0x3F000
 
+#define APCS_CLOCK_SLEEP_ENA_VOTE	0x45008
 #define BYTE1_CMD_RCGR			0x4D0B0
 #define ESC1_CMD_RCGR			0x4D0A8
 #define PCLK1_CMD_RCGR			0x4D0B8
@@ -231,6 +234,7 @@
 #define SNOC_CLK_ID			0x1
 #define SYSMMNOC_CLK_ID			0x2
 #define BIMC_CLK_ID			0x0
+#define BIMC_GPU_CLK_ID			0x2
 #define IPA_CLK_ID			0x0
 
 #define BUS_SCALING		0x2
@@ -280,6 +284,7 @@
 /* cci_clk_src and usb_fs_system_clk_src */
 #define gpll0_out_aux_source_val	2
 #define gpll4_source_val		2   /* sdcc1_apss_clk_src */
+#define gpll4_out_source_val		3   /* sdcc1_apss_clk_src */
 #define gpll6_source_val		2   /* mclk0_2_clk_src */
 #define gpll6_aux_source_val		3   /* gfx3d_clk_src */
 #define gpll6_out_main_source_val	1   /* usb_fs_ic_clk_src */
@@ -339,6 +344,9 @@
 	},                                      \
 	.num_fmax = VDD_DIG_NUM
 
+# define OVERRIDE_FMAX1(clkname, l1, f1) \
+	clkname##_clk_src.c.fmax[VDD_DIG_##l1] = (f1)
+
 # define OVERRIDE_FMAX2(clkname, l1, f1, l2, f2) \
 	clkname##_clk_src.c.fmax[VDD_DIG_##l1] = (f1);  \
 	clkname##_clk_src.c.fmax[VDD_DIG_##l2] = (f2)
@@ -382,8 +390,17 @@
 	clkname##_clk_src.c.fmax[VDD_DIG_##l4] = (f4);\
 	clkname##_clk_src.c.fmax[VDD_DIG_##l5] = (f5)
 
-#define OVERRIDE_FTABLE(clkname, ftable) \
-	clkname##_clk_src.freq_tbl = ftable##_thorium
+#define OVERRIDE_FMAX6(clkname, \
+		l1, f1, l2, f2, l3, f3, l4, f4, l5, f5, l6, f6) \
+	clkname##_clk_src.c.fmax[VDD_DIG_##l1] = (f1);\
+	clkname##_clk_src.c.fmax[VDD_DIG_##l2] = (f2);\
+	clkname##_clk_src.c.fmax[VDD_DIG_##l3] = (f3);\
+	clkname##_clk_src.c.fmax[VDD_DIG_##l4] = (f4);\
+	clkname##_clk_src.c.fmax[VDD_DIG_##l5] = (f5);\
+	clkname##_clk_src.c.fmax[VDD_DIG_##l6] = (f6)
+
+#define OVERRIDE_FTABLE(clkname, ftable, name) \
+	clkname##_clk_src.freq_tbl = ftable##_##name
 
 enum vdd_dig_levels {
 	VDD_DIG_NONE,
@@ -392,7 +409,26 @@ enum vdd_dig_levels {
 	VDD_DIG_NOMINAL,
 	VDD_DIG_NOM_PLUS,
 	VDD_DIG_HIGH,
+	VDD_DIG_SUPER_TUR,
 	VDD_DIG_NUM
+};
+
+enum vdd_dig_levels_8917 {
+	VDD_DIG_NONE_8917,
+	VDD_DIG_LOWER_8917,
+	VDD_DIG_LOW_8917,
+	VDD_DIG_NOMINAL_8917,
+	VDD_DIG_NOM_PLUS_8917,
+	VDD_DIG_HIGH_8917,
+	VDD_DIG_NUM_8917
+};
+
+enum vdd_hf_pll_levels_8917 {
+	VDD_HF_PLL_OFF_8917,
+	VDD_HF_PLL_SVS_8917,
+	VDD_HF_PLL_NOM_8917,
+	VDD_HF_PLL_TUR_8917,
+	VDD_HF_PLL_NUM_8917,
 };
 
 int vdd_corner[] = {
@@ -402,5 +438,6 @@ int vdd_corner[] = {
 	RPM_REGULATOR_LEVEL_NOM,		/* VDD_DIG_NOM */
 	RPM_REGULATOR_LEVEL_NOM_PLUS,		/* VDD_DIG_NOM_PLUS */
 	RPM_REGULATOR_LEVEL_TURBO,		/* VDD_DIG_TURBO */
+	RPM_REGULATOR_LEVEL_BINNING,		/* VDD_DIG_SUPER_TUR */
 };
 #endif

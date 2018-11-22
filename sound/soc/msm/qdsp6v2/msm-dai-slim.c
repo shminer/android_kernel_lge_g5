@@ -266,6 +266,7 @@ static int msm_dai_slim_hw_params(
 		dai_data->bits = 16;
 		break;
 	case SNDRV_PCM_FORMAT_S24_LE:
+	case SNDRV_PCM_FORMAT_S24_3LE:
 		dai_data->bits = 24;
 		break;
 	case SNDRV_PCM_FORMAT_S32_LE:
@@ -482,7 +483,9 @@ static void msm_dai_slim_remove_dai_data(
 		dai_data_t = &drv_data->slim_dai_data[i];
 
 		kfree(dai_data_t->chan_h);
+		dai_data_t->chan_h = NULL;
 		kfree(dai_data_t->sh_ch);
+		dai_data_t->sh_ch = NULL;
 	}
 }
 

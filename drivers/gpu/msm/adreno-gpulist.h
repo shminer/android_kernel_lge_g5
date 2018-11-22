@@ -1,4 +1,4 @@
-/* Copyright (c) 2002,2007-2015, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2002,2007-2016, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -20,6 +20,18 @@ static const struct adreno_gpu_core adreno_gpulist[] = {
 		.major = 0,
 		.minor = 6,
 		.patchid = 0x00,
+		.pm4fw_name = "a300_pm4.fw",
+		.pfpfw_name = "a300_pfp.fw",
+		.gpudev = &adreno_a3xx_gpudev,
+		.gmem_size = SZ_128K,
+		.busy_mask = 0x7FFFFFFE,
+	},
+	{
+		.gpurev = ADRENO_REV_A306A,
+		.core = 3,
+		.major = 0,
+		.minor = 6,
+		.patchid = 0x20,
 		.pm4fw_name = "a300_pm4.fw",
 		.pfpfw_name = "a300_pfp.fw",
 		.gpudev = &adreno_a3xx_gpudev,
@@ -127,7 +139,6 @@ static const struct adreno_gpu_core adreno_gpulist[] = {
 		.major = 3,
 		.minor = 0,
 		.patchid = 0,
-		.features = ADRENO_SYNC_SMMU_PC,
 		.pm4fw_name = "a530v1_pm4.fw",
 		.pfpfw_name = "a530v1_pfp.fw",
 		.gpudev = &adreno_a5xx_gpudev,
@@ -142,7 +153,7 @@ static const struct adreno_gpu_core adreno_gpulist[] = {
 		.minor = 0,
 		.patchid = 1,
 		.features = ADRENO_GPMU | ADRENO_SPTP_PC | ADRENO_LM |
-			ADRENO_PREEMPTION | ADRENO_SYNC_SMMU_PC | ADRENO_64BIT |
+			ADRENO_PREEMPTION | ADRENO_64BIT |
 			ADRENO_CONTENT_PROTECTION,
 		.pm4fw_name = "a530_pm4.fw",
 		.pfpfw_name = "a530_pfp.fw",
@@ -191,6 +202,7 @@ static const struct adreno_gpu_core adreno_gpulist[] = {
 		.major = 0,
 		.minor = 5,
 		.patchid = ANY_ID,
+		.features = ADRENO_PREEMPTION | ADRENO_64BIT,
 		.pm4fw_name = "a530_pm4.fw",
 		.pfpfw_name = "a530_pfp.fw",
 		.gpudev = &adreno_a5xx_gpudev,
@@ -204,8 +216,11 @@ static const struct adreno_gpu_core adreno_gpulist[] = {
 		.major = 0,
 		.minor = 6,
 		.patchid = ANY_ID,
+		.features = ADRENO_PREEMPTION | ADRENO_64BIT |
+			ADRENO_CONTENT_PROTECTION | ADRENO_CPZ_RETENTION,
 		.pm4fw_name = "a530_pm4.fw",
 		.pfpfw_name = "a530_pfp.fw",
+		.zap_name = "a506_zap",
 		.gpudev = &adreno_a5xx_gpudev,
 		.gmem_size = (SZ_128K + SZ_8K),
 		.num_protected_regs = 0x20,
@@ -223,5 +238,27 @@ static const struct adreno_gpu_core adreno_gpulist[] = {
 		.gmem_size = SZ_256K,
 		.num_protected_regs = 0x20,
 		.busy_mask = 0xFFFFFFFE,
+	},
+	{
+		.gpurev = ADRENO_REV_A540,
+		.core = 5,
+		.major = 4,
+		.minor = 0,
+		.patchid = ANY_ID,
+		.features = ADRENO_PREEMPTION | ADRENO_64BIT |
+			ADRENO_CONTENT_PROTECTION |
+			ADRENO_GPMU | ADRENO_SPTP_PC,
+		.pm4fw_name = "a530_pm4.fw",
+		.pfpfw_name = "a530_pfp.fw",
+		.zap_name = "a530_zap",
+		.gpudev = &adreno_a5xx_gpudev,
+		.gmem_size = SZ_1M,
+		.num_protected_regs = 0x20,
+		.busy_mask = 0xFFFFFFFE,
+		.gpmufw_name = "a540_gpmu.fw2",
+		.gpmu_major = 3,
+		.gpmu_minor = 0,
+		.gpmu_tsens = 0x000C000D,
+		.max_power = 5448,
 	},
 };

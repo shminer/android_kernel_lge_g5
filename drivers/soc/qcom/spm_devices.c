@@ -1,4 +1,4 @@
-/* Copyright (c) 2011-2015, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2011-2016, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -175,6 +175,7 @@ static void msm_spm_config_q2s(struct msm_spm_device *dev, unsigned int mode)
 		spm_legacy_mode = 0;
 		break;
 	case MSM_SPM_MODE_GDHS:
+	case MSM_SPM_MODE_STANDALONE_POWER_COLLAPSE:
 	case MSM_SPM_MODE_POWER_COLLAPSE:
 		qchannel_ignore = dev->qchannel_ignore;
 		spm_legacy_mode = 1;
@@ -198,6 +199,7 @@ static void msm_spm_config_hw_flush(struct msm_spm_device *dev,
 
 	switch (mode) {
 	case MSM_SPM_MODE_FASTPC:
+	case MSM_SPM_MODE_STANDALONE_POWER_COLLAPSE:
 	case MSM_SPM_MODE_POWER_COLLAPSE:
 		val = BIT(0);
 		break;
@@ -219,6 +221,7 @@ static void msm_spm_config_slpreq(struct msm_spm_device *dev,
 	switch (mode) {
 	case MSM_SPM_MODE_FASTPC:
 	case MSM_SPM_MODE_GDHS:
+	case MSM_SPM_MODE_STANDALONE_POWER_COLLAPSE:
 	case MSM_SPM_MODE_POWER_COLLAPSE:
 		val = BIT(4);
 		break;
@@ -231,11 +234,11 @@ static void msm_spm_config_slpreq(struct msm_spm_device *dev,
 }
 
 static int msm_spm_dev_set_low_power_mode(struct msm_spm_device *dev,
-		unsigned int mode, bool notify_rpm)
+		unsigned int mode, bool notify_rpm, bool set_spm_enable)
 {
 	uint32_t i;
 	int ret = -EINVAL;
-	uint32_t ctl;
+	uint32_t ctl = 0;
 
 	if (!dev) {
 		pr_err("dev is NULL\n");
@@ -248,9 +251,11 @@ static int msm_spm_dev_set_low_power_mode(struct msm_spm_device *dev,
 	if (!dev->num_modes)
 		return 0;
 
-	if (mode == MSM_SPM_MODE_DISABLED) {
+	if (mode == MSM_SPM_MODE_DISABLED && set_spm_enable) {
 		ret = msm_spm_drv_set_spm_enable(&dev->reg_data, false);
-	} else if (!msm_spm_drv_set_spm_enable(&dev->reg_data, true)) {
+	} else {
+		if (set_spm_enable)
+			ret = msm_spm_drv_set_spm_enable(&dev->reg_data, true);
 		for (i = 0; i < dev->num_modes; i++) {
 			if (dev->modes[i].mode != mode)
 				continue;
@@ -534,9 +539,23 @@ EXPORT_SYMBOL(msm_spm_avs_clear_irq);
 int msm_spm_set_low_power_mode(unsigned int mode, bool notify_rpm)
 {
 	struct msm_spm_device *dev = &__get_cpu_var(msm_cpu_spm_device);
-	return msm_spm_dev_set_low_power_mode(dev, mode, notify_rpm);
+	return msm_spm_dev_set_low_power_mode(dev, mode, notify_rpm, true);
 }
 EXPORT_SYMBOL(msm_spm_set_low_power_mode);
+
+void msm_spm_set_rpm_hs(bool allow_rpm_hs)
+{
+	struct msm_spm_device *dev = &__get_cpu_var(msm_cpu_spm_device);
+
+	dev->allow_rpm_hs = allow_rpm_hs;
+}
+EXPORT_SYMBOL(msm_spm_set_rpm_hs);
+
+int msm_spm_config_low_power_mode_addr(struct msm_spm_device *dev,
+		unsigned int mode, bool notify_rpm)
+{
+	return msm_spm_dev_set_low_power_mode(dev, mode, notify_rpm, false);
+}
 
 /**
  * msm_spm_init(): Board initalization function
@@ -579,7 +598,7 @@ struct msm_spm_device *msm_spm_get_device_by_name(const char *name)
 int msm_spm_config_low_power_mode(struct msm_spm_device *dev,
 		unsigned int mode, bool notify_rpm)
 {
-	return msm_spm_dev_set_low_power_mode(dev, mode, notify_rpm);
+	return msm_spm_dev_set_low_power_mode(dev, mode, notify_rpm, true);
 }
 #ifdef CONFIG_MSM_L2_SPM
 
@@ -729,7 +748,8 @@ static int msm_spm_dev_probe(struct platform_device *pdev)
 		{"qcom,saw2-spm-cmd-wfi", MSM_SPM_MODE_CLOCK_GATING},
 		{"qcom,saw2-spm-cmd-ret", MSM_SPM_MODE_RETENTION},
 		{"qcom,saw2-spm-cmd-gdhs", MSM_SPM_MODE_GDHS},
-		{"qcom,saw2-spm-cmd-spc", MSM_SPM_MODE_POWER_COLLAPSE},
+		{"qcom,saw2-spm-cmd-spc",
+				MSM_SPM_MODE_STANDALONE_POWER_COLLAPSE},
 		{"qcom,saw2-spm-cmd-pc", MSM_SPM_MODE_POWER_COLLAPSE},
 		{"qcom,saw2-spm-cmd-fpc", MSM_SPM_MODE_FASTPC},
 	};

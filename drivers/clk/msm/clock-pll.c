@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012-2015, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2012-2016, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -338,16 +338,18 @@ static int variable_rate_pll_clk_enable(struct clk *c)
 		writel_relaxed(pll->vals.test_ctl_lo_val,
 				PLL_TEST_CTL_LO_REG(pll));
 
-	/* Enable test_ctl debug */
-	mode |= BIT(3);
-	writel_relaxed(mode, PLL_MODE_REG(pll));
+	if (!pll->test_ctl_dbg) {
+		/* Enable test_ctl debug */
+		mode |= BIT(3);
+		writel_relaxed(mode, PLL_MODE_REG(pll));
 
-	testlo = readl_relaxed(PLL_TEST_CTL_LO_REG(pll));
-	testlo &= ~BM(7, 6);
-	testlo |= 0xC0;
-	writel_relaxed(testlo, PLL_TEST_CTL_LO_REG(pll));
-	/* Wait for the write to complete */
-	mb();
+		testlo = readl_relaxed(PLL_TEST_CTL_LO_REG(pll));
+		testlo &= ~BM(7, 6);
+		testlo |= 0xC0;
+		writel_relaxed(testlo, PLL_TEST_CTL_LO_REG(pll));
+		/* Wait for the write to complete */
+		mb();
+	}
 
 	/* Disable PLL bypass mode. */
 	mode |= PLL_BYPASSNL;
@@ -888,7 +890,6 @@ struct clk_ops clk_ops_variable_rate_pll_hwfsm = {
 	.set_rate = variable_rate_pll_set_rate,
 	.round_rate = variable_rate_pll_round_rate,
 	.handoff = variable_rate_pll_handoff,
-	.list_registers = variable_rate_pll_list_registers,
 };
 
 struct clk_ops clk_ops_variable_rate_pll = {
@@ -949,6 +950,60 @@ struct clk_ops clk_ops_pll_acpu_vote = {
 	.disable = pll_acpu_vote_clk_disable,
 	.is_enabled = pll_vote_clk_is_enabled,
 	.handoff = pll_acpu_vote_clk_handoff,
+	.list_registers = pll_vote_clk_list_registers,
+};
+
+
+static int pll_sleep_clk_enable(struct clk *c)
+{
+	u32 ena;
+	unsigned long flags;
+	struct pll_vote_clk *pllv = to_pll_vote_clk(c);
+
+	spin_lock_irqsave(&pll_reg_lock, flags);
+	ena = readl_relaxed(PLL_EN_REG(pllv));
+	ena &= ~(pllv->en_mask);
+	writel_relaxed(ena, PLL_EN_REG(pllv));
+	spin_unlock_irqrestore(&pll_reg_lock, flags);
+	return 0;
+}
+
+static void pll_sleep_clk_disable(struct clk *c)
+{
+	u32 ena;
+	unsigned long flags;
+	struct pll_vote_clk *pllv = to_pll_vote_clk(c);
+
+	spin_lock_irqsave(&pll_reg_lock, flags);
+	ena = readl_relaxed(PLL_EN_REG(pllv));
+	ena |= pllv->en_mask;
+	writel_relaxed(ena, PLL_EN_REG(pllv));
+	spin_unlock_irqrestore(&pll_reg_lock, flags);
+}
+
+static enum handoff pll_sleep_clk_handoff(struct clk *c)
+{
+	struct pll_vote_clk *pllv = to_pll_vote_clk(c);
+
+	if (!(readl_relaxed(PLL_EN_REG(pllv)) & pllv->en_mask))
+		return HANDOFF_ENABLED_CLK;
+
+	return HANDOFF_DISABLED_CLK;
+}
+
+/*
+ * This .ops is meant to be used by gpll0_sleep_clk_src. The aim is to utilise
+ * the h/w feature of sleep enable bit to denote if the PLL can be turned OFF
+ * once APPS goes to PC. gpll0_sleep_clk_src will be enabled only if there is a
+ * peripheral client using it and disabled if there is none. The current
+ * implementation of enable .ops  clears the h/w bit of sleep enable while the
+ * disable .ops asserts it.
+ */
+
+struct clk_ops clk_ops_pll_sleep_vote = {
+	.enable = pll_sleep_clk_enable,
+	.disable = pll_sleep_clk_disable,
+	.handoff = pll_sleep_clk_handoff,
 	.list_registers = pll_vote_clk_list_registers,
 };
 

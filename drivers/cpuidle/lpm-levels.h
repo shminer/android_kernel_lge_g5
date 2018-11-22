@@ -1,4 +1,4 @@
-/* Copyright (c) 2014, 2015, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2014-2016, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -40,6 +40,7 @@ struct lpm_cpu_level {
 	bool is_reset;
 	bool jtag_save_restore;
 	bool hyp_psci;
+	int reset_level;
 };
 
 struct lpm_cpu {
@@ -74,6 +75,7 @@ struct lpm_cluster_level {
 	struct lpm_level_avail available;
 	unsigned int psci_id;
 	bool is_reset;
+	int reset_level;
 };
 
 struct low_power_ops {

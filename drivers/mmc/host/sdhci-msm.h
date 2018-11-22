@@ -111,7 +111,7 @@ struct sdhci_msm_pm_qos_data {
  */
 struct sdhci_msm_pm_qos_group {
 	struct pm_qos_request req;
-	struct work_struct unvote_work;
+	struct delayed_work unvote_work;
 	atomic_t counter;
 	s32 latency;
 };
@@ -119,7 +119,7 @@ struct sdhci_msm_pm_qos_group {
 /* PM QoS HW IRQ voting */
 struct sdhci_msm_pm_qos_irq {
 	struct pm_qos_request req;
-	struct work_struct unvote_work;
+	struct delayed_work unvote_work;
 	struct device_attribute enable_attr;
 	struct device_attribute status_attr;
 	atomic_t counter;
@@ -146,11 +146,13 @@ struct sdhci_msm_pltfm_data {
 	struct sdhci_msm_bus_voting_data *voting_data;
 	u32 *sup_clk_table;
 	unsigned char sup_clk_cnt;
+	int sdiowakeup_irq;
 	u32 *sup_ice_clk_table;
 	unsigned char sup_ice_clk_cnt;
 	u32 ice_clk_max;
 	u32 ice_clk_min;
 	struct sdhci_msm_pm_qos_data pm_qos_data;
+	bool core_3_0v_support;
 };
 
 struct sdhci_msm_bus_vote {
@@ -194,6 +196,8 @@ struct sdhci_msm_host {
 	u8 saved_tuning_phase;
 	bool en_auto_cmd21;
 	struct device_attribute auto_cmd21_attr;
+	bool is_sdiowakeup_enabled;
+	bool sdio_pending_processing;
 	atomic_t controller_clock;
 	bool use_cdclp533;
 	bool use_updated_dll_reset;
@@ -209,6 +213,7 @@ struct sdhci_msm_host {
 	struct device_attribute pm_qos_group_status_attr;
 	bool pm_qos_group_enable;
 	struct sdhci_msm_pm_qos_irq pm_qos_irq;
+	bool tuning_in_progress;
 };
 
 extern char *saved_command_line;

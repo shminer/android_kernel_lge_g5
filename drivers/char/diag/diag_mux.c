@@ -1,4 +1,4 @@
-/* Copyright (c) 2014-2015, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2014-2016, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -23,61 +23,21 @@
 #include <linux/spinlock.h>
 #include <linux/ratelimit.h>
 #include "diagchar.h"
+#include "diagfwd.h"
 #include "diag_mux.h"
 #include "diag_usb.h"
 #include "diag_memorydevice.h"
-#include "mts_tty.h"
 #ifdef CONFIG_LGE_DM_APP
 #include "lg_dm_tty.h"
-#include "diagfwd.h"
 #include "diagmem.h"
-
-#define DM_WQUEUE "dm_wq"
 #endif
 #ifdef CONFIG_LGE_DIAG_BYPASS
 #include "lg_diag_bypass.h"
 #endif
 
-struct diag_logger_t *logger;
+struct diag_mux_state_t *diag_mux;
 static struct diag_logger_t usb_logger;
 static struct diag_logger_t md_logger;
-
-#ifdef CONFIG_LGE_DM_APP
-struct workqueue_struct {
-	struct list_head	pwqs;		/* WR: all pwqs of this wq */
-	struct list_head	list;		/* PL: list of all workqueues */
-
-	struct mutex		mutex;		/* protects this wq */
-	int			work_color;	/* WQ: current work color */
-	int			flush_color;	/* WQ: current flush color */
-	atomic_t		nr_pwqs_to_flush; /* flush in progress */
-	struct wq_flusher	*first_flusher;	/* WQ: first flusher */
-	struct list_head	flusher_queue;	/* WQ: flush waiters */
-	struct list_head	flusher_overflow; /* WQ: flush overflow list */
-
-	struct list_head	maydays;	/* MD: pwqs requesting rescue */
-	struct worker		*rescuer;	/* I: rescue worker */
-
-	int			nr_drainers;	/* WQ: drain in progress */
-	int			saved_max_active; /* WQ: saved pwq max_active */
-
-	struct workqueue_attrs	*unbound_attrs;	/* WQ: only for unbound wqs */
-	struct pool_workqueue	*dfl_pwq;	/* WQ: only for unbound wqs */
-
-#ifdef CONFIG_SYSFS
-	struct wq_device	*wq_dev;	/* I: for sysfs interface */
-#endif
-#ifdef CONFIG_LOCKDEP
-	struct lockdep_map	lockdep_map;
-#endif
-	char			name[24]; /* I: workqueue name */
-
-	/* hot fields used during command issue, aligned to cacheline */
-	unsigned int		flags ____cacheline_aligned; /* WQ: WQ_* flags */
-	struct pool_workqueue __percpu *cpu_pwqs; /* I: per-cpu pwqs */
-	struct pool_workqueue __rcu *numa_pwq_tbl[]; /* FR: unbound pwqs indexed by node */
-};
-#endif
 
 static struct diag_logger_ops usb_log_ops = {
 	.open = diag_usb_connect_all,
@@ -97,16 +57,14 @@ static struct diag_logger_ops md_log_ops = {
 
 int diag_mux_init()
 {
-
 #ifdef CONFIG_LGE_DM_APP
     int j = 0;
 #endif
-
-	logger = kzalloc(NUM_MUX_PROC * sizeof(struct diag_logger_t),
+	diag_mux = kzalloc(sizeof(struct diag_mux_state_t),
 			 GFP_KERNEL);
-	if (!logger)
+	if (!diag_mux)
 		return -ENOMEM;
-	kmemleak_not_leak(logger);
+	kmemleak_not_leak(diag_mux);
 
 	usb_logger.mode = DIAG_USB_MODE;
 	usb_logger.log_ops = &usb_log_ops;
@@ -148,13 +106,17 @@ int diag_mux_init()
 	 * Set USB logging as the default logger. This is the mode
 	 * Diag should be in when it initializes.
 	 */
-	logger = &usb_logger;
+	diag_mux->usb_ptr = &usb_logger;
+	diag_mux->md_ptr = &md_logger;
+	diag_mux->logger = &usb_logger;
+	diag_mux->mux_mask = 0;
+	diag_mux->mode = DIAG_USB_MODE;
 	return 0;
 }
 
 void diag_mux_exit()
 {
-	kfree(logger);
+	kfree(diag_mux);
 }
 
 int diag_mux_register(int proc, int ctx, struct diag_mux_ops *ops)
@@ -198,17 +160,28 @@ int diag_mux_register(int proc, int ctx, struct diag_mux_ops *ops)
 
 int diag_mux_queue_read(int proc)
 {
+	struct diag_logger_t *logger = NULL;
+
 	if (proc < 0 || proc >= NUM_MUX_PROC)
 		return -EINVAL;
-	if (!logger)
+	if (!diag_mux)
 		return -EIO;
-	if (logger->log_ops && logger->log_ops->queue_read)
+
+	if (diag_mux->mode == DIAG_MULTI_MODE)
+		logger = diag_mux->usb_ptr;
+	else
+		logger = diag_mux->logger;
+
+	if (logger && logger->log_ops && logger->log_ops->queue_read)
 		return logger->log_ops->queue_read(proc);
+
 	return 0;
 }
 
 int diag_mux_write(int proc, unsigned char *buf, int len, int ctx)
 {
+	struct diag_logger_t *logger = NULL;
+	int peripheral;
 
 #ifdef CONFIG_LGE_DM_APP
     int i;
@@ -218,13 +191,21 @@ int diag_mux_write(int proc, unsigned char *buf, int len, int ctx)
 
 	if (proc < 0 || proc >= NUM_MUX_PROC)
 		return -EINVAL;
+	if (!diag_mux)
+		return -EIO;
 
 #ifdef CONFIG_LGE_DM_APP
     if (driver->logging_mode == DM_APP_MODE) {
         /* only diag cmd #250 for supporting testmode tool */
         if ((GET_BUF_PERIPHERAL(ctx) == APPS_DATA) && (*((char *)buf) == 0xFA)) {
-            if (strcmp(lge_dm_tty->dm_wq->name,DM_WQUEUE) != 0)
-                return -EINVAL;
+            if (!lge_dm_tty || !lge_dm_tty->dm_wq){
+                usb_info = &diag_usb[proc];
+                if (!usb_info->hdl || !atomic_read(&usb_info->connected) ||
+                        !atomic_read(&usb_info->diag_state))
+                    return 0;
+                else
+                    goto err_lge_dm_tty;
+            }
             usb_info = &diag_usb[lge_dm_tty->id];
             lge_dm_tty->dm_usb_req = diagmem_alloc(driver, sizeof(struct diag_request),
                 usb_info->mempool);
@@ -262,17 +243,22 @@ int diag_mux_write(int proc, unsigned char *buf, int len, int ctx)
     }
 #endif
 
-	if (mts_tty->run) {
-		/* block usb out for 250 command processing */
-		if (buf[0] != 0xFA) {
-			return -EINVAL;
-		}
-	}
-
 #ifdef CONFIG_LGE_DIAG_BYPASS
     if(diag_bypass_response(buf, len, proc, ctx, logger) > 0) {
         return 0;
     }
+#endif
+
+	peripheral = GET_BUF_PERIPHERAL(ctx);
+	if (peripheral > NUM_PERIPHERALS)
+		return -EINVAL;
+
+	if (MD_PERIPHERAL_MASK(peripheral) & diag_mux->mux_mask)
+		logger = diag_mux->md_ptr;
+	else
+		logger = diag_mux->usb_ptr;
+#ifdef CONFIG_LGE_DM_APP
+err_lge_dm_tty:
 #endif
 
 	if (logger && logger->log_ops && logger->log_ops->write)
@@ -282,38 +268,86 @@ int diag_mux_write(int proc, unsigned char *buf, int len, int ctx)
 
 int diag_mux_close_peripheral(int proc, uint8_t peripheral)
 {
+	struct diag_logger_t *logger = NULL;
 	if (proc < 0 || proc >= NUM_MUX_PROC)
 		return -EINVAL;
 	/* Peripheral should account for Apps data as well */
 	if (peripheral > NUM_PERIPHERALS)
 		return -EINVAL;
+	if (!diag_mux)
+		return -EIO;
+
+	if (MD_PERIPHERAL_MASK(peripheral) & diag_mux->mux_mask)
+		logger = diag_mux->md_ptr;
+	else
+		logger = diag_mux->logger;
+
 	if (logger && logger->log_ops && logger->log_ops->close_peripheral)
 		return logger->log_ops->close_peripheral(proc, peripheral);
 	return 0;
 }
 
-int diag_mux_switch_logging(int new_mode)
+int diag_mux_switch_logging(int *req_mode, int *peripheral_mask)
 {
-	struct diag_logger_t *new_logger = NULL;
+	unsigned int new_mask = 0;
 
-	switch (new_mode) {
-	case DIAG_USB_MODE:
-		new_logger = &usb_logger;
-		break;
-	case DIAG_MEMORY_DEVICE_MODE:
-		new_logger = &md_logger;
-		break;
-	default:
-		pr_err("diag: Invalid mode %d in %s\n", new_mode, __func__);
+	if (!req_mode)
+		return -EINVAL;
+
+	if (*peripheral_mask <= 0 || *peripheral_mask > DIAG_CON_ALL) {
+		pr_err("diag: mask %d in %s\n", *peripheral_mask, __func__);
 		return -EINVAL;
 	}
 
-	if (logger) {
-		logger->log_ops->close();
-		logger = new_logger;
-		logger->log_ops->open();
+	switch (*req_mode) {
+	case DIAG_USB_MODE:
+		new_mask = ~(*peripheral_mask) & diag_mux->mux_mask;
+		if (new_mask != DIAG_CON_NONE)
+			*req_mode = DIAG_MULTI_MODE;
+		break;
+	case DIAG_MEMORY_DEVICE_MODE:
+		new_mask = (*peripheral_mask) | diag_mux->mux_mask;
+		if (new_mask != DIAG_CON_ALL)
+			*req_mode = DIAG_MULTI_MODE;
+		break;
+	default:
+		pr_err("diag: Invalid mode %d in %s\n", *req_mode, __func__);
+		return -EINVAL;
 	}
 
+	switch (diag_mux->mode) {
+	case DIAG_USB_MODE:
+		if (*req_mode == DIAG_MEMORY_DEVICE_MODE) {
+			diag_mux->usb_ptr->log_ops->close();
+			diag_mux->logger = diag_mux->md_ptr;
+			diag_mux->md_ptr->log_ops->open();
+		} else if (*req_mode == DIAG_MULTI_MODE) {
+			diag_mux->md_ptr->log_ops->open();
+			diag_mux->logger = NULL;
+		}
+		break;
+	case DIAG_MEMORY_DEVICE_MODE:
+		if (*req_mode == DIAG_USB_MODE) {
+			diag_mux->md_ptr->log_ops->close();
+			diag_mux->logger = diag_mux->usb_ptr;
+			diag_mux->usb_ptr->log_ops->open();
+		} else if (*req_mode == DIAG_MULTI_MODE) {
+			diag_mux->usb_ptr->log_ops->open();
+			diag_mux->logger = NULL;
+		}
+		break;
+	case DIAG_MULTI_MODE:
+		if (*req_mode == DIAG_USB_MODE) {
+			diag_mux->md_ptr->log_ops->close();
+			diag_mux->logger = diag_mux->usb_ptr;
+		} else if (*req_mode == DIAG_MEMORY_DEVICE_MODE) {
+			diag_mux->usb_ptr->log_ops->close();
+			diag_mux->logger = diag_mux->md_ptr;
+		}
+		break;
+	}
+	diag_mux->mode = *req_mode;
+	diag_mux->mux_mask = new_mask;
+	*peripheral_mask = new_mask;
 	return 0;
 }
-

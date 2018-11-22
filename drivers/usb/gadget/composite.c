@@ -18,7 +18,9 @@
 #include <linux/device.h>
 #include <linux/utsname.h>
 
+#include "gadget_chips.h"
 #include <linux/usb/composite.h>
+#include <linux/usb/msm_hsusb.h>
 #include <asm/unaligned.h>
 
 #ifdef CONFIG_LGE_USB_G_MULTIPLE_CONFIGURATION
@@ -730,6 +732,11 @@ static void reset_config(struct usb_composite_dev *cdev)
 
 	DBG(cdev, "reset config\n");
 
+	if (!cdev->config) {
+		pr_err("%s:cdev->config is already NULL\n", __func__);
+		return;
+	}
+
 	list_for_each_entry(f, &cdev->config->functions, list) {
 		if (f->disable)
 			f->disable(f);
@@ -1031,8 +1038,14 @@ void usb_remove_config(struct usb_composite_dev *cdev,
 		return;
 	}
 
-	if (cdev->config == config)
+	if (cdev->config == config) {
+		if (!gadget_is_dwc3(cdev->gadget) && !cdev->suspended) {
+			spin_unlock_irqrestore(&cdev->lock, flags);
+			msm_do_bam_disable_enable(CI_CTRL);
+			spin_lock_irqsave(&cdev->lock, flags);
+		}
 		reset_config(cdev);
+	}
 
 	list_del(&config->list);
 
@@ -1309,7 +1322,6 @@ static struct usb_gadget_string_container *find_gadget_strings(
 	list_for_each_entry(uc, &cdev->gstrings, list) {
 		struct usb_gadget_strings **org_gs;
 		struct usb_string *org_s, *s;
-		int i;
 
 		org_gs = get_containers_gs(uc);
 
@@ -1323,15 +1335,11 @@ static struct usb_gadget_string_container *find_gadget_strings(
 		org_s = org_gs[0]->strings;
 		s = sp[0]->strings;
 
-		for (i = 0; i < n_strings; i++) {
-			if ((s->s != org_s->s) && !(!s->s && *org_s->s == '\0'))
-				break;
-
-			org_s++;
-			s++;
-		}
-
-		if (i == n_strings)
+		/*
+		 * only check the first string of the function since it's not
+		 * likely that a set of strings matches but not other
+		 */
+		if (s->s == org_s->s)
 			return uc;
 	}
 
@@ -1641,6 +1649,12 @@ composite_setup(struct usb_gadget *gadget, const struct usb_ctrlrequest *ctrl)
 		case USB_DT_DEVICE:
 			cdev->desc.bNumConfigurations =
 				count_configs(cdev, USB_DT_DEVICE);
+			if (cdev->desc.bNumConfigurations == 0) {
+				pr_err("%s:config is not active. send stall\n",
+								__func__);
+				break;
+			}
+
 			cdev->desc.bMaxPacketSize0 =
 				cdev->gadget->ep0->maxpacket;
 			if (gadget_is_superspeed(gadget)) {
@@ -1677,7 +1691,9 @@ composite_setup(struct usb_gadget *gadget, const struct usb_ctrlrequest *ctrl)
 				break;
 			/* FALLTHROUGH */
 		case USB_DT_CONFIG:
+			spin_lock(&cdev->lock);
 			value = config_desc(cdev, w_value);
+			spin_unlock(&cdev->lock);
 			if (value >= 0)
 				value = min(w_length, (u16) value);
 			break;
@@ -1685,8 +1701,10 @@ composite_setup(struct usb_gadget *gadget, const struct usb_ctrlrequest *ctrl)
 #ifdef CONFIG_LGE_USB_G_MULTIPLE_CONFIGURATION
 			lgeusb_set_host_os(w_length);
 #endif
+			spin_lock(&cdev->lock);
 			value = get_string(cdev, req->buf,
 					w_index, w_value & 0xff);
+			spin_unlock(&cdev->lock);
 			if (value >= 0)
 				value = min(w_length, (u16) value);
 			break;
@@ -2027,8 +2045,14 @@ void composite_disconnect(struct usb_gadget *gadget)
 	 * disconnect callbacks?
 	 */
 	spin_lock_irqsave(&cdev->lock, flags);
-	if (cdev->config)
+	if (cdev->config) {
+		if (!gadget_is_dwc3(gadget) && !cdev->suspended) {
+			spin_unlock_irqrestore(&cdev->lock, flags);
+			msm_do_bam_disable_enable(CI_CTRL);
+			spin_lock_irqsave(&cdev->lock, flags);
+		}
 		reset_config(cdev);
+	}
 	if (cdev->driver->disconnect)
 		cdev->driver->disconnect(cdev);
 	if (cdev->delayed_status != 0) {

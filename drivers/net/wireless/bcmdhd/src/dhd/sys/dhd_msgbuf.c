@@ -26,7 +26,7 @@
  *
  * <<Broadcom-WL-IPTag/Open:>>
  *
- * $Id: dhd_msgbuf.c 613569 2016-01-19 09:46:44Z $
+ * $Id: dhd_msgbuf.c 674923 2016-12-13 08:52:33Z $
  */
 
 
@@ -44,6 +44,7 @@
 #include <dhd_bus.h>
 
 #include <dhd_dbg.h>
+#include <dhd_debug.h>
 #include <siutils.h>
 
 
@@ -2344,7 +2345,6 @@ dhd_prot_detach(dhd_pub_t *dhd)
 
 	/* Stop the protocol module */
 	if (prot) {
-
 		/* free up all DMA-able buffers allocated during prot attach/init */
 
 		dhd_dma_buf_free(dhd, &prot->d2h_dma_scratch_buf);
@@ -3698,12 +3698,14 @@ dhd_prot_txstatus_process(dhd_pub_t *dhd, void *msg)
 	uint32 len;
 	void *dmah;
 	void *secdma;
+	bool pkt_fate;
 
 	/* locks required to protect circular buffer accesses */
 	DHD_GENERAL_LOCK(dhd, flags);
 
 	txstatus = (host_txbuf_cmpl_t *)msg;
 	pktid = ltoh32(txstatus->cmn_hdr.request_id);
+	pkt_fate = TRUE;
 
 #if defined(DHD_PKTID_AUDIT_RING)
 	DHD_PKTID_AUDIT(dhd, dhd->prot->pktid_map_handle, pktid,
@@ -3783,6 +3785,21 @@ workq_ring_full:
 	}
 
 	if (pkt) {
+#ifdef DBG_PKT_MON
+		/*
+		 * tx_status in TX completion message cannot be used. As a WAR,
+		 * send d11 tx_status through unused status field of PCIe
+		 * completion header.
+		 */
+		if (dhd->d11_tx_status) {
+			uint16 tx_status;
+
+			tx_status = ltoh16(txstatus->compl_hdr.status);
+			pkt_fate = (tx_status == WLFC_CTL_PKTFLAG_DISCARD) ? TRUE : FALSE;
+
+			DHD_DBG_PKT_MON_TX_STATUS(dhd, pkt, pktid, tx_status);
+		}
+#endif /* DBG_PKT_MON */
 		if (SECURE_DMA_ENAB(dhd->osh)) {
 			int offset = 0;
 			BCM_REFERENCE(offset);
@@ -3796,7 +3813,7 @@ workq_ring_full:
 			DMA_UNMAP(dhd->osh, pa, (uint) len, DMA_RX, 0, dmah);
 		}
 #if defined(BCMPCIE)
-		dhd_txcomplete(dhd, pkt, true);
+		dhd_txcomplete(dhd, pkt, pkt_fate);
 #endif 
 
 #if DHD_DBG_SHOW_METADATA
@@ -4052,6 +4069,9 @@ dhd_prot_txdata(dhd_pub_t *dhd, void *PKTBUF, uint8 ifidx)
 		goto err_no_res_pktfree;
 	}
 
+#ifdef DBG_PKT_MON
+	DHD_DBG_PKT_MON_TX(dhd, PKTBUF, pktid);
+#endif /* DBG_PKT_MON */
 	/* Extract the data pointer and length information */
 	pktdata = PKTDATA(dhd->osh, PKTBUF);
 	pktlen  = PKTLEN(dhd->osh, PKTBUF);
@@ -4581,20 +4601,33 @@ static int
 dhd_msgbuf_query_ioctl(dhd_pub_t *dhd, int ifidx, uint cmd, void *buf, uint len, uint8 action)
 {
 	int ret = 0;
+	uint copylen = 0;
 
 	DHD_TRACE(("%s: Enter\n", __FUNCTION__));
 
-	/* Respond "bcmerror" and "bcmerrorstr" with local cache */
 	if (cmd == WLC_GET_VAR && buf)
 	{
-		if (!strcmp((char *)buf, "bcmerrorstr"))
-		{
-			strncpy((char *)buf, bcmerrorstr(dhd->dongle_error), BCME_STRLEN);
+		if (!len || !*(uint8 *)buf) {
+			DHD_ERROR(("%s(): Zero length bailing\n", __FUNCTION__));
+			ret = BCME_BADARG;
 			goto done;
 		}
-		else if (!strcmp((char *)buf, "bcmerror"))
-		{
-			*(int *)buf = dhd->dongle_error;
+
+		/* Respond "bcmerror" and "bcmerrorstr" with local cache */
+		copylen = MIN(len, BCME_STRLEN);
+
+		if ((len >= strlen("bcmerrorstr")) &&
+			(!strcmp((char *)buf, "bcmerrorstr"))) {
+
+			strncpy((char *)buf, bcmerrorstr(dhd->dongle_error), copylen);
+			*(uint8 *)((uint8 *)buf + (copylen - 1)) = '\0';
+
+			goto done;
+		} else if ((len >= strlen("bcmerror")) &&
+			!strcmp((char *)buf, "bcmerror")) {
+
+			*(uint32 *)(uint32 *)buf = dhd->dongle_error;
+
 			goto done;
 		}
 	}
@@ -4641,10 +4674,10 @@ dhd_msgbuf_wait_ioctl_cmplt(dhd_pub_t *dhd, uint32 len, void *buf)
 		dhd->rxcnt_timeout++;
 		dhd->rx_ctlerrs++;
 		DHD_ERROR(("%s: resumed on timeout rxcnt_timeout %d ioctl_cmd %d"
-				"trans_id %d state %d busstate=%d ioctl_received=%d\n",
-	  			__FUNCTION__, dhd->rxcnt_timeout, prot->curr_ioctl_cmd,
-				prot->ioctl_trans_id, prot->ioctl_state & ~MSGBUF_IOCTL_RESP_PENDING,
-				dhd->busstate, prot->ioctl_received));
+			"trans_id %d state %d busstate=%d ioctl_received=%d\n",
+			__FUNCTION__, dhd->rxcnt_timeout, prot->curr_ioctl_cmd,
+			prot->ioctl_trans_id, prot->ioctl_state & ~MSGBUF_IOCTL_RESP_PENDING,
+			dhd->busstate, prot->ioctl_received));
 
 		dhd_prot_debug_info_print(dhd);
 #if defined(DHD_FW_COREDUMP)

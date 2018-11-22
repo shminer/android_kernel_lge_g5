@@ -55,6 +55,7 @@ obj-$(CONFIG_CHARGER_MAX8998)	+= max8998_charger.o
 obj-$(CONFIG_CHARGER_BQ2415X)	+= bq2415x_charger.o
 obj-$(CONFIG_CHARGER_BQ24190)	+= bq24190_charger.o
 obj-$(CONFIG_CHARGER_BQ24735)	+= bq24735-charger.o
+obj-$(CONFIG_FUELGAUGE_STC3117)	+= stc3117_battery.o
 obj-$(CONFIG_POWER_AVS)		+= avs/
 obj-$(CONFIG_CHARGER_SMB347)	+= smb347-charger.o
 obj-$(CONFIG_SMB349_USB_CHARGER)   += smb349-charger.o
@@ -63,19 +64,34 @@ obj-$(CONFIG_SMB1351_USB_CHARGER) += smb1351-charger.o
 obj-$(CONFIG_SMB350_CHARGER)   += smb350_charger.o
 obj-$(CONFIG_SMB135X_CHARGER)   += smb135x-charger.o
 obj-$(CONFIG_SMB1360_CHARGER_FG) += smb1360-charger-fg.o
+obj-$(CONFIG_SMB138X_CHARGER)	+= smb138x-charger.o pmic-voter.o
 obj-$(CONFIG_SMB358_CHARGER)	+= smb358-charger.o
+obj-$(CONFIG_SMB23X_CHARGER)	+= smb23x-charger.o
 obj-$(CONFIG_BATTERY_BQ28400)	+= bq28400_battery.o
 obj-$(CONFIG_QPNP_BMS)		+= qpnp-bms.o batterydata-lib.o
 obj-$(CONFIG_QPNP_VM_BMS)	+= qpnp-vm-bms.o batterydata-lib.o batterydata-interface.o
 obj-$(CONFIG_LGE_PM_BATTERY_ID_CHECKER) += lge_battery_id.o
+ifndef CONFIG_MACH_MSM8996_H1
+obj-$(CONFIG_QPNP_SMBCHARGER)	+= qpnp-smbcharger.o pmic-voter.o
+else
+obj-$(CONFIG_QPNP_SMBCHARGER)   += qpnp-smbcharger_alice.o pmic-voter.o
+endif
+obj-$(CONFIG_BATTERY_MAX17050)  += max17050_battery.o
+ifndef CONFIG_MACH_MSM8996_H1
 obj-$(CONFIG_QPNP_FG)		+= qpnp-fg.o
+else
+obj-$(CONFIG_QPNP_FG)           += qpnp-fg_alice.o
+endif
 obj-$(CONFIG_QPNP_CHARGER)	+= qpnp-charger.o
 obj-$(CONFIG_QPNP_LINEAR_CHARGER)	+= qpnp-linear-charger.o
-obj-$(CONFIG_QPNP_SMBCHARGER)	+= qpnp-smbcharger.o pmic-voter.o
+obj-$(CONFIG_QPNP_TYPEC)	+= qpnp-typec.o
 obj-$(CONFIG_CHARGER_TPS65090)	+= tps65090-charger.o
 obj-$(CONFIG_BATTERY_BCL)	+= battery_current_limit.o
 obj-$(CONFIG_MSM_BCL_CTL)	+= msm_bcl.o
 obj-$(CONFIG_MSM_BCL_PERIPHERAL_CTL) += bcl_peripheral.o
 obj-$(CONFIG_POWER_RESET)	+= reset/
 obj-$(CONFIG_LGE_PM_BATT_MANAGER) += lge_battery_manager.o
+obj-$(CONFIG_LGE_PM_BATTERY_SWAP) += lge_battery_swap.o
+obj-$(CONFIG_LGE_APPS_PORT_FRIENDS) += lge_friends_manager.o
 obj-$(CONFIG_ARCH_MSM)		+= qcom/
+obj-$(CONFIG_LGE_PM_LGE_POWER_CLASS_VZW_REQ)		+= lge_vzw_req.o

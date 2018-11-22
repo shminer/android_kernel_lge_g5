@@ -629,10 +629,6 @@ static int gaudio_open_snd_dev(struct gaudio *card)
 	fn_cap = opts->fn_cap;
 	fn_cntl = opts->fn_cntl;
 
-	if (!card) {
-		pr_err("%s: Card is NULL", __func__);
-		return -ENODEV;
-	}
 	/* Open control device */
 	snd = &card->control;
 	snd->filp = filp_open(fn_cntl, O_RDWR, 0);
@@ -699,18 +695,24 @@ static int gaudio_close_snd_dev(struct gaudio *gau)
 	pr_debug("Enter");
 	/* Close control device */
 	snd = &gau->control;
-	if (snd->filp)
+	if (snd->filp) {
 		filp_close(snd->filp, NULL);
+		snd->filp = NULL;
+	}
 
 	/* Close PCM playback device and setup substream */
 	snd = &gau->playback;
-	if (snd->filp)
+	if (snd->filp) {
 		filp_close(snd->filp, NULL);
+		snd->filp = NULL;
+	}
 
 	/* Close PCM capture device and setup substream */
 	snd = &gau->capture;
-	if (snd->filp)
+	if (snd->filp) {
 		filp_close(snd->filp, NULL);
+		snd->filp = NULL;
+	}
 
 	return 0;
 }

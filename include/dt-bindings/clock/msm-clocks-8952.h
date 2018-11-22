@@ -16,8 +16,13 @@
 /* clock_gcc controlled clocks */
 
 /* GPLLs */
+#define clk_gpll0_clk_src_8952			0x1617c790
+#define clk_gpll0_ao_clk_src_8952		0x9b4db4e8
+#define clk_gpll0_clk_src_8937			0x94350fc4
+#define clk_gpll0_ao_clk_src_8937		0x923c7546
 #define clk_gpll0_clk_src			0x5933b69f
 #define clk_gpll0_ao_clk_src			0x6b2fb034
+#define clk_gpll0_sleep_clk_src			0x4f89fcf0
 #define clk_gpll0_out_main			0x850fecec
 #define clk_gpll0_out_aux			0x64e55d63
 #define clk_gpll0_misc				0xe06ee816
@@ -221,12 +226,18 @@
 #define clk_gcc_bimc_gfx_clk			0x3edd69ad
 #define clk_ipa_clk				0xfa685cda
 #define clk_ipa_a_clk				0xeeec2919
+#define clk_mdss_mdp_vote_clk			0x588460a4
+#define clk_mdss_rotator_vote_clk		0x5b1f675e
 
 #define clk_pixel_clk_src                       0x8b6f83d8
 #define clk_byte_clk_src                        0x3a911c53
 #define clk_ext_pclk0_clk_src			0x087c1612
 #define clk_ext_byte0_clk_src			0xfb32f31e
 
+#define clk_dsi_pll0_byte_clk_src		0x44539836
+#define clk_dsi_pll0_pixel_clk_src		0x5767c287
+#define clk_dsi_pll1_byte_clk_src		0x73e88d02
+#define clk_dsi_pll1_pixel_clk_src		0xce233fcf
 #define clk_ext_pclk1_clk_src			0x8067c5a3
 #define clk_ext_byte1_clk_src			0x585ef6d4
 #define clk_byte1_clk_src			0x63c2c955
@@ -236,7 +247,7 @@
 #define clk_gcc_mdss_byte1_clk			0x41f97fd8
 #define clk_gcc_mdss_esc1_clk			0x34653cc7
 #define clk_gcc_dcc_clk				0xd1000c50
-#define clk_gcc_debug_mux_thorium		0x917968c2
+#define clk_gcc_debug_mux_8937			0x917968c2
 
 /* clock_rpm controlled clocks */
 #define clk_pnoc_clk				0xc1296d0f
@@ -266,6 +277,8 @@
 #define clk_bimc_msmbus_a_clk			0x71d1a499
 #define clk_bimc_usb_a_clk			0xea410834
 #define clk_bimc_usb_clk			0x9bd2b2bf
+#define clk_bimc_gpu_clk			0xd3e0a327
+#define clk_bimc_gpu_a_clk			0x67f0e9a5
 #define clk_qdss_clk				0x1492202a
 #define clk_qdss_a_clk				0xdd121669
 #define clk_xo_clk_src				0x23f5649f
@@ -321,4 +334,8 @@
 #define clk_a53_lc_clk				0xc69f0878
 #define clk_a53_bc_clk				0xcf28e63a
 #define clk_cci_clk                             0x96854074
+
+#define clk_audio_ap_clk			0x312ac429
+#define clk_audio_pmi_clk			0xb7ba2274
+
 #endif

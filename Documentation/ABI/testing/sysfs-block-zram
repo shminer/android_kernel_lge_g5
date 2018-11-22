@@ -157,6 +157,15 @@ Description:
 		The compact file is read-only and shows how many object
 		migrated by compaction.
 
+What:		/sys/block/zram<id>/io_stat
+Date:		August 2015
+Contact:	Sergey Senozhatsky <sergey.senozhatsky@gmail.com>
+Description:
+		The io_stat file is read-only and accumulates device's I/O
+		statistics not accounted by block layer. For example,
+		failed_reads, failed_writes, etc. File format is similar to
+		block layer statistics file format.
+
 What:		/sys/block/zram<id>/mm_stat
 Date:		August 2015
 Contact:	Sergey Senozhatsky <sergey.senozhatsky@gmail.com>

@@ -84,7 +84,7 @@ struct regmap;
 #define REGULATOR_MODE_NORMAL			0x2
 #define REGULATOR_MODE_IDLE			0x4
 #define REGULATOR_MODE_STANDBY			0x8
-#if defined(CONFIG_LGE_MIPI_H1_INCELL_QHD_CMD_PANEL)
+#if defined(CONFIG_LGE_DISPLAY_COMMON)
 #define REGULATOR_MODE_SHUTDOWN			0x10
 #define REGULATOR_MODE_SPARE_ON			0x20
 #define REGULATOR_MODE_TTW_ON			0x40
@@ -558,6 +558,16 @@ static inline int regulator_list_corner_voltage(struct regulator *regulator,
 	return -EINVAL;
 }
 #endif
+
+static inline int regulator_set_voltage_triplet(struct regulator *regulator,
+						int min_uV, int target_uV,
+						int max_uV)
+{
+	if (regulator_set_voltage(regulator, target_uV, max_uV) == 0)
+		return 0;
+
+	return regulator_set_voltage(regulator, min_uV, max_uV);
+}
 
 static inline int regulator_set_voltage_tol(struct regulator *regulator,
 					    int new_uV, int tol_uV)

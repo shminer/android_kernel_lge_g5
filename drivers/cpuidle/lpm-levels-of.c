@@ -1,4 +1,4 @@
-/* Copyright (c) 2014-2015, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2014-2016, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -80,6 +80,14 @@ static void set_optimum_cpu_residency(struct lpm_cpu *cpu, int cpu_id,
 	for (i = 0; i < cpu->nlevels; i++) {
 		struct power_params *pwr = &cpu->levels[i].pwr;
 
+		mode_avail = probe_time ||
+			lpm_cpu_mode_allow(cpu_id, i, true);
+
+		if (!mode_avail) {
+			residency[i] = 0;
+			continue;
+		}
+
 		residency[i] = ~0;
 		for (j = i + 1; j < cpu->nlevels; j++) {
 			mode_avail = probe_time ||
@@ -102,11 +110,19 @@ static void set_optimum_cluster_residency(struct lpm_cluster *cluster,
 	for (i = 0; i < cluster->nlevels; i++) {
 		struct power_params *pwr = &cluster->levels[i].pwr;
 
+		mode_avail = probe_time ||
+			lpm_cluster_mode_allow(cluster, i,
+					true);
+
+		if (!mode_avail) {
+			pwr->max_residency = 0;
+			continue;
+		}
+
 		pwr->max_residency = ~0;
-		for (j = 0; j < cluster->nlevels; j++) {
-			if (i >= j)
-				mode_avail = probe_time ||
-					lpm_cluster_mode_allow(cluster, i,
+		for (j = i+1; j < cluster->nlevels; j++) {
+			mode_avail = probe_time ||
+					lpm_cluster_mode_allow(cluster, j,
 							true);
 			if (mode_avail &&
 				(pwr->max_residency > pwr->residencies[j]) &&
@@ -459,6 +475,7 @@ static int parse_lpm_mode(const char *str)
 	int i;
 	struct lpm_lookup_table mode_lookup[] = {
 		{MSM_SPM_MODE_POWER_COLLAPSE, "pc"},
+		{MSM_SPM_MODE_STANDALONE_POWER_COLLAPSE, "spc"},
 		{MSM_SPM_MODE_FASTPC, "fpc"},
 		{MSM_SPM_MODE_GDHS, "gdhs"},
 		{MSM_SPM_MODE_RETENTION, "retention"},
@@ -550,7 +567,9 @@ static int parse_cluster_level(struct device_node *node,
 			if (level->mode[i] < 0)
 				goto failed;
 
-			if (level->mode[i] == MSM_SPM_MODE_POWER_COLLAPSE)
+			if (level->mode[i] == MSM_SPM_MODE_POWER_COLLAPSE
+				|| level->mode[i] ==
+				MSM_SPM_MODE_STANDALONE_POWER_COLLAPSE)
 				level->is_reset |= true;
 		}
 	}
@@ -579,8 +598,14 @@ static int parse_cluster_level(struct device_node *node,
 
 	key = "parse_power_params";
 	ret = parse_power_params(node, &level->pwr);
-
 	if (ret)
+		goto failed;
+
+	key = "qcom,reset-level";
+	ret = of_property_read_u32(node, key, &level->reset_level);
+	if (ret == -EINVAL)
+		level->reset_level = LPM_RESET_LVL_NONE;
+	else if (ret)
 		goto failed;
 
 	cluster->nlevels++;
@@ -697,11 +722,11 @@ static int calculate_residency(struct power_params *base_pwr,
 	if (residency < 0) {
 		__WARN_printf("%s: Incorrect power attributes for LPM\n",
 				__func__);
-		return 0;
+		return next_pwr->time_overhead_us;
 	}
 
-	return residency < base_pwr->time_overhead_us ?
-				base_pwr->time_overhead_us : residency;
+	return residency < next_pwr->time_overhead_us ?
+				next_pwr->time_overhead_us : residency;
 }
 
 static int parse_cpu_levels(struct device_node *node, struct lpm_cluster *c)
@@ -757,6 +782,13 @@ static int parse_cpu_levels(struct device_node *node, struct lpm_cluster *c)
 
 		key = "qcom,jtag-save-restore";
 		l->jtag_save_restore = of_property_read_bool(n, key);
+
+		key = "qcom,reset-level";
+		ret = of_property_read_u32(n, key, &l->reset_level);
+		if (ret == -EINVAL)
+			l->reset_level = LPM_RESET_LVL_NONE;
+		else if (ret)
+			goto failed;
 	}
 	for (i = 0; i < c->cpu->nlevels; i++) {
 		for (j = 0; j < c->cpu->nlevels; j++) {

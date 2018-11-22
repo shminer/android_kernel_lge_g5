@@ -1033,6 +1033,9 @@ static int msm_iommu_attach_dev(struct iommu_domain *domain, struct device *dev)
 		goto unlock;
 	}
 
+	if (!(priv->client_name))
+		priv->client_name = dev_name(dev);
+
 	iommu_drvdata = dev_get_drvdata(dev->parent);
 	ctx_drvdata = dev_get_drvdata(dev);
 	if (!iommu_drvdata || !ctx_drvdata) {
@@ -1830,6 +1833,12 @@ static int msm_iommu_domain_set_attr(struct iommu_domain *domain,
 		/*
 		 * We don't need to do anything here because CB allocation
 		 * is not dynamic in this driver.
+		 */
+		break;
+	case DOMAIN_ATTR_ATOMIC:
+		/*
+		 * Map / unmap in legacy driver are by default atomic. So
+		 * we don't need to do anything here.
 		 */
 		break;
 	default:

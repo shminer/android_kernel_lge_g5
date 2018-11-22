@@ -1,4 +1,4 @@
-/* Copyright (c) 2010-2015, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2010-2016, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -22,19 +22,20 @@
 
 struct hdmi_edid_init_data {
 	struct kobject *kobj;
-	struct hdmi_util_ds_data *ds_data;
+	struct hdmi_util_ds_data ds_data;
 	u32 max_pclk_khz;
 	u8 *buf;
 	u32 buf_size;
 };
 
 int hdmi_edid_parser(void *edid_ctrl);
-#ifdef CONFIG_SLIMPORT_COMMON
+#ifdef CONFIG_SLIMPORT_CTYPE
 int hdmi_edid_reset_parser(void *edid_ctrl);
 #endif
 u32 hdmi_edid_get_raw_data(void *edid_ctrl, u8 *buf, u32 size);
 u8 hdmi_edid_get_sink_scaninfo(void *edid_ctrl, u32 resolution);
 u32 hdmi_edid_get_sink_mode(void *edid_ctrl);
+bool hdmi_edid_sink_scramble_override(void *input);
 bool hdmi_edid_get_sink_scrambler_support(void *input);
 bool hdmi_edid_get_scdc_support(void *input);
 int hdmi_edid_get_audio_blk(void *edid_ctrl,

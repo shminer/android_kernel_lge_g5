@@ -1,4 +1,4 @@
-/* Copyright (c) 2015, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2015-2016, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -31,8 +31,10 @@
 static struct dsi_pll_db pll_db[DSI_PLL_NUM];
 
 static struct clk_ops n2_clk_src_ops;
+static struct clk_ops shadow_n2_clk_src_ops;
 static struct clk_ops byte_clk_src_ops;
 static struct clk_ops post_n1_div_clk_src_ops;
+static struct clk_ops shadow_post_n1_div_clk_src_ops;
 
 static struct clk_ops clk_ops_gen_mux_dsi;
 
@@ -65,10 +67,25 @@ static struct clk_mux_ops mdss_pixel_mux_ops = {
 	.get_mux_sel = get_mdss_pixel_mux_sel_8996,
 };
 
+/* Shadow ops for dynamic refresh */
+static struct clk_ops clk_ops_shadow_dsi_vco = {
+	.set_rate = shadow_pll_vco_set_rate_8996,
+	.round_rate = pll_vco_round_rate_8996,
+	.handoff = shadow_pll_vco_handoff_8996,
+};
+
+static struct clk_div_ops shadow_post_n1_div_ops = {
+	.set_div = post_n1_div_set_div,
+};
+
+static struct clk_div_ops shadow_n2_div_ops = {
+	.set_div = shadow_n2_div_set_div,
+};
+
 static struct dsi_pll_vco_clk dsi0pll_vco_clk = {
-	.ref_clk_rate = 19200000,
-	.min_rate = 1300000000,
-	.max_rate = 2600000000,
+	.ref_clk_rate = 19200000UL,
+	.min_rate = 1300000000UL,
+	.max_rate = 2600000000UL,
 	.pll_en_seq_cnt = 1,
 	.pll_enable_seqs[0] = dsi_pll_enable_seq_8996,
 	.c = {
@@ -78,16 +95,40 @@ static struct dsi_pll_vco_clk dsi0pll_vco_clk = {
 	},
 };
 
+static struct dsi_pll_vco_clk dsi0pll_shadow_vco_clk = {
+	.ref_clk_rate = 19200000u,
+	.min_rate = 1300000000u,
+	.max_rate = 2600000000u,
+	.c = {
+		.dbg_name = "dsi0pll_shadow_vco_clk",
+		.ops = &clk_ops_shadow_dsi_vco,
+		CLK_INIT(dsi0pll_shadow_vco_clk.c),
+	},
+};
+
 static struct dsi_pll_vco_clk dsi1pll_vco_clk = {
-	.ref_clk_rate = 19200000,
-	.min_rate = 1300000000,
-	.max_rate = 2600000000,
+	.ref_clk_rate = 19200000UL,
+	.min_rate = 1300000000UL,
+	.max_rate = 2600000000UL,
 	.pll_en_seq_cnt = 1,
 	.pll_enable_seqs[0] = dsi_pll_enable_seq_8996,
 	.c = {
 		.dbg_name = "dsi1pll_vco_clk_8996",
 		.ops = &clk_ops_dsi_vco,
 		CLK_INIT(dsi1pll_vco_clk.c),
+	},
+};
+
+static struct dsi_pll_vco_clk dsi1pll_shadow_vco_clk = {
+	.ref_clk_rate = 19200000u,
+	.min_rate = 1300000000u,
+	.max_rate = 2600000000u,
+	.pll_en_seq_cnt = 1,
+	.pll_enable_seqs[0] = dsi_pll_enable_seq_8996,
+	.c = {
+		.dbg_name = "dsi1pll_shadow_vco_clk",
+		.ops = &clk_ops_shadow_dsi_vco,
+		CLK_INIT(dsi1pll_shadow_vco_clk.c),
 	},
 };
 
@@ -106,6 +147,21 @@ static struct div_clk dsi0pll_post_n1_div_clk = {
 	},
 };
 
+static struct div_clk dsi0pll_shadow_post_n1_div_clk = {
+	.data = {
+		.max_div = 15,
+		.min_div = 1,
+	},
+	.ops = &shadow_post_n1_div_ops,
+	.c = {
+		.parent = &dsi0pll_shadow_vco_clk.c,
+		.dbg_name = "dsi0pll_shadow_post_n1_div_clk",
+		.ops = &shadow_post_n1_div_clk_src_ops,
+		.flags = CLKFLAG_NO_RATE_CACHE,
+		CLK_INIT(dsi0pll_shadow_post_n1_div_clk.c),
+	},
+};
+
 static struct div_clk dsi1pll_post_n1_div_clk = {
 	.data = {
 		.max_div = 15,
@@ -118,6 +174,21 @@ static struct div_clk dsi1pll_post_n1_div_clk = {
 		.ops = &post_n1_div_clk_src_ops,
 		.flags = CLKFLAG_NO_RATE_CACHE,
 		CLK_INIT(dsi1pll_post_n1_div_clk.c),
+	},
+};
+
+static struct div_clk dsi1pll_shadow_post_n1_div_clk = {
+	.data = {
+		.max_div = 15,
+		.min_div = 1,
+	},
+	.ops = &shadow_post_n1_div_ops,
+	.c = {
+		.parent = &dsi1pll_shadow_vco_clk.c,
+		.dbg_name = "dsi1pll_shadow_post_n1_div_clk",
+		.ops = &shadow_post_n1_div_clk_src_ops,
+		.flags = CLKFLAG_NO_RATE_CACHE,
+		CLK_INIT(dsi1pll_shadow_post_n1_div_clk.c),
 	},
 };
 
@@ -136,6 +207,21 @@ static struct div_clk dsi0pll_n2_div_clk = {
 	},
 };
 
+static struct div_clk dsi0pll_shadow_n2_div_clk = {
+	.data = {
+		.max_div = 15,
+		.min_div = 1,
+	},
+	.ops = &shadow_n2_div_ops,
+	.c = {
+		.parent = &dsi0pll_shadow_post_n1_div_clk.c,
+		.dbg_name = "dsi0pll_shadow_n2_div_clk",
+		.ops = &shadow_n2_clk_src_ops,
+		.flags = CLKFLAG_NO_RATE_CACHE,
+		CLK_INIT(dsi0pll_shadow_n2_div_clk.c),
+	},
+};
+
 static struct div_clk dsi1pll_n2_div_clk = {
 	.data = {
 		.max_div = 15,
@@ -151,6 +237,21 @@ static struct div_clk dsi1pll_n2_div_clk = {
 	},
 };
 
+static struct div_clk dsi1pll_shadow_n2_div_clk = {
+	.data = {
+		.max_div = 15,
+		.min_div = 1,
+	},
+	.ops = &shadow_n2_div_ops,
+	.c = {
+		.parent = &dsi1pll_shadow_post_n1_div_clk.c,
+		.dbg_name = "dsi1pll_shadow_n2_div_clk",
+		.ops = &shadow_n2_clk_src_ops,
+		.flags = CLKFLAG_NO_RATE_CACHE,
+		CLK_INIT(dsi1pll_shadow_n2_div_clk.c),
+	},
+};
+
 static struct div_clk dsi0pll_pixel_clk_src = {
 	.data = {
 		.div = 2,
@@ -159,10 +260,25 @@ static struct div_clk dsi0pll_pixel_clk_src = {
 	},
 	.c = {
 		.parent = &dsi0pll_n2_div_clk.c,
-		.dbg_name = "dsi0pll_pixel_clk_src_0",
+		.dbg_name = "dsi0pll_pixel_clk_src",
 		.ops = &clk_ops_div,
 		.flags = CLKFLAG_NO_RATE_CACHE,
 		CLK_INIT(dsi0pll_pixel_clk_src.c),
+	},
+};
+
+static struct div_clk dsi0pll_shadow_pixel_clk_src = {
+	.data = {
+		.div = 2,
+		.min_div = 2,
+		.max_div = 2,
+	},
+	.c = {
+		.parent = &dsi0pll_shadow_n2_div_clk.c,
+		.dbg_name = "dsi0pll_shadow_pixel_clk_src",
+		.ops = &clk_ops_div,
+		.flags = CLKFLAG_NO_RATE_CACHE,
+		CLK_INIT(dsi0pll_shadow_pixel_clk_src.c),
 	},
 };
 
@@ -181,30 +297,49 @@ static struct div_clk dsi1pll_pixel_clk_src = {
 	},
 };
 
+static struct div_clk dsi1pll_shadow_pixel_clk_src = {
+	.data = {
+		.div = 2,
+		.min_div = 2,
+		.max_div = 2,
+	},
+	.c = {
+		.parent = &dsi1pll_shadow_n2_div_clk.c,
+		.dbg_name = "dsi1pll_shadow_pixel_clk_src",
+		.ops = &clk_ops_div,
+		.flags = CLKFLAG_NO_RATE_CACHE,
+		CLK_INIT(dsi1pll_shadow_pixel_clk_src.c),
+	},
+};
+
 static struct mux_clk dsi0pll_pixel_clk_mux = {
-	.num_parents = 1,
+	.num_parents = 2,
 	.parents = (struct clk_src[]) {
 		{&dsi0pll_pixel_clk_src.c, 0},
+		{&dsi0pll_shadow_pixel_clk_src.c, 1},
 	},
 	.ops = &mdss_pixel_mux_ops,
 	.c = {
 		.parent = &dsi0pll_pixel_clk_src.c,
-		.dbg_name = "dsi0pll_pixel_clk_mux_0",
-		.ops = &clk_ops_gen_mux,
+		.dbg_name = "dsi0pll_pixel_clk_mux",
+		.ops = &clk_ops_gen_mux_dsi,
+		.flags = CLKFLAG_NO_RATE_CACHE,
 		CLK_INIT(dsi0pll_pixel_clk_mux.c),
 	}
 };
 
 static struct mux_clk dsi1pll_pixel_clk_mux = {
-	.num_parents = 1,
+	.num_parents = 2,
 	.parents = (struct clk_src[]) {
 		{&dsi1pll_pixel_clk_src.c, 0},
+		{&dsi1pll_shadow_pixel_clk_src.c, 1},
 	},
 	.ops = &mdss_pixel_mux_ops,
 	.c = {
 		.parent = &dsi1pll_pixel_clk_src.c,
 		.dbg_name = "dsi1pll_pixel_clk_mux",
-		.ops = &clk_ops_gen_mux,
+		.ops = &clk_ops_gen_mux_dsi,
+		.flags = CLKFLAG_NO_RATE_CACHE,
 		CLK_INIT(dsi1pll_pixel_clk_mux.c),
 	}
 };
@@ -223,6 +358,20 @@ static struct div_clk dsi0pll_byte_clk_src = {
 	},
 };
 
+static struct div_clk dsi0pll_shadow_byte_clk_src = {
+	.data = {
+		.div = 8,
+		.min_div = 8,
+		.max_div = 8,
+	},
+	.c = {
+		.parent = &dsi0pll_shadow_post_n1_div_clk.c,
+		.dbg_name = "dsi0pll_shadow_byte_clk_src",
+		.ops = &clk_ops_div,
+		CLK_INIT(dsi0pll_shadow_byte_clk_src.c),
+	},
+};
+
 static struct div_clk dsi1pll_byte_clk_src = {
 	.data = {
 		.div = 8,
@@ -237,29 +386,47 @@ static struct div_clk dsi1pll_byte_clk_src = {
 	},
 };
 
+static struct div_clk dsi1pll_shadow_byte_clk_src = {
+	.data = {
+		.div = 8,
+		.min_div = 8,
+		.max_div = 8,
+	},
+	.c = {
+		.parent = &dsi1pll_shadow_post_n1_div_clk.c,
+		.dbg_name = "dsi1pll_shadow_byte_clk_src",
+		.ops = &clk_ops_div,
+		CLK_INIT(dsi1pll_shadow_byte_clk_src.c),
+	},
+};
+
 static struct mux_clk dsi0pll_byte_clk_mux = {
-	.num_parents = 1,
+	.num_parents = 2,
 	.parents = (struct clk_src[]) {
 		{&dsi0pll_byte_clk_src.c, 0},
+		{&dsi0pll_shadow_byte_clk_src.c, 1},
 	},
 	.ops = &mdss_byte_mux_ops,
 	.c = {
 		.parent = &dsi0pll_byte_clk_src.c,
 		.dbg_name = "dsi0pll_byte_clk_mux",
 		.ops = &clk_ops_gen_mux_dsi,
+		.flags = CLKFLAG_NO_RATE_CACHE,
 		CLK_INIT(dsi0pll_byte_clk_mux.c),
 	}
 };
 static struct mux_clk dsi1pll_byte_clk_mux = {
-	.num_parents = 1,
+	.num_parents = 2,
 	.parents = (struct clk_src[]) {
 		{&dsi1pll_byte_clk_src.c, 0},
+		{&dsi1pll_shadow_byte_clk_src.c, 1},
 	},
 	.ops = &mdss_byte_mux_ops,
 	.c = {
 		.parent = &dsi1pll_byte_clk_src.c,
 		.dbg_name = "dsi1pll_byte_clk_mux",
 		.ops = &clk_ops_gen_mux_dsi,
+		.flags = CLKFLAG_NO_RATE_CACHE,
 		CLK_INIT(dsi1pll_byte_clk_mux.c),
 	}
 };
@@ -272,6 +439,11 @@ static struct clk_lookup mdss_dsi_pllcc_8996[] = {
 	CLK_LIST(dsi0pll_n2_div_clk),
 	CLK_LIST(dsi0pll_post_n1_div_clk),
 	CLK_LIST(dsi0pll_vco_clk),
+	CLK_LIST(dsi0pll_shadow_byte_clk_src),
+	CLK_LIST(dsi0pll_shadow_pixel_clk_src),
+	CLK_LIST(dsi0pll_shadow_n2_div_clk),
+	CLK_LIST(dsi0pll_shadow_post_n1_div_clk),
+	CLK_LIST(dsi0pll_shadow_vco_clk),
 };
 
 static struct clk_lookup mdss_dsi_pllcc_8996_1[] = {
@@ -282,12 +454,19 @@ static struct clk_lookup mdss_dsi_pllcc_8996_1[] = {
 	CLK_LIST(dsi1pll_n2_div_clk),
 	CLK_LIST(dsi1pll_post_n1_div_clk),
 	CLK_LIST(dsi1pll_vco_clk),
+	CLK_LIST(dsi1pll_shadow_byte_clk_src),
+	CLK_LIST(dsi1pll_shadow_pixel_clk_src),
+	CLK_LIST(dsi1pll_shadow_n2_div_clk),
+	CLK_LIST(dsi1pll_shadow_post_n1_div_clk),
+	CLK_LIST(dsi1pll_shadow_vco_clk),
 };
 
 int dsi_pll_clock_register_8996(struct platform_device *pdev,
 				struct mdss_pll_resources *pll_res)
 {
-	int rc, ndx;
+	int rc = 0, ndx;
+	int const ssc_freq_default = 31500; /* default h/w recommended value */
+	int const ssc_ppm_default = 5000; /* default h/w recommended value */
 	struct dsi_pll_db *pdb;
 
 	if (!pdev || !pdev->dev.of_node) {
@@ -319,9 +498,13 @@ int dsi_pll_clock_register_8996(struct platform_device *pdev,
 	n2_clk_src_ops = clk_ops_slave_div;
 	n2_clk_src_ops.prepare = dsi_pll_div_prepare;
 
+	shadow_n2_clk_src_ops = clk_ops_slave_div;
+
 	/* hr_ockl2, byte, vco pll */
 	post_n1_div_clk_src_ops = clk_ops_div;
 	post_n1_div_clk_src_ops.prepare = dsi_pll_div_prepare;
+
+	shadow_post_n1_div_clk_src_ops = clk_ops_div;
 
 	byte_clk_src_ops = clk_ops_div;
 	byte_clk_src_ops.prepare = dsi_pll_div_prepare;
@@ -329,6 +512,13 @@ int dsi_pll_clock_register_8996(struct platform_device *pdev,
 	clk_ops_gen_mux_dsi = clk_ops_gen_mux;
 	clk_ops_gen_mux_dsi.round_rate = parent_round_rate;
 	clk_ops_gen_mux_dsi.set_rate = parent_set_rate;
+
+	if (pll_res->ssc_en) {
+		if (!pll_res->ssc_freq)
+			pll_res->ssc_freq = ssc_freq_default;
+		if (!pll_res->ssc_ppm)
+			pll_res->ssc_ppm = ssc_ppm_default;
+	}
 
 	/* Set client data to mux, div and vco clocks.  */
 	if (pll_res->index == DSI_PLL_1) {
@@ -338,10 +528,19 @@ int dsi_pll_clock_register_8996(struct platform_device *pdev,
 		dsi1pll_n2_div_clk.priv = pll_res;
 		dsi1pll_vco_clk.priv = pll_res;
 
+		dsi1pll_shadow_byte_clk_src.priv = pll_res;
+		dsi1pll_shadow_pixel_clk_src.priv = pll_res;
+		dsi1pll_shadow_post_n1_div_clk.priv = pll_res;
+		dsi1pll_shadow_n2_div_clk.priv = pll_res;
+		dsi1pll_shadow_vco_clk.priv = pll_res;
+
 		pll_res->vco_delay = VCO_DELAY_USEC;
-		rc = of_msm_clock_register(pdev->dev.of_node,
+		if ((pll_res->target_id == MDSS_PLL_TARGET_8996) ||
+			(pll_res->target_id == MDSS_PLL_TARGET_8953)) {
+			rc = of_msm_clock_register(pdev->dev.of_node,
 				mdss_dsi_pllcc_8996_1,
 				ARRAY_SIZE(mdss_dsi_pllcc_8996_1));
+		}
 	} else {
 		dsi0pll_byte_clk_src.priv = pll_res;
 		dsi0pll_pixel_clk_src.priv = pll_res;
@@ -349,10 +548,19 @@ int dsi_pll_clock_register_8996(struct platform_device *pdev,
 		dsi0pll_n2_div_clk.priv = pll_res;
 		dsi0pll_vco_clk.priv = pll_res;
 
+		dsi0pll_shadow_byte_clk_src.priv = pll_res;
+		dsi0pll_shadow_pixel_clk_src.priv = pll_res;
+		dsi0pll_shadow_post_n1_div_clk.priv = pll_res;
+		dsi0pll_shadow_n2_div_clk.priv = pll_res;
+		dsi0pll_shadow_vco_clk.priv = pll_res;
+
 		pll_res->vco_delay = VCO_DELAY_USEC;
-		rc = of_msm_clock_register(pdev->dev.of_node,
+		if ((pll_res->target_id == MDSS_PLL_TARGET_8996) ||
+			(pll_res->target_id == MDSS_PLL_TARGET_8953)) {
+			rc = of_msm_clock_register(pdev->dev.of_node,
 				mdss_dsi_pllcc_8996,
 				ARRAY_SIZE(mdss_dsi_pllcc_8996));
+		}
 	}
 
 	if (!rc) {

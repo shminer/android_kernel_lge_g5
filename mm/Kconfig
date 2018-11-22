@@ -516,6 +516,12 @@ config CMA_DEBUG
 	  processing calls such as dma_alloc_from_contiguous().
 	  This option does not affect warning and error messages.
 
+config CMA_DEBUGFS
+	bool "CMA debugfs interface"
+	depends on CMA && DEBUG_FS
+	help
+	  Turns on the DebugFS interface for CMA.
+
 config CMA_AREAS
 	int "Maximum count of the CMA areas"
 	depends on CMA
@@ -629,6 +635,21 @@ config MAX_STACK_SIZE_MB
 
 	  A sane initial value is 80 MB.
 
+config ZCACHE
+       bool "Compressed cache for file pages (EXPERIMENTAL)"
+       depends on CRYPTO && CLEANCACHE
+       select CRYPTO_LZO
+       select ZBUD
+       default n
+       help
+         A compressed cache for file pages.
+         It takes active file pages that are in the process of being reclaimed
+         and attempts to compress them into a dynamically allocated RAM-based
+         memory pool.
+
+         If this process is successful, when those file pages needed again, the
+         I/O reading operation was avoided. This results in a significant performance
+         gains under memory pressure for systems full with file pages.
 
 config BALANCE_ANON_FILE_RECLAIM
 	bool "During reclaim treat anon and file backed pages equally"
@@ -720,3 +741,10 @@ config READAHEAD_MMAP_PAGE_CNT
 		4 ==>16 KB
 		2 ==>8 KB
 		1 ==>4 KB
+
+config LGE_ADAPTIVE_READAHEAD
+    bool "lge adaptive readahead set enable"
+	default n
+	help
+	  lge adaptive readahead set enable
+

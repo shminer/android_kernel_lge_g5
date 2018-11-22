@@ -44,7 +44,7 @@
 #include "sreadahead_prof.h"
 /* LGE_CHAGE_E */
 
-
+#ifdef CONFIG_MDFPP_CCAUDIT
 #define ccaudit_permck(error, fname, flags) \
 { \
 	if (unlikely((error == -EACCES) || (error == -EPERM) || (error == -EROFS))) \
@@ -52,6 +52,7 @@
                         if(!strstr(fname,"@classes.dex.flock")) \
                                 printk("[CCAudit] %s error=%d file=%s flag=%d proc=%s parent=%s\n", __func__, (int)error, fname /*tmp->name*/, flags, current->comm, current->real_parent->comm); \
 }
+#endif
 
 int do_truncate(struct dentry *dentry, loff_t length, unsigned int time_attrs,
 	struct file *filp)
@@ -509,7 +510,9 @@ static int chmod_common(struct path *path, umode_t mode)
 
 	error = mnt_want_write(path->mnt);
 	if (error){
+#ifdef CONFIG_MDFPP_CCAUDIT
 		ccaudit_permck(error, path->dentry->d_iname, 0);
+#endif
 		return error;
 	}
 retry_deleg:
@@ -528,7 +531,9 @@ out_unlock:
 			goto retry_deleg;
 	}
 	mnt_drop_write(path->mnt);
+#ifdef CONFIG_MDFPP_CCAUDIT
 	ccaudit_permck(error, path->dentry->d_iname, 0);
+#endif
 	return error;
 }
 
@@ -687,18 +692,18 @@ int open_check_o_direct(struct file *f)
 }
 
 static int do_dentry_open(struct file *f,
+			  struct inode *inode,
 			  int (*open)(struct inode *, struct file *),
 			  const struct cred *cred)
 {
 	static const struct file_operations empty_fops = {};
-	struct inode *inode;
 	int error;
 
 	f->f_mode = OPEN_FMODE(f->f_flags) | FMODE_LSEEK |
 				FMODE_PREAD | FMODE_PWRITE;
 
 	path_get(&f->f_path);
-	inode = f->f_inode = f->f_path.dentry->d_inode;
+	f->f_inode = inode;
 	f->f_mapping = inode->i_mapping;
 
 	if (unlikely(f->f_flags & O_PATH)) {
@@ -802,7 +807,8 @@ int finish_open(struct file *file, struct dentry *dentry,
 	BUG_ON(*opened & FILE_OPENED); /* once it's opened, it's opened */
 
 	file->f_path.dentry = dentry;
-	error = do_dentry_open(file, open, current_cred());
+	error = do_dentry_open(file, d_backing_inode(dentry), open,
+			       current_cred());
 	if (!error)
 		*opened |= FILE_OPENED;
 
@@ -830,6 +836,28 @@ int finish_no_open(struct file *file, struct dentry *dentry)
 	return 1;
 }
 EXPORT_SYMBOL(finish_no_open);
+
+/**
+ * vfs_open - open the file at the given path
+ * @path: path to open
+ * @file: newly allocated file with f_flag initialized
+ * @cred: credentials to use
+ */
+int vfs_open(const struct path *path, struct file *file,
+	     const struct cred *cred)
+{
+	struct dentry *dentry = path->dentry;
+	struct inode *inode = dentry->d_inode;
+
+	file->f_path = *path;
+	if (dentry->d_flags & DCACHE_OP_SELECT_INODE) {
+		inode = dentry->d_op->d_select_inode(dentry, file->f_flags);
+		if (IS_ERR(inode))
+			return PTR_ERR(inode);
+	}
+
+	return do_dentry_open(file, inode, NULL, cred);
+}
 
 struct file *dentry_open(const struct path *path, int flags,
 			 const struct cred *cred)
@@ -861,26 +889,6 @@ struct file *dentry_open(const struct path *path, int flags,
 	return f;
 }
 EXPORT_SYMBOL(dentry_open);
-
-/**
- * vfs_open - open the file at the given path
- * @path: path to open
- * @filp: newly allocated file with f_flag initialized
- * @cred: credentials to use
- */
-int vfs_open(const struct path *path, struct file *filp,
-	     const struct cred *cred)
-{
-	struct inode *inode = path->dentry->d_inode;
-
-	if (inode->i_op->dentry_open)
-		return inode->i_op->dentry_open(path->dentry, filp, cred);
-	else {
-		filp->f_path = *path;
-		return do_dentry_open(filp, NULL, cred);
-	}
-}
-EXPORT_SYMBOL(vfs_open);
 
 static inline int build_open_flags(int flags, umode_t mode, struct open_flags *op)
 {
@@ -987,14 +995,12 @@ struct file *filp_open(const char *filename, int flags, umode_t mode)
 EXPORT_SYMBOL(filp_open);
 
 struct file *file_open_root(struct dentry *dentry, struct vfsmount *mnt,
-			    const char *filename, int flags)
+			    const char *filename, int flags, umode_t mode)
 {
 	struct open_flags op;
-	int err = build_open_flags(flags, 0, &op);
+	int err = build_open_flags(flags, mode, &op);
 	if (err)
 		return ERR_PTR(err);
-	if (flags & O_CREAT)
-		return ERR_PTR(-EINVAL);
 	if (!filename && (flags & O_DIRECTORY))
 		if (!dentry->d_inode->i_op->lookup)
 			return ERR_PTR(-ENOTDIR);
@@ -1019,7 +1025,9 @@ long do_sys_open(int dfd, const char __user *filename, int flags, umode_t mode)
 	if (fd >= 0) {
 		struct file *f = do_filp_open(dfd, tmp, &op);
 		if (IS_ERR(f)) {
+#ifdef CONFIG_MDFPP_CCAUDIT
 			ccaudit_permck(PTR_ERR(f), tmp->name, flags);
+#endif
 			put_unused_fd(fd);
 			fd = PTR_ERR(f);
 		} else {

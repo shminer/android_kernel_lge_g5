@@ -184,6 +184,7 @@
 #define   SDHCI_CTRL_DRV_TYPE_D		0x0030
 #define  SDHCI_CTRL_EXEC_TUNING		0x0040
 #define  SDHCI_CTRL_TUNED_CLK		0x0080
+#define  SDHCI_CTRL_ASYNC_INT_ENABLE	0x4000
 #define  SDHCI_CTRL_PRESET_VAL_ENABLE	0x8000
 
 #define SDHCI_CAPABILITIES	0x40
@@ -204,6 +205,7 @@
 #define  SDHCI_CAN_VDD_300	0x02000000
 #define  SDHCI_CAN_VDD_180	0x04000000
 #define  SDHCI_CAN_64BIT	0x10000000
+#define  SDHCI_CAN_ASYNC_INT	0x20000000
 
 #define  SDHCI_SUPPORT_SDR50	0x00000001
 #define  SDHCI_SUPPORT_SDR104	0x00000002
@@ -334,7 +336,6 @@ struct sdhci_ops {
 	int	(*enable_controller_clock)(struct sdhci_host *host);
 	void	(*clear_set_dumpregs)(struct sdhci_host *host, bool set);
 	void	(*enhanced_strobe_mask)(struct sdhci_host *host, bool set);
-	void	(*detect)(struct sdhci_host *host, bool detected);
 	int	(*notify_load)(struct sdhci_host *host, enum mmc_load state);
 	void	(*reset_workaround)(struct sdhci_host *host, u32 enable);
 	void	(*init)(struct sdhci_host *host);
@@ -462,4 +463,5 @@ extern int sdhci_runtime_suspend_host(struct sdhci_host *host);
 extern int sdhci_runtime_resume_host(struct sdhci_host *host);
 #endif
 
+void sdhci_cfg_irq(struct sdhci_host *host, bool enable, bool sync);
 #endif /* __SDHCI_HW_H */

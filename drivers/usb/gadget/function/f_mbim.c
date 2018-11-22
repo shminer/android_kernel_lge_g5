@@ -1,4 +1,4 @@
-/* Copyright (c) 2012-2015, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2012-2016, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -132,6 +132,7 @@ struct f_mbim {
 
 	atomic_t		error;
 	unsigned int		cpkt_drop_cnt;
+	bool			remote_wakeup_enabled;
 };
 
 struct mbim_ntb_input_size {
@@ -740,7 +741,7 @@ static void mbim_notify_complete(struct usb_ep *ep, struct usb_request *req)
 	struct f_mbim			*mbim = req->context;
 	struct usb_cdc_notification	*event = req->buf;
 
-	pr_debug("dev:%p\n", mbim);
+	pr_debug("dev:%pK\n", mbim);
 
 	spin_lock(&mbim->lock);
 	switch (req->status) {
@@ -770,7 +771,7 @@ static void mbim_notify_complete(struct usb_ep *ep, struct usb_request *req)
 	mbim_do_notify(mbim);
 	spin_unlock(&mbim->lock);
 
-	pr_debug("dev:%p Exit\n", mbim);
+	pr_debug("dev:%pK Exit\n", mbim);
 }
 
 static void mbim_ep0out_complete(struct usb_ep *ep, struct usb_request *req)
@@ -781,7 +782,7 @@ static void mbim_ep0out_complete(struct usb_ep *ep, struct usb_request *req)
 	struct f_mbim		*mbim = func_to_mbim(f);
 	struct mbim_ntb_input_size *ntb = NULL;
 
-	pr_debug("dev:%p\n", mbim);
+	pr_debug("dev:%pK\n", mbim);
 
 	req->context = NULL;
 	if (req->status || req->actual != req->length) {
@@ -819,7 +820,7 @@ static void mbim_ep0out_complete(struct usb_ep *ep, struct usb_request *req)
 invalid:
 	usb_ep_set_halt(ep);
 
-	pr_err("dev:%p Failed\n", mbim);
+	pr_err("dev:%pK Failed\n", mbim);
 
 	return;
 }
@@ -830,6 +831,7 @@ fmbim_cmd_complete(struct usb_ep *ep, struct usb_request *req)
 	struct f_mbim		*dev = req->context;
 	struct ctrl_pkt		*cpkt = NULL;
 	int			len = req->actual;
+	static bool		first_command_sent;
 
 	if (!dev) {
 		pr_err("mbim dev is null\n");
@@ -841,7 +843,19 @@ fmbim_cmd_complete(struct usb_ep *ep, struct usb_request *req)
 		return;
 	}
 
-	pr_debug("dev:%p port#%d\n", dev, dev->port_num);
+	/*
+	 * Wait for user to process prev MBIM_OPEN cmd before handling new one.
+	 * However don't drop first command during bootup as file may not be
+	 * opened by now. Queue the command in this case.
+	 */
+	if (!atomic_read(&dev->open_excl) && first_command_sent) {
+		pr_err("mbim not opened yet, dropping cmd pkt = %d\n", len);
+		return;
+	}
+	if (!first_command_sent)
+		first_command_sent = true;
+
+	pr_debug("dev:%pK port#%d\n", dev, dev->port_num);
 
 	cpkt = mbim_alloc_ctrl_pkt(len, GFP_ATOMIC);
 	if (!cpkt) {
@@ -1181,7 +1195,7 @@ static int mbim_set_alt(struct usb_function *f, unsigned intf, unsigned alt)
 			return ret;
 		}
 
-		pr_info("Set mbim port in_desc = 0x%p\n",
+		pr_info("Set mbim port in_desc = 0x%pK\n",
 				mbim->bam_port.in->desc);
 
 		ret = config_ep_by_speed(cdev->gadget, f,
@@ -1193,7 +1207,7 @@ static int mbim_set_alt(struct usb_function *f, unsigned intf, unsigned alt)
 			return ret;
 		}
 
-		pr_info("Set mbim port out_desc = 0x%p\n",
+		pr_info("Set mbim port out_desc = 0x%pK\n",
 				mbim->bam_port.out->desc);
 
 		pr_debug("Activate mbim\n");
@@ -1203,14 +1217,6 @@ static int mbim_set_alt(struct usb_function *f, unsigned intf, unsigned alt)
 						mbim->bam_port.out);
 			break;
 		case USB_GADGET_XPORT_BAM2BAM_IPA:
-			if (gadget_is_dwc3(cdev->gadget)) {
-				if (msm_ep_config(mbim->bam_port.in) ||
-					msm_ep_config(mbim->bam_port.out)) {
-					pr_err("%s: ep_config failed\n",
-							__func__);
-					goto fail;
-				}
-			}
 			ret = bam_data_connect(&mbim->bam_port,
 				mbim->xport, mbim->port_num,
 				USB_FUNC_MBIM);
@@ -1266,6 +1272,7 @@ static void mbim_disable(struct usb_function *f)
 
 	pr_info("SET DEVICE OFFLINE\n");
 	atomic_set(&mbim->online, 0);
+	mbim->remote_wakeup_enabled = 0;
 
 	 /* Disable Control Path */
 	if (mbim->not_port.notify->driver_data) {
@@ -1308,7 +1315,6 @@ static void mbim_disable(struct usb_function *f)
 
 static void mbim_suspend(struct usb_function *f)
 {
-	bool remote_wakeup_allowed;
 	struct f_mbim	*mbim = func_to_mbim(f);
 
 	pr_info("mbim suspended\n");
@@ -1327,9 +1333,9 @@ static void mbim_suspend(struct usb_function *f)
 		return;
 
 	if (mbim->cdev->gadget->speed == USB_SPEED_SUPER)
-		remote_wakeup_allowed = f->func_wakeup_allowed;
+		mbim->remote_wakeup_enabled = f->func_wakeup_allowed;
 	else
-		remote_wakeup_allowed = mbim->cdev->gadget->remote_wakeup;
+		mbim->remote_wakeup_enabled = mbim->cdev->gadget->remote_wakeup;
 
 	/* MBIM data interface is up only when alt setting is set to 1. */
 	if (!mbim->data_interface_up) {
@@ -1337,16 +1343,15 @@ static void mbim_suspend(struct usb_function *f)
 		return;
 	}
 
-	if (!remote_wakeup_allowed)
+	if (!mbim->remote_wakeup_enabled)
 		atomic_set(&mbim->online, 0);
 
 	bam_data_suspend(&mbim->bam_port, mbim->port_num, USB_FUNC_MBIM,
-			remote_wakeup_allowed);
+			 mbim->remote_wakeup_enabled);
 }
 
 static void mbim_resume(struct usb_function *f)
 {
-	bool remote_wakeup_allowed;
 	struct f_mbim	*mbim = func_to_mbim(f);
 
 	pr_info("mbim resumed\n");
@@ -1367,22 +1372,17 @@ static void mbim_resume(struct usb_function *f)
 	mbim_do_notify(mbim);
 	spin_unlock(&mbim->lock);
 
-	if (mbim->cdev->gadget->speed == USB_SPEED_SUPER)
-		remote_wakeup_allowed = f->func_wakeup_allowed;
-	else
-		remote_wakeup_allowed = mbim->cdev->gadget->remote_wakeup;
-
 	/* MBIM data interface is up only when alt setting is set to 1. */
 	if (!mbim->data_interface_up) {
 		pr_debug("MBIM data interface is not opened. Returning\n");
 		return;
 	}
 
-	if (!remote_wakeup_allowed)
+	if (!mbim->remote_wakeup_enabled)
 		atomic_set(&mbim->online, 1);
 
 	bam_data_resume(&mbim->bam_port, mbim->port_num, USB_FUNC_MBIM,
-			remote_wakeup_allowed);
+			mbim->remote_wakeup_enabled);
 }
 
 static int mbim_func_suspend(struct usb_function *f, unsigned char options)
@@ -1832,7 +1832,7 @@ mbim_write(struct file *fp, const char __user *buf, size_t count, loff_t *pos)
 	pr_debug("Enter(%zu)\n", count);
 
 	if (!dev || !req || !req->buf) {
-		pr_err("%s: dev %p req %p req->buf %p\n",
+		pr_err("%s: dev %pK req %pK req->buf %pK\n",
 			__func__, dev, req, req ? req->buf : req);
 		return -ENODEV;
 	}
@@ -1854,7 +1854,7 @@ mbim_write(struct file *fp, const char __user *buf, size_t count, loff_t *pos)
 	}
 
 	if (dev->not_port.notify_state != MBIM_NOTIFY_RESPONSE_AVAILABLE) {
-		pr_err("dev:%p state=%d error\n", dev,
+		pr_err("dev:%pK state=%d error\n", dev,
 			dev->not_port.notify_state);
 		mbim_unlock(&dev->write_excl);
 		return -EINVAL;
@@ -2030,7 +2030,7 @@ static long mbim_ioctl(struct file *fp, unsigned cmd, unsigned long arg)
 		default:
 			ret = -ENODEV;
 			pr_err("unknown transport\n");
-			break;
+			goto fail;
 		}
 
 		ret = copy_to_user((void __user *)arg, &info,
@@ -2046,6 +2046,7 @@ static long mbim_ioctl(struct file *fp, unsigned cmd, unsigned long arg)
 		ret = -EINVAL;
 	}
 
+fail:
 	mbim_unlock(&mbim->ioctl_excl);
 
 	return ret;

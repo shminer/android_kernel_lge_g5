@@ -101,6 +101,7 @@ config SND_SOC_ALL_CODECS
 	select SND_SOC_STAC9766 if SND_SOC_AC97_BUS
 	select SND_SOC_TAS2552 if I2C
 	select SND_SOC_TAS5086 if I2C
+	select SND_SOC_ES9018 if I2C
 	select SND_SOC_TLV320AIC23_I2C if I2C
 	select SND_SOC_TLV320AIC23_SPI if SPI_MASTER
 	select SND_SOC_TLV320AIC26 if SPI_MASTER
@@ -569,6 +570,11 @@ config SND_SOC_STA529
 config SND_SOC_STAC9766
 	tristate
 
+config SND_SOC_ES9018
+	tristate "es9018 Hi-Fi headphones amp"
+	depends on MACH_LGE
+	default n
+
 config SND_SOC_TAS2552
 	tristate "Texas Instruments TAS2552 Mono Audio amplifier"
 	depends on I2C
@@ -620,6 +626,9 @@ config SND_SOC_UDA134X
 config SND_SOC_UDA1380
         tristate
 
+config SND_SOC_WCD9306
+        tristate
+
 config SND_SOC_WCD9320
         tristate
 
@@ -630,13 +639,18 @@ config SND_SOC_WCD9330
 config SND_SOC_WCD9335
         tristate
 
+config SND_SOC_WSA881X_SENSORS
+	tristate
+
 config SND_SOC_WSA881X
         tristate
 	select REGMAP_SWR
+	select SND_SOC_WSA881X_SENSORS
 
 config SND_SOC_WSA881X_ANALOG
         tristate
 	select REGMAP_I2C
+	select SND_SOC_WSA881X_SENSORS
 
 config SND_SOC_MSM8X16_WCD
 	tristate
@@ -644,6 +658,7 @@ config SND_SOC_MSM8X16_WCD
 config SND_SOC_WCD9XXX
 	tristate
 	default y if SND_SOC_WCD9320=y || SND_SOC_WCD9330=y || SND_SOC_WCD9335=y
+	default y if SND_SOC_WCD9306=y
 
 config SND_SOC_WCD9XXX_V2
 	tristate
@@ -659,7 +674,7 @@ config AUDIO_EXT_CLK
 
 config SND_SOC_WCD_MBHC
 	tristate
-	default y if SND_SOC_MSM8909_WCD=y || SND_SOC_MSM8X16_WCD=y || SND_SOC_WCD9335=y
+	default y if (SND_SOC_MSM8909_WCD=y || SND_SOC_MSM8X16_WCD=y || SND_SOC_WCD9335=y) && SND_SOC_MDMCALIFORNIUM!=y
 
 config SND_SOC_WL1273
 	tristate
@@ -859,4 +874,8 @@ config SND_SOC_MSM_HDMI_CODEC_RX
 	help
 	HDMI audio drivers should be built only if the platform
         supports hdmi panel.
+
+config SND_SOC_MSM_HDMI_DBA_CODEC_RX
+	bool "HDMI DBA Audio Playback"
+	depends on MSM_DBA
 endmenu

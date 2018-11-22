@@ -1,4 +1,4 @@
-/* Copyright (c) 2013-2015, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2013-2016, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -40,13 +40,17 @@ struct mem_blocks {
 	uint32_t alloted;
 	/* Size required for client */
 	uint32_t size;
-	/* start address of the memory block reserved by server memory
+	/*
+	 * start address of the memory block reserved by server memory
 	 * subsystem to client
-	*/
+	 */
 	phys_addr_t phy_addr;
-	/* Virtual address for the physical address allocated
-	*/
+	/* Virtual address for the physical address allocated */
 	void *virtual_addr;
+	/* Release memory only when XPU is released*/
+	uint8_t free_memory;
+	/* Need Hypervisor mapping*/
+	uint8_t hyp_mapping;
 };
 
 int memshare_alloc(struct device *dev,

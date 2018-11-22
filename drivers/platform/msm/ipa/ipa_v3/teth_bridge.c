@@ -1,4 +1,4 @@
-/* Copyright (c) 2013-2015, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2013-2016, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -98,8 +98,6 @@ static void teth_bridge_ipa_cb(void *priv, enum ipa_dp_evt_type evt,
 */
 int ipa3_teth_bridge_init(struct teth_bridge_init_params *params)
 {
-	int res = 0;
-
 	TETH_DBG_FUNC_ENTRY();
 
 	if (!params) {
@@ -112,28 +110,8 @@ int ipa3_teth_bridge_init(struct teth_bridge_init_params *params)
 	params->private_data = NULL;
 	params->skip_ep_cfg = true;
 
-	/* Build dependency graph */
-	res = ipa3_rm_add_dependency(IPA_RM_RESOURCE_USB_PROD,
-				    IPA_RM_RESOURCE_Q6_CONS);
-	if (res < 0 && res != -EINPROGRESS) {
-		TETH_ERR("ipa3_rm_add_dependency() failed.\n");
-		goto bail;
-	}
-	res = ipa3_rm_add_dependency(IPA_RM_RESOURCE_Q6_PROD,
-				    IPA_RM_RESOURCE_USB_CONS);
-	if (res < 0 && res != -EINPROGRESS) {
-		ipa3_rm_delete_dependency(IPA_RM_RESOURCE_USB_PROD,
-					IPA_RM_RESOURCE_Q6_CONS);
-		TETH_ERR("ipa3_rm_add_dependency() failed.\n");
-		goto bail;
-	}
-
-	res = 0;
-	goto bail;
-
-bail:
 	TETH_DBG_FUNC_EXIT();
-	return res;
+	return 0;
 }
 
 /**
@@ -142,9 +120,9 @@ bail:
 int ipa3_teth_bridge_disconnect(enum ipa_client_type client)
 {
 	TETH_DBG_FUNC_ENTRY();
-	ipa3_rm_delete_dependency(IPA_RM_RESOURCE_USB_PROD,
+	ipa_rm_delete_dependency(IPA_RM_RESOURCE_USB_PROD,
 				 IPA_RM_RESOURCE_Q6_CONS);
-	ipa3_rm_delete_dependency(IPA_RM_RESOURCE_Q6_PROD,
+	ipa_rm_delete_dependency(IPA_RM_RESOURCE_Q6_PROD,
 				 IPA_RM_RESOURCE_USB_CONS);
 	TETH_DBG_FUNC_EXIT();
 
@@ -162,7 +140,40 @@ int ipa3_teth_bridge_disconnect(enum ipa_client_type client)
 */
 int ipa3_teth_bridge_connect(struct teth_bridge_connect_params *connect_params)
 {
-	return 0;
+	int res = 0;
+
+	TETH_DBG_FUNC_ENTRY();
+
+	/* Build the dependency graph, first add_dependency call is sync
+	 * in order to make sure the IPA clocks are up before we continue
+	 * and notify the USB driver it may continue.
+	 */
+	res = ipa_rm_add_dependency_sync(IPA_RM_RESOURCE_USB_PROD,
+				    IPA_RM_RESOURCE_Q6_CONS);
+	if (res < 0) {
+		TETH_ERR("ipa_rm_add_dependency() failed.\n");
+		goto bail;
+	}
+
+	/* this add_dependency call can't be sync since it will block until USB
+	 * status is connected (which can happen only after the tethering
+	 * bridge is connected), the clocks are already up so the call doesn't
+	 * need to block.
+	 */
+	res = ipa_rm_add_dependency(IPA_RM_RESOURCE_Q6_PROD,
+				    IPA_RM_RESOURCE_USB_CONS);
+	if (res < 0 && res != -EINPROGRESS) {
+		ipa_rm_delete_dependency(IPA_RM_RESOURCE_USB_PROD,
+					IPA_RM_RESOURCE_Q6_CONS);
+		TETH_ERR("ipa_rm_add_dependency() failed.\n");
+		goto bail;
+	}
+
+	res = 0;
+
+bail:
+	TETH_DBG_FUNC_EXIT();
+	return res;
 }
 
 static long ipa3_teth_bridge_ioctl(struct file *filp,

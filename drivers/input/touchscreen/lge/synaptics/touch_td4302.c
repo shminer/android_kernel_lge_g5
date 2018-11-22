@@ -688,9 +688,9 @@ static int synaptics_lpwg_mode(struct device *dev)
 				__func__, __LINE__);
 			synaptics_sleep_control(dev, 1);
 			synaptics_lpwg_control(dev, LPWG_NONE);
-		} else if (ts->lpwg.qcover == HOLE_NEAR) {
+		} else if (ts->lpwg.qcover == HALL_NEAR) {
 			/* knock on */
-			TOUCH_I("%s(%d) - knock on by hole\n",
+			TOUCH_I("%s(%d) - knock on by hall\n",
 				__func__, __LINE__);
 			synaptics_sleep_control(dev, 1);
 			synaptics_lpwg_control(dev, LPWG_DOUBLE_TAP);
@@ -1085,6 +1085,12 @@ static ssize_t store_reg_ctrl(struct device *dev,
 	if (sscanf(buf, "%5s %d %hx %x %x", command, &page, &reg, &offset,
 				&value) <= 0)
 		return count;
+
+	if ((offset < 0) || (offset > 49)) {
+			TOUCH_E("invalid offset[%d]\n", offset);
+				return count;
+
+	}
 
 	if (!strcmp(command, "write")) {
 		if (synaptics_read(dev, page, reg, (unsigned char *)&buffer[0],

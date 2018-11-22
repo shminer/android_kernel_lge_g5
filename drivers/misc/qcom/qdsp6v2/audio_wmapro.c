@@ -2,7 +2,7 @@
  *
  * Copyright (C) 2008 Google, Inc.
  * Copyright (C) 2008 HTC Corporation
- * Copyright (c) 2009-2015, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2009-2016, The Linux Foundation. All rights reserved.
  *
  * This software is licensed under the terms of the GNU General Public
  * License version 2, as published by the Free Software Foundation, and
@@ -19,6 +19,9 @@
 #include <linux/msm_audio_wmapro.h>
 #include <linux/compat.h>
 #include "audio_utils_aio.h"
+
+static struct miscdevice audio_wmapro_misc;
+static struct ws_mgr audio_wmapro_ws_mgr;
 
 #ifdef CONFIG_DEBUG_FS
 static const struct file_operations audio_wmapro_debug_fops = {
@@ -214,6 +217,8 @@ static long audio_compat_ioctl(struct file *file, unsigned int cmd,
 		struct msm_audio_wmapro_config *wmapro_config;
 		struct msm_audio_wmapro_config32 wmapro_config_32;
 
+		memset(&wmapro_config_32, 0, sizeof(wmapro_config_32));
+
 		wmapro_config =
 			(struct msm_audio_wmapro_config *)audio->codec_cfg;
 		wmapro_config_32.armdatareqthr = wmapro_config->armdatareqthr;
@@ -317,6 +322,11 @@ static int audio_open(struct inode *inode, struct file *file)
 
 
 	audio->pcm_cfg.buffer_size = PCM_BUFSZ_MIN;
+	audio->miscdevice = &audio_wmapro_misc;
+	audio->wakelock_voted = false;
+	audio->audio_ws_mgr = &audio_wmapro_ws_mgr;
+
+	init_waitqueue_head(&audio->event_wait);
 
 	audio->ac = q6asm_audio_client_alloc((app_cb) q6_audio_cb,
 					     (void *)audio);
@@ -391,7 +401,7 @@ static const struct file_operations audio_wmapro_fops = {
 	.compat_ioctl = audio_compat_ioctl
 };
 
-struct miscdevice audio_wmapro_misc = {
+static struct miscdevice audio_wmapro_misc = {
 	.minor = MISC_DYNAMIC_MINOR,
 	.name = "msm_wmapro",
 	.fops = &audio_wmapro_fops,
@@ -399,7 +409,14 @@ struct miscdevice audio_wmapro_misc = {
 
 static int __init audio_wmapro_init(void)
 {
-	return misc_register(&audio_wmapro_misc);
+	int ret = misc_register(&audio_wmapro_misc);
+
+	if (ret == 0)
+		device_init_wakeup(audio_wmapro_misc.this_device, true);
+	audio_wmapro_ws_mgr.ref_cnt = 0;
+	mutex_init(&audio_wmapro_ws_mgr.ws_lock);
+
+	return ret;
 }
 
 device_initcall(audio_wmapro_init);

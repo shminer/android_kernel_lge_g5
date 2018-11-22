@@ -1,4 +1,4 @@
-/* Copyright (c) 2012-2014, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2012-2016, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -855,21 +855,14 @@ static int stm_probe(struct platform_device *pdev)
 	size_t res_size, bitmap_size;
 	struct coresight_desc *desc;
 
-	if (coresight_fuse_access_disabled())
-		return -EPERM;
-
-	if (pdev->dev.of_node) {
-		pdata = of_get_coresight_platform_data(dev, pdev->dev.of_node);
-		if (IS_ERR(pdata))
-			return PTR_ERR(pdata);
-		pdev->dev.platform_data = pdata;
-	}
+	pdata = of_get_coresight_platform_data(dev, pdev->dev.of_node);
+	if (IS_ERR(pdata))
+		return PTR_ERR(pdata);
+	pdev->dev.platform_data = pdata;
 
 	drvdata = devm_kzalloc(dev, sizeof(*drvdata), GFP_KERNEL);
 	if (!drvdata)
 		return -ENOMEM;
-	/* Store the driver data pointer for use in exported functions */
-	stmdrvdata = drvdata;
 	drvdata->dev = &pdev->dev;
 	platform_set_drvdata(pdev, drvdata);
 
@@ -912,14 +905,21 @@ static int stm_probe(struct platform_device *pdev)
 	if (ret)
 		return ret;
 
+	ret = clk_prepare_enable(drvdata->clk);
+	if (ret)
+		return ret;
+
+	if (!coresight_authstatus_enabled(drvdata->base))
+		goto err1;
+
+	clk_disable_unprepare(drvdata->clk);
+
 	bitmap_fill(drvdata->entities, OST_ENTITY_MAX);
 
-	if (pdev->dev.of_node) {
-		drvdata->write_64bit = of_property_read_bool(pdev->dev.of_node,
-							"qcom,write-64bit");
-		drvdata->data_barrier = of_property_read_bool(pdev->dev.of_node,
-							"qcom,data-barrier");
-	}
+	drvdata->write_64bit = of_property_read_bool(pdev->dev.of_node,
+						     "qcom,write-64bit");
+	drvdata->data_barrier = of_property_read_bool(pdev->dev.of_node,
+						      "qcom,data-barrier");
 
 	desc = devm_kzalloc(dev, sizeof(*desc), GFP_KERNEL);
 	if (!desc)
@@ -948,10 +948,16 @@ static int stm_probe(struct platform_device *pdev)
 	if (boot_enable)
 		coresight_enable(drvdata->csdev);
 
+	/* Store the driver data pointer for use in exported functions */
+	stmdrvdata = drvdata;
+
 	return 0;
 err:
 	coresight_unregister(drvdata->csdev);
 	return ret;
+err1:
+	clk_disable_unprepare(drvdata->clk);
+	return -EPERM;
 }
 
 static int stm_remove(struct platform_device *pdev)

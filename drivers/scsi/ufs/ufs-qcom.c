@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2013-2015, Linux Foundation. All rights reserved.
+ * Copyright (c) 2013-2016, Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -25,9 +25,7 @@
 #include "unipro.h"
 #include "ufs-qcom.h"
 #include "ufshci.h"
-#ifdef CONFIG_MACH_LGE
 #include "ufs_quirks.h"
-#endif
 #include "ufs-qcom-ice.h"
 #include "ufs-qcom-debugfs.h"
 #include <linux/clk/msm-clk.h>
@@ -377,7 +375,6 @@ static int ufs_qcom_hce_enable_notify(struct ufs_hba *hba,
 		/* check if UFS PHY moved from DISABLED to HIBERN8 */
 		err = ufs_qcom_check_hibern8(hba);
 		ufs_qcom_enable_hw_clk_gating(hba);
-
 		break;
 	default:
 		dev_err(hba->dev, "%s: invalid status %d\n", __func__, status);
@@ -680,8 +677,32 @@ out:
 	return ret;
 }
 
+static int ufs_qcom_crypto_req_setup(struct ufs_hba *hba,
+	struct ufshcd_lrb *lrbp, u8 *cc_index, bool *enable, u64 *dun)
+{
+	struct ufs_qcom_host *host = ufshcd_get_variant(hba);
+	struct request *req;
+	int ret;
+
+	if (lrbp->cmd && lrbp->cmd->request)
+		req = lrbp->cmd->request;
+	else
+		return 0;
+
+	/* Use request LBA as the DUN value */
+	if (req->bio)
+		*dun = req->bio->bi_iter.bi_sector;
+
+	ret = ufs_qcom_ice_req_setup(host, lrbp->cmd, cc_index, enable);
+	if (ret)
+		dev_err(hba->dev, "%s: ufs_qcom_ice_req_setup failed (%d)\n",
+			__func__, ret);
+
+	return ret;
+}
+
 static
-int ufs_qcom_crytpo_engine_cfg(struct ufs_hba *hba, unsigned int task_tag)
+int ufs_qcom_crytpo_engine_cfg_start(struct ufs_hba *hba, unsigned int task_tag)
 {
 	struct ufs_qcom_host *host = ufshcd_get_variant(hba);
 	struct ufshcd_lrb *lrbp = &hba->lrb[task_tag];
@@ -691,7 +712,22 @@ int ufs_qcom_crytpo_engine_cfg(struct ufs_hba *hba, unsigned int task_tag)
 	    !lrbp->cmd || lrbp->command_type != UTP_CMD_TYPE_SCSI)
 		goto out;
 
-	err = ufs_qcom_ice_cfg(host, lrbp->cmd);
+	err = ufs_qcom_ice_cfg_start(host, lrbp->cmd);
+out:
+	return err;
+}
+
+static
+int ufs_qcom_crytpo_engine_cfg_end(struct ufs_hba *hba,
+		struct ufshcd_lrb *lrbp, struct request *req)
+{
+	struct ufs_qcom_host *host = ufshcd_get_variant(hba);
+	int err = 0;
+
+	if (!host->ice.pdev || lrbp->command_type != UTP_CMD_TYPE_SCSI)
+		goto out;
+
+	err = ufs_qcom_ice_cfg_end(host, req);
 out:
 	return err;
 }
@@ -710,53 +746,14 @@ out:
 	return err;
 }
 
-static int ufs_qcom_crypto_engine_eh(struct ufs_hba *hba)
-{
-	struct ufs_qcom_host *host = ufshcd_get_variant(hba);
-	int ice_status = 0;
-	int err = 0;
-
-	host->ice.crypto_engine_err = 0;
-
-	if (host->ice.quirks &
-	    UFS_QCOM_ICE_QUIRK_HANDLE_CRYPTO_ENGINE_ERRORS) {
-		err = ufs_qcom_ice_get_status(host, &ice_status);
-		if (!err)
-			host->ice.crypto_engine_err = ice_status;
-
-		if (host->ice.crypto_engine_err) {
-			dev_err(hba->dev, "%s handling crypto engine error\n",
-					__func__);
-			/*
-			 * block commands from scsi mid-layer.
-			 * As crypto error is a fatal error and will result in
-			 * a host reset we should leave scsi mid layer blocked
-			 * until host reset is completed.
-			 * Host reset will be handled in a seperate workqueue
-			 * and will be triggered from ufshcd_check_errors.
-			 */
-			ufshcd_scsi_block_requests(hba);
-
-			ufshcd_abort_outstanding_transfer_requests(hba,
-					DID_TARGET_FAILURE);
-		}
-	}
-
-	return host->ice.crypto_engine_err;
-}
-
-static int ufs_qcom_crypto_engine_get_err(struct ufs_hba *hba)
+static int ufs_qcom_crypto_engine_get_status(struct ufs_hba *hba, u32 *status)
 {
 	struct ufs_qcom_host *host = ufshcd_get_variant(hba);
 
-	return host->ice.crypto_engine_err;
-}
+	if (!status)
+		return -EINVAL;
 
-static void ufs_qcom_crypto_engine_reset_err(struct ufs_hba *hba)
-{
-	struct ufs_qcom_host *host = ufshcd_get_variant(hba);
-
-	host->ice.crypto_engine_err = 0;
+	return ufs_qcom_ice_get_status(host, status);
 }
 
 struct ufs_qcom_dev_params {
@@ -1125,6 +1122,18 @@ static int ufs_qcom_pwr_change_notify(struct ufs_hba *hba,
 				ufs_qcom_cap.hs_rx_gear = UFS_HS_G2;
 		}
 
+		/*
+		 * Platforms using QRBTCv2 phy must limit link to PWM Gear-1
+		 * and SLOW mode to successfully bring up the link.
+		 */
+		if (!strcmp(ufs_qcom_phy_name(phy), "ufs_phy_qrbtc_v2")) {
+			ufs_qcom_cap.tx_lanes = 1;
+			ufs_qcom_cap.rx_lanes = 1;
+			ufs_qcom_cap.pwm_rx_gear = UFS_PWM_G1;
+			ufs_qcom_cap.pwm_tx_gear = UFS_PWM_G1;
+			ufs_qcom_cap.desired_working_mode = SLOW;
+		}
+
 		ret = ufs_qcom_get_pwr_dev_param(&ufs_qcom_cap,
 						 dev_max_params,
 						 dev_req_params);
@@ -1179,20 +1188,19 @@ out:
 	return ret;
 }
 
-#ifdef CONFIG_MACH_LGE
 static int ufs_qcom_quirk_host_pa_saveconfigtime(struct ufs_hba *hba)
 {
 	int err;
 	u32 pa_vs_config_reg1;
 
 	err = ufshcd_dme_get(hba, UIC_ARG_MIB(PA_VS_CONFIG_REG1),
-			&pa_vs_config_reg1);
+			     &pa_vs_config_reg1);
 	if (err)
 		goto out;
 
 	/* Allow extension of MSB bits of PA_SaveConfigTime attribute */
 	err = ufshcd_dme_set(hba, UIC_ARG_MIB(PA_VS_CONFIG_REG1),
-			(pa_vs_config_reg1 | (1 << 12)));
+			    (pa_vs_config_reg1 | (1 << 12)));
 
 out:
 	return err;
@@ -1207,7 +1215,6 @@ static int ufs_qcom_apply_dev_quirks(struct ufs_hba *hba)
 
 	return err;
 }
-#endif
 
 static u32 ufs_qcom_get_ufs_hci_version(struct ufs_hba *hba)
 {
@@ -1258,12 +1265,16 @@ static void ufs_qcom_set_caps(struct ufs_hba *hba)
 {
 	struct ufs_qcom_host *host = ufshcd_get_variant(hba);
 
-	hba->caps |= UFSHCD_CAP_CLK_GATING | UFSHCD_CAP_HIBERN8_WITH_CLK_GATING;
-	hba->caps |= UFSHCD_CAP_CLK_SCALING;
+	if (!host->disable_lpm) {
+		hba->caps |= UFSHCD_CAP_CLK_GATING;
+		hba->caps |= UFSHCD_CAP_HIBERN8_WITH_CLK_GATING;
+		hba->caps |= UFSHCD_CAP_CLK_SCALING;
+	}
 	hba->caps |= UFSHCD_CAP_AUTO_BKOPS_SUSPEND;
 
 	if (host->hw_ver.major >= 0x2) {
-		hba->caps |= UFSHCD_CAP_POWER_COLLAPSE_DURING_HIBERN8;
+		if (!host->disable_lpm)
+			hba->caps |= UFSHCD_CAP_POWER_COLLAPSE_DURING_HIBERN8;
 		host->caps = UFS_QCOM_CAP_QUNIPRO |
 			     UFS_QCOM_CAP_RETAIN_SEC_CFG_AFTER_PWR_COLLAPSE;
 	}
@@ -1740,6 +1751,18 @@ static int __init get_android_boot_dev(char *str)
 __setup("androidboot.bootdevice=", get_android_boot_dev);
 #endif
 
+/*
+ * ufs_qcom_parse_lpm - read from DTS whether LPM modes should be disabled.
+ */
+static void ufs_qcom_parse_lpm(struct ufs_qcom_host *host)
+{
+	struct device_node *node = host->hba->dev->of_node;
+
+	host->disable_lpm = of_property_read_bool(node, "qcom,disable-lpm");
+	if (host->disable_lpm)
+		pr_info("%s: will disable all LPM modes\n", __func__);
+}
+
 /**
  * ufs_qcom_init - bind phy with controller
  * @hba: host controller instance
@@ -1871,6 +1894,9 @@ static int ufs_qcom_init(struct ufs_hba *hba)
 	if (err)
 		goto out_disable_phy;
 
+	ufs_qcom_parse_lpm(host);
+	if (host->disable_lpm)
+		pm_runtime_forbid(host->hba->dev);
 	ufs_qcom_set_caps(hba);
 	ufs_qcom_advertise_quirks(hba);
 
@@ -2127,7 +2153,8 @@ void ufs_qcom_print_hw_debug_reg_all(struct ufs_hba *hba, void *priv,
 	reg = ufs_qcom_get_debug_reg_offset(host, UFS_UFS_DBG_RD_PRDT_RAM);
 	print_fn(hba, reg, 64, "UFS_UFS_DBG_RD_PRDT_RAM ", priv);
 
-	ufshcd_writel(hba, (reg & ~UFS_BIT(17)), REG_UFS_CFG1);
+	/* clear bit 17 - UTP_DBG_RAMS_EN */
+	ufshcd_rmwl(hba, UFS_BIT(17), 0, REG_UFS_CFG1);
 
 	reg = ufs_qcom_get_debug_reg_offset(host, UFS_DBG_RD_REG_UAWM);
 	print_fn(hba, reg, 4, "UFS_DBG_RD_REG_UAWM ", priv);
@@ -2306,9 +2333,7 @@ static struct ufs_hba_variant_ops ufs_hba_qcom_vops = {
 	.hce_enable_notify	= ufs_qcom_hce_enable_notify,
 	.link_startup_notify	= ufs_qcom_link_startup_notify,
 	.pwr_change_notify	= ufs_qcom_pwr_change_notify,
-#ifdef CONFIG_MACH_LGE
 	.apply_dev_quirks	= ufs_qcom_apply_dev_quirks,
-#endif
 	.suspend		= ufs_qcom_suspend,
 	.resume			= ufs_qcom_resume,
 	.full_reset		= ufs_qcom_full_reset,
@@ -2320,11 +2345,11 @@ static struct ufs_hba_variant_ops ufs_hba_qcom_vops = {
 };
 
 static struct ufs_hba_crypto_variant_ops ufs_hba_crypto_variant_ops = {
-	.crypto_engine_cfg	= ufs_qcom_crytpo_engine_cfg,
-	.crypto_engine_reset	= ufs_qcom_crytpo_engine_reset,
-	.crypto_engine_eh	= ufs_qcom_crypto_engine_eh,
-	.crypto_engine_get_err	= ufs_qcom_crypto_engine_get_err,
-	.crypto_engine_reset_err = ufs_qcom_crypto_engine_reset_err,
+	.crypto_req_setup	= ufs_qcom_crypto_req_setup,
+	.crypto_engine_cfg_start	= ufs_qcom_crytpo_engine_cfg_start,
+	.crypto_engine_cfg_end	= ufs_qcom_crytpo_engine_cfg_end,
+	.crypto_engine_reset	  = ufs_qcom_crytpo_engine_reset,
+	.crypto_engine_get_status = ufs_qcom_crypto_engine_get_status,
 };
 
 static struct ufs_hba_pm_qos_variant_ops ufs_hba_pm_qos_variant_ops = {

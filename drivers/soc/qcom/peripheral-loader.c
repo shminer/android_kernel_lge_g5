@@ -1,4 +1,4 @@
-/* Copyright (c) 2010-2015, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2010-2016, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -65,6 +65,7 @@ static void __iomem *pil_info_base;
 static int proxy_timeout_ms = -1;
 module_param(proxy_timeout_ms, int, S_IRUGO | S_IWUSR);
 
+static bool disable_timeouts;
 /**
  * struct pil_mdt - Representation of <name>.mdt file in memory
  * @hdr: ELF32 header
@@ -517,6 +518,7 @@ static int pil_setup_region(struct pil_priv *priv, const struct pil_mdt *mdt)
 
 	if (relocatable) {
 		ret = pil_alloc_region(priv, min_addr_r, max_addr_r, align);
+
 	} else {
 		priv->region_start = min_addr_n;
 		priv->region_end = max_addr_n;
@@ -741,7 +743,7 @@ int pil_boot(struct pil_desc *desc)
 	const struct firmware *fw;
 	struct pil_priv *priv = desc->priv;
 	bool mem_protect = false;
-    bool hyp_assign = false;
+	bool hyp_assign = false;
 
 	if (desc->shutdown_fail)
 		pil_err(desc, "Subsystem shutdown failed previously!\n");
@@ -811,15 +813,18 @@ int pil_boot(struct pil_desc *desc)
 	}
 
 	if (desc->subsys_vmid > 0) {
-		/* Make sure the memory is actually assigned to Linux. In the
-		 * case where the shutdown sequence is not able to immediately
-		 * assign the memory back to Linux, we need to do this here. */
+		/* In case of modem ssr, we need to assign memory back to linux.
+		 * This is not true after cold boot since linux already owns it.
+		 * Also for secure boot devices, modem memory has to be released
+		 * after MBA is booted. */
 		pil_info(desc, "%s pil assign mem to linux", fw_name);
-		ret = pil_assign_mem_to_linux(desc, priv->region_start,
+		if (desc->modem_ssr) {
+			ret = pil_assign_mem_to_linux(desc, priv->region_start,
 				(priv->region_end - priv->region_start));
-		if (ret)
-			pil_err(desc, "Failed to assign to linux, ret - %d\n",
+			if (ret)
+				pil_err(desc, "Failed to assign to linux, ret- %d\n",
 								ret);
+		}
 		pil_info(desc, "%s pil assign mem to subsys and linux", fw_name);
 		ret = pil_assign_mem_to_subsys_and_linux(desc,
 				priv->region_start,
@@ -829,7 +834,7 @@ int pil_boot(struct pil_desc *desc)
 								ret);
 			goto err_deinit_image;
 		}
-    hyp_assign = true;
+		hyp_assign = true;
 	}
 
 	list_for_each_entry(seg, &desc->priv->segs, list) {
@@ -847,7 +852,7 @@ int pil_boot(struct pil_desc *desc)
 							desc->name, ret);
 			goto err_deinit_image;
 		}
-    hyp_assign = false;
+		hyp_assign = false;
 	}
 	pil_info(desc, "%s starting auth and reset", fw_name);
 	ret = desc->ops->auth_and_reset(desc);
@@ -856,6 +861,7 @@ int pil_boot(struct pil_desc *desc)
 		goto err_auth_and_reset;
 	}
 	pil_info(desc, "Brought out of reset\n");
+	desc->modem_ssr = false;
 err_auth_and_reset:
 	if (ret && desc->subsys_vmid > 0) {
 		pil_assign_mem_to_linux(desc, priv->region_start,
@@ -875,8 +881,8 @@ out:
 	up_read(&pil_pm_rwsem);
 	if (ret) {
 		if (priv->region) {
-            if (desc->subsys_vmid > 0 && !mem_protect &&
-                hyp_assign) {
+			if (desc->subsys_vmid > 0 && !mem_protect &&
+					hyp_assign) {
 				pil_reclaim_mem(desc, priv->region_start,
 					(priv->region_end -
 						priv->region_start),
@@ -916,6 +922,7 @@ void pil_shutdown(struct pil_desc *desc)
 		pil_proxy_unvote(desc, 1);
 	else
 		flush_delayed_work(&priv->proxy);
+	desc->modem_ssr = true;
 }
 EXPORT_SYMBOL(pil_shutdown);
 
@@ -940,6 +947,10 @@ EXPORT_SYMBOL(pil_free_memory);
 
 static DEFINE_IDA(pil_ida);
 
+bool is_timeout_disabled(void)
+{
+	return disable_timeouts;
+}
 /**
  * pil_desc_init() - Initialize a pil descriptor
  * @desc: descriptor to intialize
@@ -1078,6 +1089,10 @@ static int __init msm_pil_init(void)
 	if (!pil_info_base) {
 		pr_warn("pil: could not map imem region\n");
 		goto out;
+	}
+	if (__raw_readl(pil_info_base) == 0x53444247) {
+		pr_info("pil: pil-imem set to disable pil timeouts\n");
+		disable_timeouts = true;
 	}
 	for (i = 0; i < resource_size(&res)/sizeof(u32); i++)
 		writel_relaxed(0, pil_info_base + (i * sizeof(u32)));

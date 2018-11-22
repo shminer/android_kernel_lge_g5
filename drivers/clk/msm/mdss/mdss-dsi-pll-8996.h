@@ -1,4 +1,4 @@
-/* Copyright (c) 2015, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2015-2016, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -22,6 +22,7 @@
 #define DSIPHY_CMN_CTRL_1		0x0020
 
 #define DSIPHY_CMN_LDO_CNTRL		0x004c
+#define DSIPHY_CMN_GLBL_DIGTOP_SPARE2	0x005c
 
 #define DSIPHY_PLL_IE_TRIM		0x0400
 #define DSIPHY_PLL_IP_TRIM		0x0404
@@ -38,10 +39,13 @@
 #define DSIPHY_PLL_RESETSM_CNTRL5	0x043c
 #define DSIPHY_PLL_KVCO_DIV_REF1	0x0440
 #define DSIPHY_PLL_KVCO_DIV_REF2	0x0444
-
 #define DSIPHY_PLL_KVCO_COUNT1		0x0448
 #define DSIPHY_PLL_KVCO_COUNT2		0x044c
 #define DSIPHY_PLL_VREF_CFG1		0x045c
+
+#define DSIPHY_PLL_KVCO_CODE		0x0458
+#define DSIPHY_PLL_CORE_VCO_TUNE_STATUS	0x4D0
+#define DSIPHY_PLL_CORE_KVCO_CODE_STATUS	0x4D4
 
 #define DSIPHY_PLL_VCO_DIV_REF1		0x046c
 #define DSIPHY_PLL_VCO_DIV_REF2		0x0470
@@ -51,7 +55,7 @@
 #define DSIPHY_PLL_PLLLOCK_CMP2		0x0480
 #define DSIPHY_PLL_PLLLOCK_CMP3		0x0484
 #define DSIPHY_PLL_PLLLOCK_CMP_EN	0x0488
-
+#define DSIPHY_PLL_PLL_VCO_TUNE		0x048C
 #define DSIPHY_PLL_DEC_START		0x0490
 #define DSIPHY_PLL_SSC_EN_CENTER	0x0494
 #define DSIPHY_PLL_SSC_ADJ_PER1		0x0498
@@ -76,6 +80,22 @@
 #define DSIPHY_PLL_PLL_ICP_SET		0x04fc
 #define DSIPHY_PLL_PLL_LPF1		0x0500
 #define DSIPHY_PLL_PLL_LPF2_POSTDIV	0x0504
+#define DSIPHY_PLL_PLL_BANDGAP	0x0508
+
+#define DSI_DYNAMIC_REFRESH_PLL_CTRL15		0x050
+#define DSI_DYNAMIC_REFRESH_PLL_CTRL19		0x060
+#define DSI_DYNAMIC_REFRESH_PLL_CTRL20		0x064
+#define DSI_DYNAMIC_REFRESH_PLL_CTRL21		0x068
+#define DSI_DYNAMIC_REFRESH_PLL_CTRL22		0x06C
+#define DSI_DYNAMIC_REFRESH_PLL_CTRL23		0x070
+#define DSI_DYNAMIC_REFRESH_PLL_CTRL24		0x074
+#define DSI_DYNAMIC_REFRESH_PLL_CTRL25		0x078
+#define DSI_DYNAMIC_REFRESH_PLL_CTRL26		0x07C
+#define DSI_DYNAMIC_REFRESH_PLL_CTRL27		0x080
+#define DSI_DYNAMIC_REFRESH_PLL_CTRL28		0x084
+#define DSI_DYNAMIC_REFRESH_PLL_CTRL29		0x088
+#define DSI_DYNAMIC_REFRESH_PLL_UPPER_ADDR	0x094
+#define DSI_DYNAMIC_REFRESH_PLL_UPPER_ADDR2	0x098
 
 struct dsi_pll_input {
 	u32 fref;	/* 19.2 Mhz, reference clk */
@@ -114,7 +134,7 @@ struct dsi_pll_input {
 
 	u32 pll_lpf_res1;	/* 3, reg: 0x0504, bit 0 - 3 */
 	u32 pll_lpf_cap1;	/* 11, reg: 0x0500, bit 0 - 3 */
-	u32 pll_lpf_cap2;	/* 14, reg: 0x0500, bit 4 - 7 */
+	u32 pll_lpf_cap2;	/* 1, reg: 0x0500, bit 4 - 7 */
 	u32 pll_c3ctrl;		/* 2, reg: 0x04c4 */
 	u32 pll_r3ctrl;		/* 1, reg: 0x04c4 */
 };
@@ -183,6 +203,12 @@ enum {
 int pll_vco_set_rate_8996(struct clk *c, unsigned long rate);
 long pll_vco_round_rate_8996(struct clk *c, unsigned long rate);
 enum handoff pll_vco_handoff_8996(struct clk *c);
+enum handoff shadow_pll_vco_handoff_8996(struct clk *c);
+int shadow_post_n1_div_set_div(struct div_clk *clk, int div);
+int shadow_post_n1_div_get_div(struct div_clk *clk);
+int shadow_n2_div_set_div(struct div_clk *clk, int div);
+int shadow_n2_div_get_div(struct div_clk *clk);
+int shadow_pll_vco_set_rate_8996(struct clk *c, unsigned long rate);
 int pll_vco_prepare_8996(struct clk *c);
 void pll_vco_unprepare_8996(struct clk *c);
 int set_mdss_byte_mux_sel_8996(struct mux_clk *clk, int sel);

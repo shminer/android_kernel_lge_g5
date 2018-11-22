@@ -705,6 +705,21 @@ static long writeback_sb_inodes(struct super_block *sb,
 
 		work->nr_pages -= write_chunk - wbc.nr_to_write;
 		wrote += write_chunk - wbc.nr_to_write;
+
+		if (need_resched()) {
+			/*
+			 * We're trying to balance between building up a nice
+			 * long list of IOs to improve our merge rate, and
+			 * getting those IOs out quickly for anyone throttling
+			 * in balance_dirty_pages().  cond_resched() doesn't
+			 * unplug, so get our IOs out the door before we
+			 * give up the CPU.
+			 */
+			blk_flush_plug(current);
+			cond_resched();
+		}
+
+
 		spin_lock(&wb->list_lock);
 		spin_lock(&inode->i_lock);
 		if (!(inode->i_state & I_DIRTY))
@@ -712,7 +727,7 @@ static long writeback_sb_inodes(struct super_block *sb,
 		requeue_inode(inode, wb, &wbc);
 		inode_sync_complete(inode);
 		spin_unlock(&inode->i_lock);
-		cond_resched_lock(&wb->list_lock);
+
 		/*
 		 * bail out to wb_writeback() often enough to check
 		 * background threshold and other termination conditions.
@@ -1409,27 +1424,6 @@ void sync_inodes_sb(struct super_block *sb)
 	wait_sb_inodes(sb);
 }
 EXPORT_SYMBOL(sync_inodes_sb);
-#ifdef CONFIG_MACH_LGE
-void async_inodes_sb(struct super_block *sb)
-{
-	struct wb_writeback_work *work;
-
-	work = kzalloc(sizeof(*work), GFP_ATOMIC);
-	if (!work) {
-		trace_writeback_nowork(sb->s_bdi);
-		bdi_wakeup_thread(sb->s_bdi);
-		return;
-	}
-
-	work->sb = sb;
-	work->sync_mode = WB_SYNC_NONE;
-	work->nr_pages	= LONG_MAX;
-	work->range_cyclic = 0;
-	work->reason	= WB_REASON_SYNC;
-	bdi_queue_work(sb->s_bdi, work);
-}
-EXPORT_SYMBOL(async_inodes_sb);
-#endif
 
 /**
  * write_inode_now	-	write an inode to disk

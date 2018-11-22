@@ -1,4 +1,4 @@
-/* Copyright (c) 2015, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2015-2016, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -78,7 +78,7 @@
  * Value n means CQE would send CMD13 during the transfer of data block
  * BLOCK_CNT-n
  */
-#define SEND_QSR_INTERVAL 0x70000
+#define SEND_QSR_INTERVAL 0x70001
 
 /* send status config 2 */
 #define CQSSC2		0x44
@@ -144,6 +144,11 @@
 #define CQ_VENDOR_CFG	0x100
 #define CMDQ_SEND_STATUS_TRIGGER (1 << 31)
 
+struct task_history {
+	u64 task;
+	bool is_dcmd;
+};
+
 struct cmdq_host {
 	const struct cmdq_host_ops *ops;
 	void __iomem *mmio;
@@ -183,13 +188,16 @@ struct cmdq_host {
 	dma_addr_t desc_dma_base;
 	dma_addr_t trans_desc_dma_base;
 
+	struct task_history *thist;
+	u8 thist_idx;
+
 	struct completion halt_comp;
 	struct mmc_request **mrq_slot;
 	void *private;
 };
 
 struct cmdq_host_ops {
-	void (*set_tranfer_params)(struct mmc_host *mmc);
+	void (*set_transfer_params)(struct mmc_host *mmc);
 	void (*set_data_timeout)(struct mmc_host *mmc, u32 val);
 	void (*clear_set_irqs)(struct mmc_host *mmc, bool clear);
 	void (*set_block_size)(struct mmc_host *mmc);
@@ -207,7 +215,7 @@ struct cmdq_host_ops {
 
 static inline void cmdq_writel(struct cmdq_host *host, u32 val, int reg)
 {
-	if (unlikely(host->ops->write_l))
+	if (unlikely(host->ops && host->ops->write_l))
 		host->ops->write_l(host, val, reg);
 	else
 		writel_relaxed(val, host->mmio + reg);
@@ -215,7 +223,7 @@ static inline void cmdq_writel(struct cmdq_host *host, u32 val, int reg)
 
 static inline u32 cmdq_readl(struct cmdq_host *host, int reg)
 {
-	if (unlikely(host->ops->read_l))
+	if (unlikely(host->ops && host->ops->read_l))
 		return host->ops->read_l(host, reg);
 	else
 		return readl_relaxed(host->mmio + reg);

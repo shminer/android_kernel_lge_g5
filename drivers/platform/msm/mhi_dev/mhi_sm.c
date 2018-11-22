@@ -1,4 +1,4 @@
-/* Copyright (c) 2015, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2015-2016, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -16,7 +16,7 @@
 #include <linux/device.h>
 #include <linux/errno.h>
 #include <linux/debugfs.h>
-#include <linux/ipa.h>
+#include <linux/ipa_mhi.h>
 #include "mhi_hwio.h"
 #include "mhi_sm.h"
 
@@ -150,6 +150,9 @@ static inline const char *mhi_sm_pcie_event_str(enum ep_pcie_event event)
 		break;
 	case EP_PCIE_EVENT_PM_D0:
 		str = "EP_PCIE_PM_D0_EVENT";
+		break;
+	case EP_PCIE_EVENT_MHI_A7:
+		str = "EP_PCIE_MHI_A7";
 		break;
 	default:
 		str = "INVALID_PCIE_EVENT";
@@ -409,6 +412,9 @@ static bool mhi_sm_is_legal_pcie_event_on_state(enum mhi_dev_state curr_mstate,
 		res = (curr_dstate == MHI_SM_EP_PCIE_D0_STATE ||
 			curr_dstate == MHI_SM_EP_PCIE_D3_HOT_STATE);
 		break;
+	case EP_PCIE_EVENT_MHI_A7:
+		res = true;
+		break;
 	default:
 		MHI_SM_ERR("Invalid ep_pcie event, received: %s\n",
 			mhi_sm_pcie_event_str(event));
@@ -442,7 +448,8 @@ static int mhi_sm_change_to_M0(void)
 		MHI_SM_DBG("Nothing to do, already in M0 state\n");
 		res = 0;
 		goto exit;
-	} else if (old_state == MHI_DEV_M3_STATE) {
+	} else if (old_state == MHI_DEV_M3_STATE ||
+				old_state == MHI_DEV_READY_STATE) {
 		/*  Retrieve MHI configuration*/
 		res = mhi_dev_config_outbound_iatu(mhi_sm_ctx->mhi_dev);
 		if (res) {
@@ -1143,6 +1150,11 @@ void mhi_dev_sm_pcie_handler(struct ep_pcie_notify *notify)
 		MHI_SM_ERR("got %s, ERROR occurred\n",
 			mhi_sm_pcie_event_str(event));
 		break;
+	case EP_PCIE_EVENT_MHI_A7:
+		ep_pcie_mask_irq_event(mhi_sm_ctx->mhi_dev->phandle,
+				EP_PCIE_INT_EVT_MHI_A7, false);
+		mhi_dev_notify_a7_event(mhi_sm_ctx->mhi_dev);
+		goto exit;
 	default:
 		MHI_SM_ERR("Invalid ep_pcie event, received 0x%x event\n",
 			event);

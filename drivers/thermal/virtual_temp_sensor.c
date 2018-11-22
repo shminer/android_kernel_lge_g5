@@ -1,3 +1,4 @@
+//#define DEBUG
 #define pr_fmt(fmt) "%s: " fmt, __func__
 
 #include <linux/module.h>
@@ -60,7 +61,7 @@ int vts_register_value_sensor(struct value_sensor *vs) {
 	}
 	INIT_LIST_HEAD(&vs->list);
 	list_add_tail(&vs->list, &value_sensors_head);
-	pr_info("Success to register %s", vs->name);
+	pr_info("Register value sensor [%s] : weight = %d\n", vs->name, vs->weight);
 err:
 	return ret;
 }
@@ -101,12 +102,14 @@ static int vts_tz_get_temp(struct thermal_zone_device *thermal,
 			return ret;
 		}
 		val += sensor->weight * results.physical;
+	//	pr_err("%s : weight = %d, val = %ld\n", sensor->name, sensor->weight, val);
 	}
 value_sensor:
 	list_for_each_entry(vs, &value_sensors_head, list) {
 		if (vs->vts_index != vts->index)
 			continue;
 		val += vs->weight * vts_get_value_sensor_temp(vs);
+	//	pr_err("%s : weight = %d, index = %d, val = %ld\n", vs->name, vs->weight, vs->vts_index, val);
 	}
 	val += vts->constant;
 	val *= vts->scaling_factor;
@@ -189,6 +192,10 @@ static int vts_probe(struct platform_device *pdev)
 			kfree(sensor);
 			continue;
 		}
+		if (of_property_read_bool(child,"weight-negative")) {
+			sensor->weight *= -1;
+		}
+
 		pr_info("%s: %s is registered. chan=%d, weight=%d\n",
 			vts->name, sensor->name, sensor->channel, sensor->weight);
 		INIT_LIST_HEAD(&sensor->list);

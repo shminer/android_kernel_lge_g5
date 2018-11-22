@@ -1,4 +1,4 @@
-/* Copyright (c) 2014-2015, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2014-2016, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -35,6 +35,7 @@
 #include <soc/qcom/jtag.h>
 #include <asm/smp_plat.h>
 #include <asm/etmv4x.h>
+#include <soc/qcom/socinfo.h>
 
 #define CORESIGHT_LAR		(0xFB0)
 
@@ -180,6 +181,7 @@
 
 #define TZ_DBG_ETM_FEAT_ID	(0x8)
 #define TZ_DBG_ETM_VER		(0x400000)
+#define HW_SOC_ID_M8953		(293)
 
 #define etm_writel(etm, val, off)	\
 		   __raw_writel(val, etm->base + off)
@@ -488,18 +490,18 @@ static inline void etm_clk_disable(void)
 	uint32_t cpmr;
 
 	isb();
-	asm volatile("mrs %0, S3_7_c15_c0_5" : "=r" (cpmr));
+	cpmr = trc_readl(CPMR_EL1);
 	cpmr  &= ~ETM_CPMR_CLKEN;
-	asm volatile("msr S3_7_c15_c0_5, %0" : : "r" (cpmr));
+	trc_write(cpmr, CPMR_EL1);
 }
 
 static inline void etm_clk_enable(void)
 {
 	uint32_t cpmr;
 
-	asm volatile("mrs %0, S3_7_c15_c0_5" : "=r" (cpmr));
+	cpmr = trc_readl(CPMR_EL1);
 	cpmr  |= ETM_CPMR_CLKEN;
-	asm volatile("msr S3_7_c15_c0_5, %0" : : "r" (cpmr));
+	trc_write(cpmr, CPMR_EL1);
 	isb();
 }
 
@@ -1545,6 +1547,21 @@ static struct notifier_block jtag_mm_etm_notifier = {
 	.notifier_call = jtag_mm_etm_callback,
 };
 
+static bool skip_etm_save_restore(void)
+{
+	uint32_t id;
+	uint32_t version;
+
+	id = socinfo_get_id();
+	version = socinfo_get_version();
+
+	if (HW_SOC_ID_M8953 == id && 1 == SOCINFO_VERSION_MAJOR(version) &&
+		0 == SOCINFO_VERSION_MINOR(version))
+		return true;
+
+	return false;
+}
+
 static int jtag_mm_etm_probe(struct platform_device *pdev, uint32_t cpu)
 {
 	struct etm_ctx *etmdata;
@@ -1556,7 +1573,6 @@ static int jtag_mm_etm_probe(struct platform_device *pdev, uint32_t cpu)
 	if (!etmdata)
 		return -ENOMEM;
 
-	etm[cpu] = etmdata;
 
 	res = platform_get_resource_byname(pdev, IORESOURCE_MEM, "etm-base");
 	if (!res)
@@ -1572,6 +1588,9 @@ static int jtag_mm_etm_probe(struct platform_device *pdev, uint32_t cpu)
 					 pdev->dev.of_node,
 					 "qcom,save-restore-disable");
 
+	if (skip_etm_save_restore())
+		etmdata->save_restore_disabled = 1;
+
 	/* Allocate etm state save space per core */
 	etmdata->state = devm_kzalloc(dev,
 				      MAX_ETM_STATE_SIZE * sizeof(uint64_t),
@@ -1585,12 +1604,18 @@ static int jtag_mm_etm_probe(struct platform_device *pdev, uint32_t cpu)
 	if (++cnt >= nr_cpu_ids)
 		register_hotcpu_notifier(&jtag_mm_etm_notifier);
 
+	get_online_cpus();
+
 	if (!smp_call_function_single(cpu, etm_init_arch_data, etmdata,
 				      1))
 		etmdata->init = true;
 
-	if (etmdata->init) {
-		mutex_lock(&etmdata->mutex);
+	etm[cpu] = etmdata;
+
+	put_online_cpus();
+
+	mutex_lock(&etmdata->mutex);
+	if (etmdata->init && !etmdata->enable) {
 		if (etm_arch_supported(etmdata->arch)) {
 			if (scm_get_feat_version(TZ_DBG_ETM_FEAT_ID) <
 			    TZ_DBG_ETM_VER)
@@ -1600,8 +1625,8 @@ static int jtag_mm_etm_probe(struct platform_device *pdev, uint32_t cpu)
 		} else
 			pr_info("etm arch %u not supported\n", etmdata->arch);
 		etmdata->enable = true;
-		mutex_unlock(&etmdata->mutex);
 	}
+	mutex_unlock(&etmdata->mutex);
 	return 0;
 }
 

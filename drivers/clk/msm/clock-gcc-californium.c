@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2015, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2015-2016, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -68,7 +68,9 @@ static void __iomem *virt_apcsbase;
 #define GCC_REG_BASE(x) (void __iomem *)(virt_base + (x))
 
 #define xo_source_val 0
+#define xo_a_clk_source_val 0
 #define gpll0_out_main_cgc_source_val 1
+#define gpll0_ao_out_main_cgc_source_val 1
 #define gpll0_out_main_div2_cgc_source_val 2
 
 #define FIXDIV(div) (div ? (2 * (div) - 1) : (0))
@@ -141,6 +143,7 @@ static DEFINE_VDD_REGULATORS(vdd_dig_ao, VDD_DIG_NUM, 1, vdd_corner, NULL);
 #define APCS_GPLL_ENA_VOTE                               (0x45000)
 #define APCS_CLOCK_BRANCH_ENA_VOTE                       (0x45004)
 #define APCS_SMMU_CLOCK_BRANCH_ENA_VOTE                  (0x4500C)
+#define APSS_AHB_CMD_RCGR                                (0x46000)
 #define GCC_DEBUG_CLK_CTL                                (0x74000)
 #define CLOCK_FRQ_MEASURE_CTL                            (0x74004)
 #define CLOCK_FRQ_MEASURE_STATUS                         (0x74008)
@@ -182,8 +185,6 @@ static DEFINE_VDD_REGULATORS(vdd_dig_ao, VDD_DIG_NUM, 1, vdd_corner, NULL);
 
 DEFINE_CLK_RPM_SMD_BRANCH(xo, xo_a_clk, RPM_MISC_CLK_TYPE,
 			  XO_ID, 19200000);
-DEFINE_CLK_RPM_SMD_BRANCH(cxo_clk_src, cxo_a_clk_src, RPM_MISC_CLK_TYPE,
-			  CXO_CLK_SRC_ID, 19200000);
 
 DEFINE_CLK_RPM_SMD(ce_clk, ce_a_clk, RPM_CE_CLK_TYPE,
 		   CE_CLK_ID, NULL);
@@ -214,9 +215,9 @@ static DEFINE_CLK_VOTER(qseecom_ce_clk, &ce_clk.c, 85710000);
 static DEFINE_CLK_VOTER(scm_ce_clk, &ce_clk.c, 85710000);
 static DEFINE_CLK_VOTER(snoc_msmbus_clk, &snoc_clk.c, LONG_MAX);
 static DEFINE_CLK_VOTER(snoc_msmbus_a_clk, &snoc_a_clk.c, LONG_MAX);
-static DEFINE_CLK_BRANCH_VOTER(cxo_dwc3_clk, &cxo_clk_src.c);
-static DEFINE_CLK_BRANCH_VOTER(cxo_lpm_clk, &cxo_clk_src.c);
-static DEFINE_CLK_BRANCH_VOTER(cxo_otg_clk, &cxo_clk_src.c);
+static DEFINE_CLK_BRANCH_VOTER(cxo_dwc3_clk, &xo.c);
+static DEFINE_CLK_BRANCH_VOTER(cxo_lpm_clk, &xo.c);
+static DEFINE_CLK_BRANCH_VOTER(cxo_otg_clk, &xo.c);
 
 DEFINE_CLK_RPM_SMD_XO_BUFFER(div_clk1, div_clk1_ao, DIV_CLK1_ID);
 DEFINE_CLK_RPM_SMD_XO_BUFFER(ln_bb_clk, ln_bb_a_clk, LN_BB_CLK_ID);
@@ -296,6 +297,7 @@ static struct pll_vote_clk gpll0_ao = {
 };
 
 DEFINE_EXT_CLK(gpll0_out_main_cgc, &gpll0.c);
+DEFINE_EXT_CLK(gpll0_ao_out_main_cgc, &gpll0_ao.c);
 
 DEFINE_FIXED_DIV_CLK(gpll0_out_main_div2_cgc, 2, &gpll0.c);
 
@@ -311,8 +313,34 @@ static struct gate_clk gpll0_out_msscc = {
 	},
 };
 
+static struct clk_freq_tbl ftbl_apss_ahb_clk_src[] = {
+	F(  19200000,         xo_a_clk,    1,    0,     0),
+	F(  50000000, gpll0_ao_out_main_cgc,   12,    0,     0),
+	F( 100000000, gpll0_ao_out_main_cgc,    6,    0,     0),
+	F( 133333333, gpll0_ao_out_main_cgc,  4.5,    0,     0),
+	F_END
+};
+
+static struct rcg_clk apss_ahb_clk_src = {
+	.cmd_rcgr_reg = APSS_AHB_CMD_RCGR,
+	.set_rate = set_rate_hid,
+	.freq_tbl = ftbl_apss_ahb_clk_src,
+	.current_freq = &rcg_dummy_freq,
+	.base = &virt_base,
+	.c = {
+		.dbg_name = "apss_ahb_clk_src",
+		.ops = &clk_ops_rcg,
+		VDD_DIG_FMAX_MAP4(LOWER, 19200000, LOW, 50000000,
+				  NOMINAL, 100000000, HIGH, 133333333),
+		CLK_INIT(apss_ahb_clk_src.c),
+	},
+};
+
 static struct clk_freq_tbl ftbl_usb30_master_clk_src[] = {
-	F( 125000000, gpll0_out_main_cgc,    1,    5,    24),
+	F(  60000000, gpll0_out_main_div2_cgc,    5,    0,     0),
+	F( 120000000, gpll0_out_main_cgc,    5,    0,     0),
+	F( 171430000, gpll0_out_main_cgc,  3.5,    0,     0),
+	F( 200000000, gpll0_out_main_cgc,    3,    0,     0),
 	F_END
 };
 
@@ -635,6 +663,7 @@ static struct rcg_clk gp3_clk_src = {
 
 static struct clk_freq_tbl ftbl_pcie_aux_clk_src[] = {
 	F(   1000000,         xo,    1,    5,    96),
+	F(  19200000,         xo,    1,    0,     0),
 	F_END
 };
 
@@ -699,6 +728,8 @@ static struct rcg_clk sdcc1_apps_clk_src = {
 };
 
 static struct clk_freq_tbl ftbl_usb30_mock_utmi_clk_src[] = {
+	F(  19200000,         xo,    1,    0,     0),
+	F(  30000000, gpll0_out_main_div2_cgc,   10,    0,     0),
 	F(  60000000, gpll0_out_main_cgc,   10,    0,     0),
 	F_END
 };
@@ -1040,6 +1071,7 @@ static struct branch_clk gcc_pcie_pipe_clk = {
 	.bcr_reg = PCIEPHY_PHY_BCR,
 	.has_sibling = 0,
 	.base = &virt_base,
+	.halt_check = DELAY,
 	.c = {
 		.dbg_name = "gcc_pcie_pipe_clk",
 		.ops = &clk_ops_branch,
@@ -1373,8 +1405,6 @@ static struct clk_lookup msm_clocks_rpm_californium[] = {
 	CLK_LIST(a7pll_clk),
 	CLK_LIST(xo),
 	CLK_LIST(xo_a_clk),
-	CLK_LIST(cxo_clk_src),
-	CLK_LIST(cxo_a_clk_src),
 	CLK_LIST(ce_clk),
 	CLK_LIST(ce_a_clk),
 	CLK_LIST(pcnoc_clk),
@@ -1430,6 +1460,7 @@ static struct clk_lookup msm_clocks_gcc_californium[] = {
 	CLK_LIST(gpll0_out_main_cgc),
 	CLK_LIST(gpll0_out_main_div2_cgc),
 	CLK_LIST(gpll0_out_msscc),
+	CLK_LIST(apss_ahb_clk_src),
 	CLK_LIST(usb30_master_clk_src),
 	CLK_LIST(blsp1_qup1_i2c_apps_clk_src),
 	CLK_LIST(blsp1_qup1_spi_apps_clk_src),

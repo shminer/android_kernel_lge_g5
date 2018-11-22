@@ -369,7 +369,13 @@ static int really_probe(struct device *dev, struct device_driver *drv)
 		if (nsec64_probe_spend)
 			bus_stime = ktime_get();
 #endif
+#if defined(CONFIG_LGE_PROBE_TIME_PROFILING) || defined(CONFIG_PROC_EVENTS)
+		dev_err(dev, "bus probe_log s\n");
+#endif
 		ret = dev->bus->probe(dev);
+#if defined(CONFIG_LGE_PROBE_TIME_PROFILING) || defined(CONFIG_PROC_EVENTS)
+		dev_err(dev, "bus probe_log e\n");
+#endif
 #if defined(CONFIG_MACH_LGE)
 		if (nsec64_probe_spend) {
 			int usecs, bus_us;
@@ -401,7 +407,13 @@ static int really_probe(struct device *dev, struct device_driver *drv)
 		if (nsec64_probe_spend)
 			drv_stime = ktime_get();
 #endif
+#if defined(CONFIG_LGE_PROBE_TIME_PROFILING) || defined(CONFIG_PROC_EVENTS)
+		dev_err(dev, "drv probe_log s\n");
+#endif
 		ret = drv->probe(dev);
+#if defined(CONFIG_LGE_PROBE_TIME_PROFILING) || defined(CONFIG_PROC_EVENTS)
+		dev_err(dev, "drv probe_log e\n");
+#endif
 #if defined(CONFIG_MACH_LGE)
 		if (nsec64_probe_spend) {
 			int usecs, drv_us;
@@ -444,7 +456,7 @@ probe_failed:
 
 	if (ret == -EPROBE_DEFER) {
 		/* Driver requested deferred probing */
-		dev_info(dev, "Driver %s requests probe deferral\n", drv->name);
+		dev_dbg(dev, "Driver %s requests probe deferral\n", drv->name);
 		driver_deferred_probe_add(dev);
 		/* Did a trigger occur while probing? Need to re-trigger if yes */
 		if (local_trigger_count != atomic_read(&deferred_trigger_count))

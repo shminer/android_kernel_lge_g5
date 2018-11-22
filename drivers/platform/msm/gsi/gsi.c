@@ -1,4 +1,4 @@
-/* Copyright (c) 2015, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2015-2016, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -21,7 +21,7 @@
 #include "gsi_reg.h"
 
 #define GSI_CMD_TIMEOUT (5*HZ)
-#define GSI_STOP_CMD_TIMEOUT_MS 1
+#define GSI_STOP_CMD_TIMEOUT_MS 10
 #define GSI_MAX_CH_LOW_WEIGHT 15
 #define GSI_MHI_ER_START 10
 #define GSI_MHI_ER_END 16
@@ -91,26 +91,6 @@ static void __gsi_config_gen_irq(int ee, uint32_t mask, uint32_t val)
 			GSI_EE_n_CNTXT_GSI_IRQ_EN_OFFS(ee));
 	gsi_writel((curr & ~mask) | (val & mask), gsi_ctx->base +
 			GSI_EE_n_CNTXT_GSI_IRQ_EN_OFFS(ee));
-}
-
-static void __gsi_config_inter_ee_ch_irq(int ee, uint32_t mask, uint32_t val)
-{
-	uint32_t curr;
-
-	curr = gsi_readl(gsi_ctx->base +
-			GSI_INTER_EE_n_SRC_GSI_CH_IRQ_MSK_OFFS(ee));
-	gsi_writel((curr & ~mask) | (val & mask), gsi_ctx->base +
-			GSI_INTER_EE_n_SRC_GSI_CH_IRQ_MSK_OFFS(ee));
-}
-
-static void __gsi_config_inter_ee_evt_irq(int ee, uint32_t mask, uint32_t val)
-{
-	uint32_t curr;
-
-	curr = gsi_readl(gsi_ctx->base +
-			GSI_INTER_EE_n_SRC_EV_CH_IRQ_MSK_OFFS(ee));
-	gsi_writel((curr & ~mask) | (val & mask), gsi_ctx->base +
-			GSI_INTER_EE_n_SRC_EV_CH_IRQ_MSK_OFFS(ee));
 }
 
 static void gsi_handle_ch_ctrl(int ee)
@@ -315,7 +295,7 @@ static void gsi_incr_ring_rp(struct gsi_ring_ctx *ctx)
 		ctx->rp_local = ctx->base;
 }
 
-static uint16_t gsi_find_idx_from_addr(struct gsi_ring_ctx *ctx, uint64_t addr)
+uint16_t gsi_find_idx_from_addr(struct gsi_ring_ctx *ctx, uint64_t addr)
 {
 	BUG_ON(addr < ctx->base || addr >= ctx->end);
 
@@ -456,7 +436,7 @@ check_again:
 		}
 	}
 
-	gsi_writel(ch, gsi_ctx->base +
+	gsi_writel(ch & msk, gsi_ctx->base +
 			GSI_EE_n_CNTXT_SRC_IEOB_IRQ_CLR_OFFS(ee));
 }
 
@@ -663,6 +643,13 @@ int gsi_register_device(struct gsi_per_props *props, unsigned long *dev_hdl)
 			GSIERR("failed to register isr for %u\n", props->irq);
 			return -GSI_STATUS_ERROR;
 		}
+
+		res = enable_irq_wake(props->irq);
+		if (res)
+			GSIERR("failed to enable wake irq %u\n", props->irq);
+		else
+			GSIERR("GSI irq is wake enabled %u\n", props->irq);
+
 	} else {
 		GSIERR("do not support interrupt type %u\n", props->intr);
 		return -GSI_STATUS_UNSUPPORTED_OP;
@@ -684,15 +671,17 @@ int gsi_register_device(struct gsi_per_props *props, unsigned long *dev_hdl)
 	/* only support 16 un-reserved + 7 reserved event virtual IDs */
 	gsi_ctx->evt_bmap = ~0x7E03FF;
 
-	/* enable all interrupts */
+	/*
+	 * enable all interrupts but GSI_BREAK_POINT.
+	 * Inter EE commands / interrupt are no supported.
+	 */
 	__gsi_config_type_irq(props->ee, ~0, ~0);
 	__gsi_config_ch_irq(props->ee, ~0, ~0);
 	__gsi_config_evt_irq(props->ee, ~0, ~0);
 	__gsi_config_ieob_irq(props->ee, ~0, ~0);
 	__gsi_config_glob_irq(props->ee, ~0, ~0);
-	__gsi_config_gen_irq(props->ee, ~0, ~0);
-	__gsi_config_inter_ee_ch_irq(props->ee, ~0, ~0);
-	__gsi_config_inter_ee_evt_irq(props->ee, ~0, ~0);
+	__gsi_config_gen_irq(props->ee, ~0,
+		~GSI_EE_n_CNTXT_GSI_IRQ_CLR_GSI_BREAK_POINT_BMSK);
 
 	gsi_writel(props->intr, gsi_ctx->base +
 			GSI_EE_n_CNTXT_INTSET_OFFS(gsi_ctx->per.ee));
@@ -790,8 +779,6 @@ int gsi_deregister_device(unsigned long dev_hdl, bool force)
 	__gsi_config_ieob_irq(gsi_ctx->per.ee, ~0, 0);
 	__gsi_config_glob_irq(gsi_ctx->per.ee, ~0, 0);
 	__gsi_config_gen_irq(gsi_ctx->per.ee, ~0, 0);
-	__gsi_config_inter_ee_ch_irq(gsi_ctx->per.ee, ~0, 0);
-	__gsi_config_inter_ee_evt_irq(gsi_ctx->per.ee, ~0, 0);
 
 	devm_free_irq(gsi_ctx->dev, gsi_ctx->per.irq, gsi_ctx);
 	devm_iounmap(gsi_ctx->dev, gsi_ctx->base);
@@ -1537,10 +1524,12 @@ int gsi_alloc_channel(struct gsi_chan_props *props, unsigned long dev_hdl,
 
 	spin_lock_init(&ctx->ring.slock);
 	gsi_init_chan_ring(props, &ctx->ring);
-
+	if (!props->max_re_expected)
+		ctx->props.max_re_expected = ctx->ring.max_num_elem;
 	ctx->user_data = user_data;
 	*chan_hdl = props->ch_id;
 	ctx->allocated = true;
+	ctx->stats.dp.last_timestamp = jiffies_to_msecs(jiffies);
 	atomic_inc(&gsi_ctx->num_chan);
 
 	return GSI_STATUS_SUCCESS;
@@ -1736,7 +1725,7 @@ int gsi_stop_channel(unsigned long chan_hdl)
 	res = wait_for_completion_timeout(&ctx->compl,
 			msecs_to_jiffies(GSI_STOP_CMD_TIMEOUT_MS));
 	if (res == 0) {
-		GSIERR("chan_hdl=%lu timed out\n", chan_hdl);
+		GSIDBG("chan_hdl=%lu timed out\n", chan_hdl);
 		res = -GSI_STATUS_TIMED_OUT;
 		goto free_lock;
 	}
@@ -1954,35 +1943,67 @@ int gsi_dealloc_channel(unsigned long chan_hdl)
 }
 EXPORT_SYMBOL(gsi_dealloc_channel);
 
+void gsi_update_ch_dp_stats(struct gsi_chan_ctx *ctx, uint16_t used)
+{
+	unsigned long now = jiffies_to_msecs(jiffies);
+	unsigned long elapsed;
+
+	if (used == 0) {
+		elapsed = now - ctx->stats.dp.last_timestamp;
+		if (ctx->stats.dp.empty_time < elapsed)
+			ctx->stats.dp.empty_time = elapsed;
+	}
+
+	if (used <= ctx->props.max_re_expected / 3)
+		++ctx->stats.dp.ch_below_lo;
+	else if (used <= 2 * ctx->props.max_re_expected / 3)
+		++ctx->stats.dp.ch_below_hi;
+	else
+		++ctx->stats.dp.ch_above_hi;
+	ctx->stats.dp.last_timestamp = now;
+}
+
 static void __gsi_query_channel_free_re(struct gsi_chan_ctx *ctx,
 		uint16_t *num_free_re)
 {
 	uint16_t start;
+	uint16_t start_hw;
 	uint16_t end;
 	uint64_t rp;
+	uint64_t rp_hw;
 	int ee = gsi_ctx->per.ee;
 	uint16_t used;
+	uint16_t used_hw;
+
+	rp_hw = gsi_readl(gsi_ctx->base +
+		GSI_EE_n_GSI_CH_k_CNTXT_4_OFFS(ctx->props.ch_id, ee));
+	rp_hw |= ((uint64_t)gsi_readl(gsi_ctx->base +
+		GSI_EE_n_GSI_CH_k_CNTXT_5_OFFS(ctx->props.ch_id, ee)))
+		<< 32;
 
 	if (!ctx->evtr) {
-		rp = gsi_readl(gsi_ctx->base +
-			GSI_EE_n_GSI_CH_k_CNTXT_4_OFFS(ctx->props.ch_id, ee));
-		rp |= ((uint64_t)gsi_readl(gsi_ctx->base +
-			GSI_EE_n_GSI_CH_k_CNTXT_5_OFFS(ctx->props.ch_id, ee)))
-			<< 32;
+		rp = rp_hw;
 		ctx->ring.rp = rp;
 	} else {
 		rp = ctx->ring.rp_local;
 	}
 
 	start = gsi_find_idx_from_addr(&ctx->ring, rp);
+	start_hw = gsi_find_idx_from_addr(&ctx->ring, rp_hw);
 	end = gsi_find_idx_from_addr(&ctx->ring, ctx->ring.wp_local);
 
 	if (end >= start)
 		used = end - start;
 	else
-		used = ctx->ring.max_num_elem + 1 - (end - start);
+		used = ctx->ring.max_num_elem + 1 - (start - end);
+
+	if (end >= start_hw)
+		used_hw = end - start_hw;
+	else
+		used_hw = ctx->ring.max_num_elem + 1 - (start_hw - end);
 
 	*num_free_re = ctx->ring.max_num_elem - used;
+	gsi_update_ch_dp_stats(ctx, used_hw);
 }
 
 int gsi_query_channel_info(unsigned long chan_hdl,
@@ -2056,12 +2077,73 @@ int gsi_query_channel_info(unsigned long chan_hdl,
 }
 EXPORT_SYMBOL(gsi_query_channel_info);
 
+int gsi_is_channel_empty(unsigned long chan_hdl, bool *is_empty)
+{
+	struct gsi_chan_ctx *ctx;
+	spinlock_t *slock;
+	unsigned long flags;
+	uint64_t rp;
+	uint64_t wp;
+	int ee = gsi_ctx->per.ee;
+
+	if (!gsi_ctx) {
+		pr_err("%s:%d gsi context not allocated\n", __func__, __LINE__);
+		return -GSI_STATUS_NODEV;
+	}
+
+	if (chan_hdl >= GSI_MAX_CHAN || !is_empty) {
+		GSIERR("bad params chan_hdl=%lu is_empty=%p\n",
+				chan_hdl, is_empty);
+		return -GSI_STATUS_INVALID_PARAMS;
+	}
+
+	ctx = &gsi_ctx->chan[chan_hdl];
+
+	if (ctx->props.prot != GSI_CHAN_PROT_GPI) {
+		GSIERR("op not supported for protocol %u\n", ctx->props.prot);
+		return -GSI_STATUS_UNSUPPORTED_OP;
+	}
+
+	if (ctx->evtr)
+		slock = &ctx->evtr->ring.slock;
+	else
+		slock = &ctx->ring.slock;
+
+	spin_lock_irqsave(slock, flags);
+
+	rp = gsi_readl(gsi_ctx->base +
+		GSI_EE_n_GSI_CH_k_CNTXT_4_OFFS(ctx->props.ch_id, ee));
+	rp |= ((uint64_t)gsi_readl(gsi_ctx->base +
+		GSI_EE_n_GSI_CH_k_CNTXT_5_OFFS(ctx->props.ch_id, ee))) << 32;
+	ctx->ring.rp = rp;
+
+	wp = gsi_readl(gsi_ctx->base +
+		GSI_EE_n_GSI_CH_k_CNTXT_6_OFFS(ctx->props.ch_id, ee));
+	wp |= ((uint64_t)gsi_readl(gsi_ctx->base +
+		GSI_EE_n_GSI_CH_k_CNTXT_7_OFFS(ctx->props.ch_id, ee))) << 32;
+	ctx->ring.wp = wp;
+
+	if (ctx->props.dir == GSI_CHAN_DIR_FROM_GSI)
+		*is_empty = (ctx->ring.rp_local == rp) ? true : false;
+	else
+		*is_empty = (wp == rp) ? true : false;
+
+	spin_unlock_irqrestore(slock, flags);
+
+	GSIDBG("ch=%lu RP=0x%llx WP=0x%llx RP_LOCAL=0x%llx\n",
+			chan_hdl, rp, wp, ctx->ring.rp_local);
+
+	return GSI_STATUS_SUCCESS;
+}
+EXPORT_SYMBOL(gsi_is_channel_empty);
+
 int gsi_queue_xfer(unsigned long chan_hdl, uint16_t num_xfers,
 		struct gsi_xfer_elem *xfer, bool ring_db)
 {
 	struct gsi_chan_ctx *ctx;
 	uint16_t free;
-	struct gsi_tre *tre;
+	struct gsi_tre tre;
+	struct gsi_tre *tre_ptr;
 	uint16_t idx;
 	uint64_t wp_rollback;
 	int i;
@@ -2103,25 +2185,29 @@ int gsi_queue_xfer(unsigned long chan_hdl, uint16_t num_xfers,
 
 	wp_rollback = ctx->ring.wp_local;
 	for (i = 0; i < num_xfers; i++) {
-		idx = gsi_find_idx_from_addr(&ctx->ring, ctx->ring.wp_local);
-		tre = (struct gsi_tre *)(ctx->ring.base_va +
-				idx * ctx->ring.elem_sz);
-		memset(tre, 0, sizeof(*tre));
-		tre->buffer_ptr = xfer[i].addr;
-		tre->buf_len = xfer[i].len;
+		memset(&tre, 0, sizeof(tre));
+		tre.buffer_ptr = xfer[i].addr;
+		tre.buf_len = xfer[i].len;
 		if (xfer[i].type == GSI_XFER_ELEM_DATA) {
-			tre->re_type = GSI_RE_XFER;
+			tre.re_type = GSI_RE_XFER;
 		} else if (xfer[i].type == GSI_XFER_ELEM_IMME_CMD) {
-			tre->re_type = GSI_RE_IMMD_CMD;
+			tre.re_type = GSI_RE_IMMD_CMD;
 		} else {
 			GSIERR("chan_hdl=%lu bad RE type=%u\n", chan_hdl,
 				xfer[i].type);
 			break;
 		}
-		tre->bei = (xfer[i].flags & GSI_XFER_FLAG_BEI) ? 1 : 0;
-		tre->ieot = (xfer[i].flags & GSI_XFER_FLAG_EOT) ? 1 : 0;
-		tre->ieob = (xfer[i].flags & GSI_XFER_FLAG_EOB) ? 1 : 0;
-		tre->chain = (xfer[i].flags & GSI_XFER_FLAG_CHAIN) ? 1 : 0;
+		tre.bei = (xfer[i].flags & GSI_XFER_FLAG_BEI) ? 1 : 0;
+		tre.ieot = (xfer[i].flags & GSI_XFER_FLAG_EOT) ? 1 : 0;
+		tre.ieob = (xfer[i].flags & GSI_XFER_FLAG_EOB) ? 1 : 0;
+		tre.chain = (xfer[i].flags & GSI_XFER_FLAG_CHAIN) ? 1 : 0;
+
+		idx = gsi_find_idx_from_addr(&ctx->ring, ctx->ring.wp_local);
+		tre_ptr = (struct gsi_tre *)(ctx->ring.base_va +
+				idx * ctx->ring.elem_sz);
+
+		/* write the TRE to ring */
+		*tre_ptr = tre;
 		ctx->user_data[idx] = xfer[i].xfer_user_data;
 		gsi_incr_ring_wp(&ctx->ring);
 	}
@@ -2373,6 +2459,124 @@ int gsi_set_channel_cfg(unsigned long chan_hdl, struct gsi_chan_props *props,
 	return GSI_STATUS_SUCCESS;
 }
 EXPORT_SYMBOL(gsi_set_channel_cfg);
+
+static void gsi_configure_ieps(void *base)
+{
+	void __iomem *gsi_base = (void __iomem *)base;
+
+	gsi_writel(1, gsi_base + GSI_GSI_IRAM_PTR_CH_CMD_OFFS);
+	gsi_writel(2, gsi_base + GSI_GSI_IRAM_PTR_CH_DB_OFFS);
+	gsi_writel(3, gsi_base + GSI_GSI_IRAM_PTR_CH_DIS_COMP_OFFS);
+	gsi_writel(4, gsi_base + GSI_GSI_IRAM_PTR_CH_EMPTY_OFFS);
+	gsi_writel(5, gsi_base + GSI_GSI_IRAM_PTR_EE_GENERIC_CMD_OFFS);
+	gsi_writel(6, gsi_base + GSI_GSI_IRAM_PTR_EVENT_GEN_COMP_OFFS);
+	gsi_writel(7, gsi_base + GSI_GSI_IRAM_PTR_INT_MOD_STOPED_OFFS);
+	gsi_writel(8, gsi_base + GSI_GSI_IRAM_PTR_IPA_IF_DESC_PROC_COMP_OFFS);
+	gsi_writel(9, gsi_base + GSI_GSI_IRAM_PTR_IPA_IF_RESET_COMP_OFFS);
+	gsi_writel(10, gsi_base + GSI_GSI_IRAM_PTR_IPA_IF_STOP_COMP_OFFS);
+	gsi_writel(11, gsi_base + GSI_GSI_IRAM_PTR_NEW_RE_OFFS);
+	gsi_writel(12, gsi_base + GSI_GSI_IRAM_PTR_READ_ENG_COMP_OFFS);
+	gsi_writel(13, gsi_base + GSI_GSI_IRAM_PTR_TIMER_EXPIRED_OFFS);
+}
+
+static void gsi_configure_bck_prs_matrix(void *base)
+{
+	void __iomem *gsi_base = (void __iomem *)base;
+	/*
+	 * For now, these are default values. In the future, GSI FW image will
+	 * produce optimized back-pressure values based on the FW image.
+	 */
+	gsi_writel(0xfffffffe,
+		gsi_base + GSI_IC_DISABLE_CHNL_BCK_PRS_LSB_OFFS);
+	gsi_writel(0xffffffff,
+		gsi_base + GSI_IC_DISABLE_CHNL_BCK_PRS_MSB_OFFS);
+	gsi_writel(0xffffffbf, gsi_base + GSI_IC_GEN_EVNT_BCK_PRS_LSB_OFFS);
+	gsi_writel(0xffffffff, gsi_base + GSI_IC_GEN_EVNT_BCK_PRS_MSB_OFFS);
+	gsi_writel(0xffffefff, gsi_base + GSI_IC_GEN_INT_BCK_PRS_LSB_OFFS);
+	gsi_writel(0xffffffff, gsi_base + GSI_IC_GEN_INT_BCK_PRS_MSB_OFFS);
+	gsi_writel(0xffffefff,
+		gsi_base + GSI_IC_STOP_INT_MOD_BCK_PRS_LSB_OFFS);
+	gsi_writel(0xffffffff,
+		gsi_base + GSI_IC_STOP_INT_MOD_BCK_PRS_MSB_OFFS);
+	gsi_writel(0x00000000,
+		gsi_base + GSI_IC_PROCESS_DESC_BCK_PRS_LSB_OFFS);
+	gsi_writel(0x00000000,
+		gsi_base + GSI_IC_PROCESS_DESC_BCK_PRS_MSB_OFFS);
+	gsi_writel(0x00ffffff, gsi_base + GSI_IC_TLV_STOP_BCK_PRS_LSB_OFFS);
+	gsi_writel(0xffffffff, gsi_base + GSI_IC_TLV_STOP_BCK_PRS_MSB_OFFS);
+	gsi_writel(0xfdffffff, gsi_base + GSI_IC_TLV_RESET_BCK_PRS_LSB_OFFS);
+	gsi_writel(0xffffffff, gsi_base + GSI_IC_TLV_RESET_BCK_PRS_MSB_OFFS);
+	gsi_writel(0xffffffff, gsi_base + GSI_IC_RGSTR_TIMER_BCK_PRS_LSB_OFFS);
+	gsi_writel(0xfffffffe, gsi_base + GSI_IC_RGSTR_TIMER_BCK_PRS_MSB_OFFS);
+	gsi_writel(0xffffffff, gsi_base + GSI_IC_READ_BCK_PRS_LSB_OFFS);
+	gsi_writel(0xffffefff, gsi_base + GSI_IC_READ_BCK_PRS_MSB_OFFS);
+	gsi_writel(0xffffffff, gsi_base + GSI_IC_WRITE_BCK_PRS_LSB_OFFS);
+	gsi_writel(0xffffdfff, gsi_base + GSI_IC_WRITE_BCK_PRS_MSB_OFFS);
+	gsi_writel(0xffffffff,
+		gsi_base + GSI_IC_UCONTROLLER_GPR_BCK_PRS_LSB_OFFS);
+	gsi_writel(0xff03ffff,
+		gsi_base + GSI_IC_UCONTROLLER_GPR_BCK_PRS_MSB_OFFS);
+}
+
+int gsi_configure_regs(phys_addr_t gsi_base_addr, u32 gsi_size,
+		phys_addr_t per_base_addr)
+{
+	void __iomem *gsi_base;
+
+	gsi_base = ioremap_nocache(gsi_base_addr, gsi_size);
+	if (!gsi_base) {
+		GSIERR("ioremap failed for 0x%pa\n", &gsi_base_addr);
+		return -GSI_STATUS_RES_ALLOC_FAILURE;
+	}
+	gsi_writel(0, gsi_base + GSI_GSI_PERIPH_BASE_ADDR_MSB_OFFS);
+	gsi_writel(per_base_addr,
+			gsi_base + GSI_GSI_PERIPH_BASE_ADDR_LSB_OFFS);
+	gsi_configure_bck_prs_matrix((void *)gsi_base);
+	gsi_configure_ieps((void *)gsi_base);
+	iounmap(gsi_base);
+
+	return 0;
+}
+EXPORT_SYMBOL(gsi_configure_regs);
+
+int gsi_enable_fw(phys_addr_t gsi_base_addr, u32 gsi_size)
+{
+	void __iomem *gsi_base;
+	uint32_t value;
+
+	gsi_base = ioremap_nocache(gsi_base_addr, gsi_size);
+	if (!gsi_base) {
+		GSIERR("ioremap failed for 0x%pa\n", &gsi_base_addr);
+		return -GSI_STATUS_RES_ALLOC_FAILURE;
+	}
+
+	/* Enable the MCS and set to x2 clocks */
+	value = (((1 << GSI_GSI_CFG_GSI_ENABLE_SHFT) &
+			GSI_GSI_CFG_GSI_ENABLE_BMSK) |
+		((1 << GSI_GSI_CFG_MCS_ENABLE_SHFT) &
+			GSI_GSI_CFG_MCS_ENABLE_BMSK) |
+		((1 << GSI_GSI_CFG_DOUBLE_MCS_CLK_FREQ_SHFT) &
+			GSI_GSI_CFG_DOUBLE_MCS_CLK_FREQ_BMSK) |
+		((0 << GSI_GSI_CFG_UC_IS_MCS_SHFT) &
+			GSI_GSI_CFG_UC_IS_MCS_BMSK));
+	gsi_writel(value, gsi_base + GSI_GSI_CFG_OFFS);
+
+	iounmap(gsi_base);
+
+	return 0;
+
+}
+EXPORT_SYMBOL(gsi_enable_fw);
+
+void gsi_get_inst_ram_offset_and_size(unsigned long *base_offset,
+		unsigned long *size)
+{
+	if (base_offset)
+		*base_offset = GSI_GSI_INST_RAM_BASE_OFFS;
+	if (size)
+		*size = GSI_GSI_INST_RAM_SIZE;
+}
+EXPORT_SYMBOL(gsi_get_inst_ram_offset_and_size);
 
 static int msm_gsi_probe(struct platform_device *pdev)
 {

@@ -26,19 +26,18 @@
 #include <linux/clk.h>
 #include <linux/clk/msm-clk.h>
 
+#define INIT_MAX_TIME_USEC			1000
+
 #define USB_SSPHY_1P8_VOL_MIN		1800000 /* uV */
 #define USB_SSPHY_1P8_VOL_MAX		1800000 /* uV */
 #define USB_SSPHY_1P8_HPM_LOAD		23000	/* uA */
 
-/* QMP PHY register offsets */
-#define PCIE_USB3_PHY_SW_RESET			0x600
-#define PCIE_USB3_PHY_POWER_DOWN_CONTROL	0x604
-#define PCIE_USB3_PHY_START			0x608
 
+/* USB3PHY_PCIE_USB3_PCS_PCS_STATUS bit */
 #define PHYSTATUS				BIT(6)
 
-
-#define INIT_MAX_TIME_USEC			1000
+/* TCSR_PHY_CLK_SCHEME_SEL bit mask */
+#define PHY_CLK_SCHEME_SEL BIT(0)
 
 /* PCIE_USB3_PHY_AUTONOMOUS_MODE_CTRL bits */
 #define ARCVR_DTCT_EN		BIT(0)
@@ -53,6 +52,10 @@ enum qmp_phy_rev_reg {
 	USB3_PHY_PCS_STATUS,
 	USB3_PHY_AUTONOMOUS_MODE_CTRL,
 	USB3_PHY_LFPS_RXTERM_IRQ_CLEAR,
+	USB3_PHY_POWER_DOWN_CONTROL,
+	USB3_PHY_SW_RESET,
+	USB3_PHY_START,
+	USB3_PHY_REG_MAX,
 };
 
 /* QMP PHY register offset for rev1 */
@@ -64,6 +67,9 @@ unsigned int qmp_phy_rev1[] = {
 	[USB3_PHY_PCS_STATUS] = 0x728,
 	[USB3_PHY_AUTONOMOUS_MODE_CTRL] = 0x6BC,
 	[USB3_PHY_LFPS_RXTERM_IRQ_CLEAR] = 0x6C0,
+	[USB3_PHY_POWER_DOWN_CONTROL] = 0x604,
+	[USB3_PHY_SW_RESET] = 0x600,
+	[USB3_PHY_START] = 0x608,
 };
 
 /* QMP PHY register offset for rev2 */
@@ -75,11 +81,17 @@ unsigned int qmp_phy_rev2[] = {
 	[USB3_PHY_PCS_STATUS] = 0x77C,
 	[USB3_PHY_AUTONOMOUS_MODE_CTRL] = 0x6D4,
 	[USB3_PHY_LFPS_RXTERM_IRQ_CLEAR] = 0x6D8,
+	[USB3_PHY_POWER_DOWN_CONTROL] = 0x604,
+	[USB3_PHY_SW_RESET] = 0x600,
+	[USB3_PHY_START] = 0x608,
 };
 
+/* reg values to write based on the phy clk scheme selected */
 struct qmp_reg_val {
 	u32 offset;
-	u32 val;
+	u32 diff_clk_sel_val;
+	u32 se_clk_sel_val;
+	u32 delay;
 };
 
 /* Use these offsets/values if PCIE_USB3_PHY_REVISION_ID0 == 0 */
@@ -139,7 +151,7 @@ static const struct qmp_reg_val qmp_settings_rev0[] = {
 	{0x674, 0x17}, /* PCIE_USB3_PHY_LOCK_DETECT_CONFIG3 */
 	{0x6AC, 0x05}, /* PCIE_USB3_PHY_FLL_CNTRL2 */
 
-	{-1, -1} /* terminating entry */
+	{-1, 0x00} /* terminating entry */
 };
 
 /*
@@ -200,7 +212,7 @@ static const struct qmp_reg_val qmp_settings_rev1[] = {
 	{0x674, 0x17}, /* PCIE_USB3_PHY_LOCK_DETECT_CONFIG3 */
 	{0x6AC, 0x05}, /* PCIE_USB3_PHY_FLL_CNTRL2 */
 
-	{-1, -1} /* terminating entry */
+	{-1, 0x00} /* terminating entry */
 };
 
 /* USB3PHY_REVISION_ID3 = 0x20 where register offset is being changed. */
@@ -273,7 +285,7 @@ static const struct qmp_reg_val qmp_settings_rev2[] = {
 	{0x688, 0x47}, /* USB3_PHY_LOCK_DETECT_CONFIG3 */
 	{0x664, 0x08}, /* USB3_PHY_POWER_STATE_CONFIG2 */
 
-	{-1, -1} /* terminating entry */
+	{-1, 0x00} /* terminating entry */
 };
 
 /* Override for QMP PHY revision 2 */
@@ -286,14 +298,14 @@ static const struct qmp_reg_val qmp_settings_rev2_misc[] = {
 	/* Res_code settings */
 	{0xC4, 0x15}, /* USB3PHY_QSERDES_COM_RESCODE_DIV_NUM */
 	{0x1B8, 0x1F}, /* QSERDES_COM_CMN_MISC2 */
-	{-1, -1} /* terminating entry */
+	{-1, 0x00} /* terminating entry */
 };
 
 /* Override PLL Calibration */
 static const struct qmp_reg_val qmp_override_pll[] = {
 	{0x04, 0xE1}, /* QSERDES_COM_PLL_VCOTAIL_EN */
 	{0x50, 0x07}, /* QSERDES_COM_RESETSM_CNTRL2 */
-	{-1, -1} /* terminating entry */
+	{-1, 0x00} /* terminating entry */
 };
 
 /* Foundry specific settings */
@@ -306,7 +318,7 @@ static const struct qmp_reg_val qmp_settings_rev0_misc[] = {
 	{0x4A8, 0xFF}, /* QSERDES_RX_RX_EQ_GAIN1_LSB */
 	{0x6B0, 0xF4}, /* PCIE_USB3_PHY_FLL_CNT_VAL_L */
 	{0x6B4, 0x41}, /* PCIE_USB3_PHY_FLL_CNT_VAL_H_TOL */
-	{-1, -1} /* terminating entry */
+	{-1, 0x00} /* terminating entry */
 };
 
 /* Vbg related settings */
@@ -314,26 +326,28 @@ static const struct qmp_reg_val qmp_settings_rev1_misc[] = {
 	{0x0C, 0x03}, /* QSERDES_COM_IE_TRIM */
 	{0x10, 0x00}, /* QSERDES_COM_IP_TRIM */
 	{0xA0, 0xFF}, /* QSERDES_COM_BGTC */
-	{-1, -1} /* terminating entry */
+	{-1, 0x00} /* terminating entry */
 };
 
 #ifdef CONFIG_LGE_USB_G_ANDROID
 #define QSERDES_TX_TX_EMP_POST1_LVL 0x218
 #define QSERDES_TX_TX_DRV_LVL       0x22C
 
-static uint32_t qmp_phy_tune_tx_pre_emphasis = 0;
-module_param(qmp_phy_tune_tx_pre_emphasis, uint, S_IRUGO|S_IWUSR);
-MODULE_PARM_DESC(qmp_phy_tune_tx_pre_emphasis, "Overide TX_PRE_EMPHASIS tuning register");
+static uint32_t override_tx_pre_emphasis = 0;
+module_param(override_tx_pre_emphasis, uint, S_IRUGO|S_IWUSR);
+MODULE_PARM_DESC(override_tx_pre_emphasis, "Overide TX_PRE_EMPHASIS tuning register");
 
-static uint32_t qmp_phy_tune_tx_swing = 0;
-module_param(qmp_phy_tune_tx_swing, uint, S_IRUGO|S_IWUSR);
-MODULE_PARM_DESC(qmp_phy_tune_tx_swing, "Override TX_SWING tuning register");
+static uint32_t override_tx_swing = 0;
+module_param(override_tx_swing, uint, S_IRUGO|S_IWUSR);
+MODULE_PARM_DESC(override_tx_swing, "Override TX_SWING tuning register");
 #endif
 
 struct msm_ssphy_qmp {
 	struct usb_phy		phy;
 	void __iomem		*base;
 	void __iomem		*vls_clamp_reg;
+	void __iomem		*tcsr_phy_clk_scheme_sel;
+
 	struct regulator	*vdd;
 	struct regulator	*vdda18;
 	int			vdd_levels[3]; /* none, low, high */
@@ -351,11 +365,23 @@ struct msm_ssphy_qmp {
 	bool			emulation;
 	bool			misc_config;
 	unsigned int		*phy_reg; /* revision based offset */
+	unsigned int		*qmp_phy_init_seq;
+	int			init_seq_len;
+	unsigned int		*qmp_phy_reg_offset;
+	int			reg_offset_cnt;
+
+#ifdef CONFIG_LGE_USB_G_ANDROID
+	uint32_t		tx_pre_emphasis;
+	uint32_t		tx_swing;
+#endif
 };
 
 static const struct of_device_id msm_usb_id_table[] = {
 	{
 		.compatible = "qcom,usb-ssphy-qmp",
+	},
+	{
+		.compatible = "qcom,usb-ssphy-qmp-v1",
 		.data = qmp_phy_rev1,
 	},
 	{
@@ -393,12 +419,14 @@ static void msm_ssusb_qmp_enable_autonomous(struct msm_ssphy_qmp *phy,
 
 	if (enable) {
 		msm_ssusb_qmp_clr_lfps_rxterm_int(phy);
-		val =
-		readb_relaxed(phy->base + autonomous_mode_offset);
-		val |= ARCVR_DTCT_EN;
-		val |= ALFPS_DTCT_EN;
-		val &= ~ARCVR_DTCT_EVENT_SEL;
-		writeb_relaxed(val, phy->base + autonomous_mode_offset);
+		if (phy->phy.flags & DEVICE_IN_SS_MODE) {
+			val =
+			readb_relaxed(phy->base + autonomous_mode_offset);
+			val |= ARCVR_DTCT_EN;
+			val |= ALFPS_DTCT_EN;
+			val &= ~ARCVR_DTCT_EVENT_SEL;
+			writeb_relaxed(val, phy->base + autonomous_mode_offset);
+		}
 
 		/* clamp phy level shifter to perform autonomous detection */
 		writel_relaxed(0x1, phy->vls_clamp_reg);
@@ -481,26 +509,57 @@ static int configure_phy_regs(struct usb_phy *uphy,
 {
 	struct msm_ssphy_qmp *phy = container_of(uphy, struct msm_ssphy_qmp,
 					phy);
+	u32 val;
+	bool diff_clk_sel = true;
 
 	if (!reg) {
 		dev_err(uphy->dev, "NULL PHY configuration\n");
 		return -EINVAL;
 	}
 
-	while (reg->offset != -1 && reg->val != -1) {
-		writel_relaxed(reg->val, phy->base + reg->offset);
+	if (phy->tcsr_phy_clk_scheme_sel) {
+		val = readl_relaxed(phy->tcsr_phy_clk_scheme_sel);
+		if (val & PHY_CLK_SCHEME_SEL) {
+			pr_debug("%s:Single Ended clk scheme is selected\n",
+				__func__);
+			diff_clk_sel = false;
+		}
+	}
+
+	while (reg->offset != -1) {
+		writel_relaxed(diff_clk_sel ?
+				reg->diff_clk_sel_val : reg->se_clk_sel_val,
+				phy->base + reg->offset);
+		if (reg->delay)
+			usleep_range(reg->delay, reg->delay + 10);
 		reg++;
 	}
 
 #ifdef CONFIG_LGE_USB_G_ANDROID
-	if (qmp_phy_tune_tx_pre_emphasis) {
-		dev_dbg(uphy->dev, "%s(), Programming TX_PRE_EMPHASIS tuning register as: %d", __func__, qmp_phy_tune_tx_pre_emphasis);
-		writel_relaxed(qmp_phy_tune_tx_pre_emphasis | 0x20, phy->base + QSERDES_TX_TX_EMP_POST1_LVL);
+	if (override_tx_pre_emphasis) {
+		dev_dbg(uphy->dev, "%s(), Programming TX_PRE_EMPHASIS"
+					" tuning register as: %d",
+					__func__,
+					override_tx_pre_emphasis);
+		writel_relaxed(override_tx_pre_emphasis | 0x20,
+				phy->base + QSERDES_TX_TX_EMP_POST1_LVL);
+	} else {
+		if (phy->tx_pre_emphasis)
+			writel_relaxed(phy->tx_pre_emphasis | 0x20,
+					phy->base + QSERDES_TX_TX_EMP_POST1_LVL);
 	}
 
-	if (qmp_phy_tune_tx_swing) {
-		dev_dbg(uphy->dev, "%s(), Programming TX_SWING tuning register as: %d", __func__, qmp_phy_tune_tx_swing);
-		writel_relaxed(qmp_phy_tune_tx_swing | 0x20, phy->base + QSERDES_TX_TX_DRV_LVL);
+	if (override_tx_swing) {
+		dev_dbg(uphy->dev, "%s(), Programming TX_SWING tuning"
+					" register as: %d",
+					__func__,
+					override_tx_swing);
+		writel_relaxed(override_tx_swing | 0x20,
+				phy->base + QSERDES_TX_TX_DRV_LVL);
+	} else {
+		if (phy->tx_swing)
+			writel_relaxed(phy->tx_swing | 0x20,
+					phy->base + QSERDES_TX_TX_DRV_LVL);
 	}
 #endif
 
@@ -556,6 +615,7 @@ static int msm_ssphy_qmp_init(struct usb_phy *uphy)
 		misc = qmp_settings_rev0_misc;
 		break;
 	case 0x10000001:
+	case 0x10010000:
 		reg = qmp_settings_rev1;
 		misc = qmp_settings_rev1_misc;
 		break;
@@ -570,7 +630,11 @@ static int msm_ssphy_qmp_init(struct usb_phy *uphy)
 		return -ENODEV;
 	}
 
-	writel_relaxed(0x01, phy->base + PCIE_USB3_PHY_POWER_DOWN_CONTROL);
+	if (phy->qmp_phy_init_seq)
+		reg = (struct qmp_reg_val *)phy->qmp_phy_init_seq;
+
+	writel_relaxed(0x01,
+		phy->base + phy->phy_reg[USB3_PHY_POWER_DOWN_CONTROL]);
 
 	/* Make sure that above write completed to get PHY into POWER DOWN */
 	mb();
@@ -599,9 +663,11 @@ static int msm_ssphy_qmp_init(struct usb_phy *uphy)
 		}
 	}
 
-	writel_relaxed(0x03, phy->base + PCIE_USB3_PHY_START);
-	writel_relaxed(0x00, phy->base + PCIE_USB3_PHY_SW_RESET);
+	writel_relaxed(0x03, phy->base + phy->phy_reg[USB3_PHY_START]);
+	writel_relaxed(0x00, phy->base + phy->phy_reg[USB3_PHY_SW_RESET]);
 
+	/* Make sure above write completed to bring PHY out of reset */
+	mb();
 
 	/* Wait for PHY initialization to be done */
 	do {
@@ -621,10 +687,13 @@ static int msm_ssphy_qmp_init(struct usb_phy *uphy)
 	};
 
 #ifdef CONFIG_LGE_USB_G_ANDROID
-	dev_dbg(uphy->dev, "%s, TX_PRE_EMPHASIS tuning register: 0x%X, TX_SWING tuning register : 0x%X\n",
+	dev_dbg(uphy->dev, "%s, TX_PRE_EMPHASIS tuning register: 0x%X,"
+				" TX_SWING tuning register : 0x%X\n",
 			__func__,
-			(readl_relaxed(phy->base + QSERDES_TX_TX_EMP_POST1_LVL) & 0x1F),
-			(readl_relaxed(phy->base + QSERDES_TX_TX_DRV_LVL)) & 0x1F);
+			(readl_relaxed(phy->base +\
+			QSERDES_TX_TX_EMP_POST1_LVL) & 0x1F),
+			(readl_relaxed(phy->base +\
+			QSERDES_TX_TX_DRV_LVL)) & 0x1F);
 #endif
 
 	return 0;
@@ -759,7 +828,7 @@ static int msm_ssphy_qmp_set_suspend(struct usb_phy *uphy, int suspend)
 	if (suspend) {
 		if (!phy->cable_connected)
 			writel_relaxed(0x00,
-				phy->base + PCIE_USB3_PHY_POWER_DOWN_CONTROL);
+			phy->base + phy->phy_reg[USB3_PHY_POWER_DOWN_CONTROL]);
 		else
 			msm_ssusb_qmp_enable_autonomous(phy, 1);
 
@@ -791,7 +860,7 @@ static int msm_ssphy_qmp_set_suspend(struct usb_phy *uphy, int suspend)
 		}
 		if (!phy->cable_connected) {
 			writel_relaxed(0x01,
-				phy->base + PCIE_USB3_PHY_POWER_DOWN_CONTROL);
+			phy->base + phy->phy_reg[USB3_PHY_POWER_DOWN_CONTROL]);
 		} else  {
 			msm_ssusb_qmp_enable_autonomous(phy, 0);
 		}
@@ -835,7 +904,7 @@ static int msm_ssphy_qmp_probe(struct platform_device *pdev)
 	struct msm_ssphy_qmp *phy;
 	struct device *dev = &pdev->dev;
 	struct resource *res;
-	int ret = 0;
+	int ret = 0, size = 0;
 	const struct of_device_id *phy_ver;
 
 	phy = devm_kzalloc(dev, sizeof(*phy), GFP_KERNEL);
@@ -893,12 +962,35 @@ static int msm_ssphy_qmp_probe(struct platform_device *pdev)
 		}
 	}
 
+	of_get_property(dev->of_node, "qcom,qmp-phy-reg-offset", &size);
+	if (size) {
+		phy->qmp_phy_reg_offset = devm_kzalloc(dev,
+						size, GFP_KERNEL);
+		if (phy->qmp_phy_reg_offset) {
+			phy->reg_offset_cnt =
+				(size / sizeof(*phy->qmp_phy_reg_offset));
+			if (phy->reg_offset_cnt > USB3_PHY_REG_MAX) {
+				dev_err(dev, "invalid reg offset count\n");
+				return -EINVAL;
+			}
+
+			of_property_read_u32_array(dev->of_node,
+				"qcom,qmp-phy-reg-offset",
+				phy->qmp_phy_reg_offset,
+				phy->reg_offset_cnt);
+		} else {
+			dev_err(dev, "err mem alloc for qmp_phy_reg_offset\n");
+		}
+	}
+
 	phy_ver = of_match_device(msm_usb_id_table, &pdev->dev);
 	if (phy_ver) {
 		dev_dbg(dev, "Found QMP PHY version as:%s.\n",
 						phy_ver->compatible);
 		if (phy_ver->data) {
 			phy->phy_reg = (unsigned int *)phy_ver->data;
+		} else if (phy->qmp_phy_reg_offset) {
+			phy->phy_reg = phy->qmp_phy_reg_offset;
 		} else {
 			dev_err(dev,
 				"QMP PHY version match but wrong data val.\n");
@@ -935,6 +1027,48 @@ static int msm_ssphy_qmp_probe(struct platform_device *pdev)
 		dev_err(dev, "couldn't find vls_clamp_reg address.\n");
 		return PTR_ERR(phy->vls_clamp_reg);
 	}
+
+	res = platform_get_resource_byname(pdev, IORESOURCE_MEM,
+			"tcsr_phy_clk_scheme_sel");
+	if (res) {
+		phy->tcsr_phy_clk_scheme_sel = devm_ioremap_nocache(dev,
+				res->start, resource_size(res));
+		if (IS_ERR(phy->tcsr_phy_clk_scheme_sel))
+			dev_dbg(dev, "err reading tcsr_phy_clk_scheme_sel\n");
+	}
+
+	of_get_property(dev->of_node, "qcom,qmp-phy-init-seq", &size);
+	if (size) {
+		if (size % sizeof(*phy->qmp_phy_init_seq)) {
+			dev_err(dev, "invalid init_seq_len\n");
+			return -EINVAL;
+		}
+		phy->qmp_phy_init_seq = devm_kzalloc(dev,
+						size, GFP_KERNEL);
+		if (phy->qmp_phy_init_seq) {
+			phy->init_seq_len =
+				(size / sizeof(*phy->qmp_phy_init_seq));
+
+			of_property_read_u32_array(dev->of_node,
+				"qcom,qmp-phy-init-seq",
+				phy->qmp_phy_init_seq,
+				phy->init_seq_len);
+		} else {
+			dev_err(dev, "error allocating memory for phy_init_seq\n");
+		}
+	}
+
+#ifdef CONFIG_LGE_USB_G_ANDROID
+	ret = of_property_read_u32(dev->of_node, "qcom,tx-pre-emphasis",
+						&phy->tx_pre_emphasis);
+	if (ret)
+		phy->tx_pre_emphasis = 0;
+
+	ret = of_property_read_u32(dev->of_node, "qcom,tx_swing",
+						&phy->tx_swing);
+	if (ret)
+		phy->tx_swing = 0;
+#endif
 
 	phy->emulation = of_property_read_bool(dev->of_node,
 						"qcom,emulation");

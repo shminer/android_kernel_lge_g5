@@ -238,15 +238,10 @@ static int funnel_probe(struct platform_device *pdev)
 	struct resource *res;
 	struct coresight_desc *desc;
 
-	if (coresight_fuse_access_disabled())
-		return -EPERM;
-
-	if (pdev->dev.of_node) {
-		pdata = of_get_coresight_platform_data(dev, pdev->dev.of_node);
-		if (IS_ERR(pdata))
-			return PTR_ERR(pdata);
-		pdev->dev.platform_data = pdata;
-	}
+	pdata = of_get_coresight_platform_data(dev, pdev->dev.of_node);
+	if (IS_ERR(pdata))
+		return PTR_ERR(pdata);
+	pdev->dev.platform_data = pdata;
 
 	drvdata = devm_kzalloc(dev, sizeof(*drvdata), GFP_KERNEL);
 	if (!drvdata)
@@ -270,10 +265,18 @@ static int funnel_probe(struct platform_device *pdev)
 	if (ret)
 		return ret;
 
+	ret = clk_prepare_enable(drvdata->clk);
+	if (ret)
+		return ret;
+
+	if (!coresight_authstatus_enabled(drvdata->base))
+		goto err;
+
+	clk_disable_unprepare(drvdata->clk);
+
 	spin_lock_init(&drvdata->spinlock);
 
-	if (pdev->dev.of_node)
-		drvdata->notify = of_property_read_bool(pdev->dev.of_node,
+	drvdata->notify = of_property_read_bool(pdev->dev.of_node,
 						"qcom,funnel-save-restore");
 
 	desc = devm_kzalloc(dev, sizeof(*desc), GFP_KERNEL);
@@ -315,6 +318,9 @@ static int funnel_probe(struct platform_device *pdev)
 out:
 	dev_dbg(dev, "FUNNEL initialized\n");
 	return 0;
+err:
+	clk_disable_unprepare(drvdata->clk);
+	return -EPERM;
 }
 
 static int funnel_remove(struct platform_device *pdev)

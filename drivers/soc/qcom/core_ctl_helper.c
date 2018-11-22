@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2014, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2014-2016, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -57,6 +57,36 @@ EXPORT_SYMBOL(core_ctl_find_cpu_device);
 
 int __ref core_ctl_online_core(unsigned int cpu)
 {
-	return cpu_up(cpu);
+	int ret;
+	struct device *dev;
+
+	lock_device_hotplug();
+	dev = get_cpu_device(cpu);
+	if (!dev) {
+		pr_err("%s: failed to get cpu%d device\n", __func__, cpu);
+		ret = -ENODEV;
+	} else {
+		ret = device_online(dev);
+	}
+	unlock_device_hotplug();
+	return ret;
 }
 EXPORT_SYMBOL(core_ctl_online_core);
+
+int __ref core_ctl_offline_core(unsigned int cpu)
+{
+	int ret;
+	struct device *dev;
+
+	lock_device_hotplug();
+	dev = get_cpu_device(cpu);
+	if (!dev) {
+		pr_err("%s: failed to get cpu%d device\n", __func__, cpu);
+		ret = -ENODEV;
+	} else {
+		ret = device_offline(dev);
+	}
+	unlock_device_hotplug();
+	return ret;
+}
+EXPORT_SYMBOL(core_ctl_offline_core);

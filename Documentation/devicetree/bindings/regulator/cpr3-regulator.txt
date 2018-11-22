@@ -74,20 +74,21 @@ Platform independent properties:
 		    after increasing the vdd-supply voltage.
 
 - clocks
-	Usage:      required
+	Usage:      optional
 	Value type: <prop-encoded-array>
 	Definition: Array of clock tuples in which each tuple consists of a
-		    phandle to a clock device and a clock ID number.  The CPR3
-		    core clock must be specified.  See platform specific
-		    cpr3-regulator binding documentation for additional clocks
-		    that may also need to be specified.
+		    phandle to a clock device and a clock ID number. The CPR3
+		    core clock must be specified for some targets. See platform
+		    specific cpr3-regulator binding documentation for additional
+		    clocks that may also need to be specified.
 
 - clock-names
-	Usage:      required
+	Usage:      optional
 	Value type: <stringlist>
 	Definition: Clock names.  This list must match up 1-to-1 with the clocks
 		    specified in the 'clocks' property. "core_clk" must be
-		    specified.  Other clocks may be required for some platforms.
+		    specified for some platforms. Other clocks may be required
+		    for some platforms.
 
 - interrupts
 	Usage:      required
@@ -102,6 +103,12 @@ Platform independent properties:
 		    interrupts specified in the 'interrupts' property. "cpr"
 		    must be specified.  "ceiling" may be specified for some
 		    platforms.
+
+- qcom,cpr-interrupt-affinity
+	Usage:      optional
+	Value type: <prop-encoded-array>
+	Definition: A list of CPU phandles which correspond to the cores that
+		    the "cpr" interrupt should have affinity for.
 
 - qcom,cpr-sensor-time
 	Usage:      required
@@ -175,6 +182,19 @@ Platform independent properties:
 	Definition: Specifies the CPR aging reference voltage in microvolts.
 		    This is the voltage that vdd-supply must be set to when
 		    performing an aging measurement.
+
+- qcom,cpr-panic-reg-addr-list
+	Usage:      optional
+	Value type: <prop-encoded-array>
+	Definition: Array of register addresses to be dumped when device resets.
+
+- qcom,cpr-panic-reg-name-list
+	Usage:      optional, though only meaningful if
+		    qcom,cpr-panic-reg-addr-list is specified
+	Value type: <prop-encoded-array>
+	Definition: Address names. Must be specified in the same order
+		    as the corresponding addresses are specified in
+		    the qcom,cpr-panic-reg-addr-list property.
 
 =================================================
 Second Level Nodes - CPR Threads for a Controller
@@ -515,6 +535,21 @@ Platform independent properties:
 		    speed bins 1-to-1 or exactly 1 element which is used
 		    regardless of the fuse combination and speed bin found
 		    on a given chip.
+
+- qcom,allow-aging-open-loop-voltage-adjustment
+	Usage:      optional
+	Value type: <prop-encoded-array>
+	Definition: A list of integers which specifies if CPR aging adjustment
+		    should be applied to open-loop voltages for each fuse
+		    combination.  Note that aging adjustment must be allowed via
+		    qcom,allow-aging-voltage-adjustment in order for this
+		    property to have an effect.
+		    Supported per-combo element values:
+			0 - do not perform CPR aging adjustment
+			1 - perform CPR aging adjustment
+
+		    The list must meet the same size requirements as those
+		    specified for qcom,allow-aging-voltage-adjustment above.
 
 - qcom,cpr-aging-max-voltage-adjustment
 	Usage:      required if qcom,allow-aging-voltage-adjustment is specified

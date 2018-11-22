@@ -1,4 +1,4 @@
-/* Copyright (c) 2015, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2015-2016, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -211,6 +211,8 @@ static void diag_state_close_socket(void *ctxt)
 		 "%s setting diag state to 0", info->name);
 	wake_up_interruptible(&info->read_wait_q);
 	flush_workqueue(info->wq);
+	DIAG_LOG(DIAG_DEBUG_PERIPHERALS, "flushing info wq");
+
 }
 
 static void socket_data_ready(struct sock *sk_ptr)
@@ -234,13 +236,6 @@ static void socket_data_ready(struct sock *sk_ptr)
 	spin_unlock_irqrestore(&info->lock, flags);
 	diag_ws_on_notify();
 
-	/*
-	 * Initialize read buffers for the servers. The servers must read data
-	 * first to get the address of its clients.
-	 */
-	if (!atomic_read(&info->opened) && info->port_type == PORT_TYPE_SERVER)
-		diagfwd_buffers_init(info->fwd_ctxt);
-
 	queue_work(info->wq, &(info->read_work));
 	wake_up_interruptible(&info->read_wait_q);
 	return;
@@ -249,7 +244,7 @@ static void socket_data_ready(struct sock *sk_ptr)
 static void cntl_socket_data_ready(struct sock *sk_ptr)
 {
 	if (!sk_ptr || !cntl_socket) {
-		pr_err_ratelimited("diag: In %s, invalid ptrs. sk_ptr: %p cntl_socket: %p\n",
+		pr_err_ratelimited("diag: In %s, invalid ptrs. sk_ptr: %pK cntl_socket: %pK\n",
 				   __func__, sk_ptr, cntl_socket);
 		return;
 	}
@@ -445,6 +440,7 @@ static void __socket_close_channel(struct diag_socket_info *info)
 
 	if (!atomic_read(&info->opened))
 		return;
+	DIAG_LOG(DIAG_DEBUG_PERIPHERALS, "\n");
 
 	memset(&info->remote_addr, 0, sizeof(struct sockaddr_msm_ipc));
 	diagfwd_channel_close(info->fwd_ctxt);
@@ -470,6 +466,8 @@ static void socket_close_channel(struct diag_socket_info *info)
 {
 	if (!info)
 		return;
+
+	DIAG_LOG(DIAG_DEBUG_PERIPHERALS, "\n");
 
 	__socket_close_channel(info);
 
@@ -628,6 +626,9 @@ static void socket_read_work_fn(struct work_struct *work)
 
 	if (!info)
 		return;
+
+	if (!atomic_read(&info->opened) && info->port_type == PORT_TYPE_SERVER)
+		diagfwd_buffers_init(info->fwd_ctxt);
 
 	diagfwd_channel_read(info->fwd_ctxt);
 }
@@ -929,9 +930,12 @@ static int diag_socket_read(void *ctxt, unsigned char *buf, int buf_len)
 				      (info->data_ready > 0) || (!info->hdl) ||
 				      (atomic_read(&info->diag_state) == 0));
 	if (err) {
+		DIAG_LOG(DIAG_DEBUG_PERIPHERALS," %d:diagfwd_channel_mutex to obtain ", __LINE__);
 		mutex_lock(&driver->diagfwd_channel_mutex);
+		DIAG_LOG(DIAG_DEBUG_PERIPHERALS," %d:diagfwd_channel_mutex obtained ", __LINE__);
 		diagfwd_channel_read_done(info->fwd_ctxt, buf, 0);
 		mutex_unlock(&driver->diagfwd_channel_mutex);
+		DIAG_LOG(DIAG_DEBUG_PERIPHERALS," %d:diagfwd_channel_mutex released ", __LINE__);
 		return -ERESTARTSYS;
 	}
 
@@ -943,9 +947,12 @@ static int diag_socket_read(void *ctxt, unsigned char *buf, int buf_len)
 		DIAG_LOG(DIAG_DEBUG_PERIPHERALS,
 			 "%s closing read thread. diag state is closed\n",
 			 info->name);
+		DIAG_LOG(DIAG_DEBUG_PERIPHERALS," %d:diagfwd_channel_mutex to obtain ", __LINE__);
 		mutex_lock(&driver->diagfwd_channel_mutex);
+		DIAG_LOG(DIAG_DEBUG_PERIPHERALS," %d:diagfwd_channel_mutex obtained ", __LINE__);
 		diagfwd_channel_read_done(info->fwd_ctxt, buf, 0);
 		mutex_unlock(&driver->diagfwd_channel_mutex);
+		DIAG_LOG(DIAG_DEBUG_PERIPHERALS," %d:diagfwd_channel_mutex released ", __LINE__);		
 		return 0;
 	}
 
@@ -1012,10 +1019,13 @@ static int diag_socket_read(void *ctxt, unsigned char *buf, int buf_len)
 	if (total_recd > 0) {
 		DIAG_LOG(DIAG_DEBUG_PERIPHERALS, "%s read total bytes: %d\n",
 			 info->name, total_recd);
+		DIAG_LOG(DIAG_DEBUG_PERIPHERALS," %d:diagfwd_channel_mutex to obtain ", __LINE__);
 		mutex_lock(&driver->diagfwd_channel_mutex);
+		DIAG_LOG(DIAG_DEBUG_PERIPHERALS," %d:diagfwd_channel_mutex obtained ", __LINE__);
 		err = diagfwd_channel_read_done(info->fwd_ctxt,
 						buf, total_recd);
 		mutex_unlock(&driver->diagfwd_channel_mutex);
+		DIAG_LOG(DIAG_DEBUG_PERIPHERALS," %d:diagfwd_channel_mutex released ", __LINE__);
 		if (err)
 			goto fail;
 	} else {
@@ -1028,9 +1038,12 @@ static int diag_socket_read(void *ctxt, unsigned char *buf, int buf_len)
 	return 0;
 
 fail:
+	DIAG_LOG(DIAG_DEBUG_PERIPHERALS," %d:diagfwd_channel_mutex to obtain ", __LINE__);
 	mutex_lock(&driver->diagfwd_channel_mutex);
+	DIAG_LOG(DIAG_DEBUG_PERIPHERALS," %d:diagfwd_channel_mutex obtained ", __LINE__);
 	diagfwd_channel_read_done(info->fwd_ctxt, buf, 0);
 	mutex_unlock(&driver->diagfwd_channel_mutex);
+	DIAG_LOG(DIAG_DEBUG_PERIPHERALS," %d:diagfwd_channel_mutex released ", __LINE__);
 	return -EIO;
 }
 

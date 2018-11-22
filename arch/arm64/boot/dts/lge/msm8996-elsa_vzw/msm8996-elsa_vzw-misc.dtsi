@@ -85,7 +85,7 @@
 		qcom,clk-freq-in  = <19200000>;
 		clock-names = "iface_clk", "core_clk";
 		clocks = <&clock_gcc clk_gcc_blsp1_ahb_clk>,
-			 <&clock_gcc clk_gcc_blsp1_qup6_i2c_apps_clk>;
+			<&clock_gcc clk_gcc_blsp1_qup6_i2c_apps_clk>;
 		pinctrl-names = "i2c_active", "i2c_sleep";
 		pinctrl-0 = <&i2c_6_active>;
 		pinctrl-1 = <&i2c_6_sleep>;
@@ -120,7 +120,7 @@
 		/delete-property/ wake-gpio;
 	};
 
-	blsp1_uart6:serial@07574000 {
+	blsp1_uart6: serial@7574000 {
 		compatible = "qcom,msm-lsuart-v14";
 		reg = <0x7574000 0x100>;
 		interrupts = <0 112 0>;
@@ -134,10 +134,10 @@
 		compatible = "uei,irrc";
 		status = "ok";
 		pinctrl-names = "default", "sleep";
-		pinctrl-0 = <&irrc_rst_active &irrc_uart_active>;
-		pinctrl-1 = <&irrc_rst_sleep &irrc_uart_sleep>;
-		interrupt-parent = <&tlmm>;
-		uei,reset-gpio = <&tlmm 73 0x00>;
+		pinctrl-0 = <&irrc_uart_active>;
+		pinctrl-1 = <&irrc_uart_sleep>;
+		interrupt-parent = <&pmi8994_gpios>;
+		uei,reset-gpio = <&pmi8994_gpios 8 0>;
 	};
 };
 
@@ -145,6 +145,26 @@
 	rpm-regulator-ldoa30 {
 		status = "okay";
 		pm8994_l30: regulator-l30 {
+			regulator-min-microvolt = <3300000>;
+			regulator-max-microvolt = <3300000>;
+			qcom,init-voltage = <3300000>;
+			status = "okay";
+		};
+	};
+
+	rpm-regulator-ldoa27 {
+		status = "okay";
+		pm8994_l27: regulator-l27 {
+			regulator-min-microvolt = <1000000>;
+			regulator-max-microvolt = <1000000>;
+			qcom,init-voltage = <1000000>;
+			status = "okay";
+		};
+	};
+
+	rpm-regulator-ldoa22 {
+		status = "okay";
+		pm8994_l22: regulator-l22 {
 			regulator-min-microvolt = <3300000>;
 			regulator-max-microvolt = <3300000>;
 			qcom,init-voltage = <3300000>;

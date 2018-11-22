@@ -176,6 +176,7 @@ enum power_supply_property {
 	POWER_SUPPLY_PROP_CHARGE_ENABLED,
 	POWER_SUPPLY_PROP_BATTERY_CHARGING_ENABLED,
 	POWER_SUPPLY_PROP_CHARGING_ENABLED,
+	POWER_SUPPLY_PROP_INPUT_SUSPEND,
 	POWER_SUPPLY_PROP_INPUT_VOLTAGE_REGULATION,
 	POWER_SUPPLY_PROP_INPUT_CURRENT_MAX,
 	POWER_SUPPLY_PROP_INPUT_CURRENT_TRIM,
@@ -195,6 +196,9 @@ enum power_supply_property {
 #endif
 #ifdef CONFIG_LGE_PM_USB_CURRENT_MAX_MODE
 	POWER_SUPPLY_PROP_USB_CURRENT_MAX_MODE,
+#endif
+#ifdef CONFIG_LGE_PM_CHARGING_CONTROLLER
+	POWER_SUPPLY_PROP_TDMB_MODE_ON,
 #endif
 #ifdef CONFIG_LGE_PM_VZW_REQ
 	POWER_SUPPLY_PROP_VZW_CHG,
@@ -221,25 +225,66 @@ enum power_supply_property {
 	POWER_SUPPLY_PROP_FORCE_TLIM,
 	POWER_SUPPLY_PROP_DP_DM,
 	POWER_SUPPLY_PROP_INPUT_CURRENT_LIMITED,
+	POWER_SUPPLY_PROP_INPUT_CURRENT_NOW,
 	POWER_SUPPLY_PROP_RERUN_AICL,
 	POWER_SUPPLY_PROP_CYCLE_COUNT_ID,
 	POWER_SUPPLY_PROP_SAFETY_TIMER_EXPIRED,
 	POWER_SUPPLY_PROP_RESTRICTED_CHARGING,
-#ifdef CONFIG_LGE_PM_BATTERY_ID_CHECKER
+#if (defined (CONFIG_LGE_PM_BATTERY_ID_CHECKER) || \
+	defined (CONFIG_LGE_PM_LGE_POWER_CLASS_BATTERY_ID_CHECKER))
 	POWER_SUPPLY_PROP_BATTERY_ID,
 	POWER_SUPPLY_PROP_BATTERY_ID_CHECKER,
 #endif
 #ifdef CONFIG_LGE_PM_CHARGERLOGO_WAIT_FOR_FG_INIT
 	POWER_SUPPLY_PROP_FIRST_SOC_EST_DONE,
 #endif
+#ifdef CONFIG_LGE_PM_BATTERY_SWAP
+	POWER_SUPPLY_PROP_MANUAL_SWAP,
+	POWER_SUPPLY_PROP_SWAP_ENABLE,
+	POWER_SUPPLY_PROP_SWAP_STATUS,
+#endif
 #ifdef CONFIG_LGE_USB_TYPE_C
 	POWER_SUPPLY_PROP_DP_ALT_MODE,
 #endif
 #ifdef CONFIG_LGE_USB_FLOATED_CHARGER_DETECT
 	POWER_SUPPLY_PROP_APSD_RERUN_NEED,
+	POWER_SUPPLY_PROP_INCOMPATIBLE_CHG,
 #endif
 #ifdef CONFIG_LGE_PM_CHARGING_CONTROLLER
 	POWER_SUPPLY_PROP_USB_NON_DRIVE,
+#endif
+#ifdef CONFIG_LGE_PM
+	POWER_SUPPLY_PROP_FASTCHG,
+#endif
+#if defined(CONFIG_BATTERY_MAX17050) || defined(CONFIG_LGE_PM_FG_AGE)
+	POWER_SUPPLY_PROP_BATTERY_CONDITION,
+	POWER_SUPPLY_PROP_BATTERY_AGE,
+#endif
+	POWER_SUPPLY_PROP_CURRENT_CAPABILITY,
+	POWER_SUPPLY_PROP_TYPEC_MODE,
+#ifdef CONFIG_LGE_APPS_PORT_FRIENDS
+	POWER_SUPPLY_PROP_FRIENDS_DETECT,
+	POWER_SUPPLY_PROP_FRIENDS_VPWR_SW,
+	POWER_SUPPLY_PROP_FRIENDS_TYPE,
+#ifdef CONFIG_LGE_APPS_PORT_FRIENDS_ONE_WIRE
+	POWER_SUPPLY_PROP_FRIENDS_COMMAND,
+#endif
+	POWER_SUPPLY_PROP_FRIENDS_USB_ENABLE,
+#endif
+#if defined(CONFIG_LGE_USB_FLOATED_CHARGER_DETECT) && defined(CONFIG_LGE_USB_TYPE_C)
+	POWER_SUPPLY_PROP_CTYPE_CHARGER,
+#endif
+#ifdef CONFIG_LGE_USB_ANX7688_OVP
+	POWER_SUPPLY_PROP_CTYPE_RP,
+#endif
+	POWER_SUPPLY_PROP_ALLOW_HVDCP3,
+	POWER_SUPPLY_PROP_MAX_PULSE_ALLOWED,
+	POWER_SUPPLY_PROP_SOC_REPORTING_READY,
+	POWER_SUPPLY_PROP_IGNORE_FALSE_NEGATIVE_ISENSE,
+	POWER_SUPPLY_PROP_ENABLE_JEITA_DETECTION,
+#ifdef CONFIG_LGE_PM_RESTORE_BATT_INFO
+	POWER_SUPPLY_PROP_BATTERY_INFO,
+	POWER_SUPPLY_PROP_BATTERY_INFO_ID,
 #endif
 	/* Local extensions of type int64_t */
 	POWER_SUPPLY_PROP_CHARGE_COUNTER_EXT,
@@ -248,9 +293,6 @@ enum power_supply_property {
 	POWER_SUPPLY_PROP_MANUFACTURER,
 	POWER_SUPPLY_PROP_SERIAL_NUMBER,
 	POWER_SUPPLY_PROP_BATTERY_TYPE,
-#if defined(CONFIG_LGE_USB_FLOATED_CHARGER_DETECT) && defined(CONFIG_LGE_USB_TYPE_C)
-	POWER_SUPPLY_PROP_CTYPE_CHARGER,
-#endif
 };
 
 enum power_supply_type {
@@ -268,9 +310,15 @@ enum power_supply_type {
 	POWER_SUPPLY_TYPE_BMS,		/* Battery Monitor System */
 	POWER_SUPPLY_TYPE_USB_PARALLEL,		/* USB Parallel Path */
 	POWER_SUPPLY_TYPE_WIPOWER,		/* Wipower */
+	POWER_SUPPLY_TYPE_TYPEC,	/*Type-C */
+	POWER_SUPPLY_TYPE_UFP,		/* Type-C UFP */
+	POWER_SUPPLY_TYPE_DFP,		/* TYpe-C DFP */
 #ifdef CONFIG_LGE_USB_TYPE_C
-	POWER_SUPPLY_TYPE_CTYPE,	/* USB Type-C Charger based on CC controller */
-	POWER_SUPPLY_TYPE_CTYPE_PD, 	/* USB Type-C Charger based on PD Message */
+	POWER_SUPPLY_TYPE_CTYPE,	/* 18  USB Type-C Charger based on CC controller */
+	POWER_SUPPLY_TYPE_CTYPE_PD,	/* 19  USB Type-C Charger based on PD Message */
+#endif
+#ifdef CONFIG_BATTERY_MAX17050
+	POWER_SUPPLY_TYPE_EXT_FG,
 #endif
 };
 
@@ -306,6 +354,11 @@ struct power_supply {
 	int (*set_property)(struct power_supply *psy,
 			    enum power_supply_property psp,
 			    const union power_supply_propval *val);
+#ifdef CONFIG_LGE_PM_LGE_POWER_CORE
+	int (*get_internal_property)(struct power_supply *psy,
+			    enum power_supply_property psp,
+			    union power_supply_propval *val);
+#endif
 	int (*property_is_writeable)(struct power_supply *psy,
 				     enum power_supply_property psp);
 	void (*external_power_changed)(struct power_supply *psy);
@@ -341,6 +394,19 @@ struct power_supply {
 	char *online_trig_name;
 	struct led_trigger *charging_blink_full_solid_trig;
 	char *charging_blink_full_solid_trig_name;
+#endif
+#ifdef CONFIG_LGE_PM_LGE_POWER_CORE
+	char **lge_power_supplied_to;
+	size_t num_lge_power_supplicants;
+	char **lge_power_supplied_from;
+	size_t num_lge_power_supplies;
+	void (*external_lge_power_changed)(struct power_supply *psy);
+	char **lge_psy_power_supplied_from;
+	size_t num_lge_psy_power_supplies;
+#endif
+#ifdef CONFIG_LGE_PM_LGE_POWER_CLASS_UEVENT
+	int *property_data;
+	int update_uevent;
 #endif
 #ifdef CONFIG_LGE_USB_FLOATED_CHARGER_DETECT
 	int is_floated_charger;
@@ -411,6 +477,10 @@ extern int power_supply_set_low_power_state(struct power_supply *psy,
 extern int power_supply_set_dp_dm(struct power_supply *psy,
 							int value);
 extern int power_supply_is_system_supplied(void);
+#ifdef CONFIG_LGE_PM_LGE_POWER_CORE
+extern int power_supply_do_i_have_property(struct power_supply *psy,
+				enum power_supply_property psp);
+#endif
 extern int power_supply_set_scope(struct power_supply *psy, int scope);
 /* For APM emulation, think legacy userspace. */
 extern struct class *power_supply_class;

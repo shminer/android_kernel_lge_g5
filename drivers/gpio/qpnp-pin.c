@@ -1,4 +1,4 @@
-/* Copyright (c) 2012-2015, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2012-2016, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -121,6 +121,14 @@
 #define Q_REG_OUT_TYPE_SHIFT		4
 #define Q_REG_OUT_TYPE_MASK		0x30
 
+/* control reg: dig_in_ctl */
+#define Q_REG_DTEST_SEL_SHIFT			0
+#define Q_REG_DTEST_SEL_MASK			0xF
+#define Q_REG_LV_MV_DTEST_SEL_CFG_SHIFT		0
+#define Q_REG_LV_MV_DTEST_SEL_CFG_MASK		0x7
+#define Q_REG_LV_MV_DTEST_SEL_EN_SHIFT		7
+#define Q_REG_LV_MV_DTEST_SEL_EN_MASK		0x80
+
 /* control reg: en */
 #define Q_REG_MASTER_EN_SHIFT		7
 #define Q_REG_MASTER_EN_MASK		0x80
@@ -154,6 +162,7 @@ enum qpnp_pin_param_type {
 	Q_PIN_CFG_AIN_ROUTE,
 	Q_PIN_CFG_CS_OUT,
 	Q_PIN_CFG_APASS_SEL,
+	Q_PIN_CFG_DTEST_SEL,
 	Q_PIN_CFG_INVALID,
 };
 
@@ -180,6 +189,7 @@ enum qpnp_pin_param_type {
 #define QPNP_PIN_AIN_ROUTE_INVALID		8
 #define QPNP_PIN_CS_OUT_INVALID			8
 #define QPNP_PIN_APASS_SEL_INVALID		4
+#define QPNP_PIN_DTEST_SEL_INVALID		4
 
 struct qpnp_pin_spec {
 	uint8_t slave;			/* 0-15 */
@@ -401,6 +411,10 @@ static int qpnp_pin_check_config(enum qpnp_pin_param_type idx,
 		if (val >= QPNP_PIN_APASS_SEL_INVALID)
 			return -EINVAL;
 		break;
+	case Q_PIN_CFG_DTEST_SEL:
+		if (val > QPNP_PIN_DTEST_SEL_INVALID)
+			return -EINVAL;
+		break;
 	default:
 		pr_err("invalid param type %u specified\n", idx);
 		return -EINVAL;
@@ -457,6 +471,9 @@ static int qpnp_pin_check_constraints(struct qpnp_pin_spec *q_spec,
 	else if (Q_CHK_INVALID(Q_PIN_CFG_APASS_SEL, q_spec, param->apass_sel))
 		pr_err("invalid apass_sel value %d for %s %d\n",
 						param->apass_sel, name, pin);
+	else if (Q_CHK_INVALID(Q_PIN_CFG_DTEST_SEL, q_spec, param->dtest_sel))
+		pr_err("invalid dtest_sel value %d for %s %d\n",
+					param->dtest_sel, name, pin);
 	else
 		return 0;
 
@@ -629,6 +646,25 @@ static int _qpnp_pin_config(struct qpnp_pin_chip *q_chip,
 		q_reg_clr_set(&q_spec->regs[Q_REG_I_DIG_OUT_CTL],
 			  Q_REG_OUT_TYPE_SHIFT, Q_REG_OUT_TYPE_MASK,
 			  param->output_type);
+
+	/* input config */
+	if (Q_HAVE_HW_SP(Q_PIN_CFG_DTEST_SEL, q_spec, param->dtest_sel)
+			&& param->dtest_sel) {
+		if (is_gpio_lv_mv(q_spec)) {
+			q_reg_clr_set(&q_spec->regs[Q_REG_I_DIG_IN_CTL],
+					Q_REG_LV_MV_DTEST_SEL_CFG_SHIFT,
+					Q_REG_LV_MV_DTEST_SEL_CFG_MASK,
+					param->dtest_sel - 1);
+			q_reg_clr_set(&q_spec->regs[Q_REG_I_DIG_IN_CTL],
+					Q_REG_LV_MV_DTEST_SEL_EN_SHIFT,
+					Q_REG_LV_MV_DTEST_SEL_EN_MASK, 0x1);
+		} else {
+			q_reg_clr_set(&q_spec->regs[Q_REG_I_DIG_IN_CTL],
+					Q_REG_DTEST_SEL_SHIFT,
+					Q_REG_DTEST_SEL_MASK,
+					BIT(param->dtest_sel - 1));
+		}
+	}
 
 	/* config applicable for both input / output */
 	if (Q_HAVE_HW_SP(Q_PIN_CFG_VIN_SEL, q_spec, param->vin_sel))
@@ -1048,6 +1084,15 @@ static int qpnp_pin_apply_config(struct qpnp_pin_chip *q_chip,
 	param.apass_sel    = q_reg_get(&q_spec->regs[Q_REG_I_APASS_SEL_CTL],
 				       Q_REG_APASS_SEL_SHIFT,
 				       Q_REG_APASS_SEL_MASK);
+	if (is_gpio_lv_mv(q_spec)) {
+		param.dtest_sel = q_reg_get(&q_spec->regs[Q_REG_I_DIG_IN_CTL],
+				Q_REG_LV_MV_DTEST_SEL_CFG_SHIFT,
+				Q_REG_LV_MV_DTEST_SEL_CFG_MASK);
+	} else {
+		 param.dtest_sel = q_reg_get(&q_spec->regs[Q_REG_I_DIG_IN_CTL],
+				Q_REG_DTEST_SEL_SHIFT,
+				Q_REG_DTEST_SEL_MASK);
+	}
 
 	of_property_read_u32(node, "qcom,mode",
 		&param.mode);
@@ -1073,6 +1118,9 @@ static int qpnp_pin_apply_config(struct qpnp_pin_chip *q_chip,
 		&param.cs_out);
 	of_property_read_u32(node, "qcom,apass-sel",
 		&param.apass_sel);
+	of_property_read_u32(node, "qcom,dtest-sel",
+		&param.dtest_sel);
+
 	rc = _qpnp_pin_config(q_chip, q_spec, &param);
 
 	return rc;
@@ -1205,6 +1253,17 @@ static int qpnp_pin_reg_attr(enum qpnp_pin_param_type type,
 		cfg->shift = Q_REG_APASS_SEL_SHIFT;
 		cfg->mask = Q_REG_APASS_SEL_MASK;
 		break;
+	case Q_PIN_CFG_DTEST_SEL:
+		if (is_gpio_lv_mv(q_spec)) {
+			cfg->shift = Q_REG_LV_MV_DTEST_SEL_CFG_SHIFT;
+			cfg->mask = Q_REG_LV_MV_DTEST_SEL_CFG_MASK;
+		} else {
+			cfg->shift = Q_REG_DTEST_SEL_SHIFT;
+			cfg->mask = Q_REG_DTEST_SEL_MASK;
+		}
+		cfg->addr = Q_REG_DIG_IN_CTL;
+		cfg->idx = Q_REG_I_DIG_IN_CTL;
+		break;
 	default:
 		return -EINVAL;
 	}
@@ -1240,6 +1299,23 @@ static int qpnp_pin_debugfs_set(void *data, u64 val)
 	q_spec = container_of(idx, struct qpnp_pin_spec, params[*idx]);
 	q_chip = q_spec->q_chip;
 
+	/*
+	 * special handling for GPIO_LV/MV 'dtest-sel'
+	 * if (dtest_sel == 0) then disable dtest-sel
+	 * else enable and set dtest.
+	 */
+	if ((q_spec->subtype == Q_GPIO_SUBTYPE_GPIO_LV ||
+		q_spec->subtype == Q_GPIO_SUBTYPE_GPIO_MV) &&
+				*idx == Q_PIN_CFG_DTEST_SEL) {
+		/* enable/disable DTEST */
+		cfg.shift = Q_REG_LV_MV_DTEST_SEL_EN_SHIFT;
+		cfg.mask = Q_REG_LV_MV_DTEST_SEL_EN_MASK;
+		cfg.addr = Q_REG_DIG_IN_CTL;
+		cfg.idx = Q_REG_I_DIG_IN_CTL;
+		q_reg_clr_set(&q_spec->regs[cfg.idx],
+				cfg.shift, cfg.mask, !!val);
+	}
+
 	rc = qpnp_pin_check_config(*idx, q_spec, val);
 	if (rc)
 		return rc;
@@ -1247,6 +1323,14 @@ static int qpnp_pin_debugfs_set(void *data, u64 val)
 	rc = qpnp_pin_reg_attr(*idx, &cfg, q_spec);
 	if (rc)
 		return rc;
+
+	if (*idx == Q_PIN_CFG_DTEST_SEL && val)  {
+		if (is_gpio_lv_mv(q_spec))
+			val -= 1;
+		else
+			val = BIT(val - 1);
+	}
+
 	q_reg_clr_set(&q_spec->regs[cfg.idx], cfg.shift, cfg.mask, val);
 	rc = spmi_ext_register_writel(q_chip->spmi->ctrl, q_spec->slave,
 				      Q_REG_ADDR(q_spec, cfg.addr),
@@ -1277,6 +1361,7 @@ static struct qpnp_pin_debugfs_args dfs_args[] = {
 	{ Q_PIN_CFG_AIN_ROUTE, "ain_route" },
 	{ Q_PIN_CFG_CS_OUT, "cs_out" },
 	{ Q_PIN_CFG_APASS_SEL, "apass_sel" },
+	{ Q_PIN_CFG_DTEST_SEL, "dtest-sel" },
 };
 
 static int qpnp_pin_debugfs_create(struct qpnp_pin_chip *q_chip)

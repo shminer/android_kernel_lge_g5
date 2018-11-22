@@ -1,7 +1,7 @@
 /*
  * u_smd.c - utilities for USB gadget serial over smd
  *
- * Copyright (c) 2011, 2013-2015, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2011, 2013-2016, The Linux Foundation. All rights reserved.
  *
  * This code also borrows from drivers/usb/gadget/u_serial.c, which is
  * Copyright (C) 2000 - 2003 Al Borchers (alborchers@steinerpoint.com)
@@ -92,6 +92,7 @@ struct gsmd_port {
 	/* pkt counters */
 	unsigned long		nbytes_tomodem;
 	unsigned long		nbytes_tolaptop;
+	bool			is_suspended;
 };
 
 static struct smd_portmaster {
@@ -299,7 +300,10 @@ static void gsmd_tx_pull(struct work_struct *w)
 	struct gsmd_port *port = container_of(w, struct gsmd_port, pull);
 	struct list_head *pool = &port->write_pool;
 	struct smd_port_info *pi = port->pi;
+	struct usb_function *func;
+	struct usb_gadget	*gadget;
 	struct usb_ep *in;
+	int ret;
 
 	pr_debug("%s: port:%p port#%d pool:%p\n", __func__,
 			port, port->port_num, pool);
@@ -314,6 +318,32 @@ static void gsmd_tx_pull(struct work_struct *w)
 	}
 
 	in = port->port_usb->in;
+	func = &port->port_usb->func;
+	gadget = func->config->cdev->gadget;
+	if (port->is_suspended) {
+		spin_unlock_irq(&port->port_lock);
+		if ((gadget->speed == USB_SPEED_SUPER) &&
+		    (func->func_is_suspended))
+			ret = usb_func_wakeup(func);
+		else
+			ret = usb_gadget_wakeup(gadget);
+
+		if ((ret == -EBUSY) || (ret == -EAGAIN))
+			pr_debug("Remote wakeup is delayed due to LPM exit\n");
+		else if (ret)
+			pr_err("Failed to wake up the USB core. ret=%d\n", ret);
+
+		spin_lock_irq(&port->port_lock);
+		if (!port->port_usb) {
+			pr_debug("%s: USB disconnected\n", __func__);
+			spin_unlock_irq(&port->port_lock);
+			gsmd_read_pending(port);
+			return;
+		}
+		spin_unlock_irq(&port->port_lock);
+		return;
+	}
+
 	while (pi->ch && !list_empty(pool)) {
 		struct usb_request *req;
 		int avail;
@@ -518,6 +548,9 @@ static void gsmd_stop_io(struct gsmd_port *port)
 		gsmd_free_requests(in, &port->write_pool);
 		port->n_read = 0;
 		port->cbits_to_laptop = 0;
+	} else {
+		spin_unlock(&port->port_lock);
+		return;
 	}
 
 	if (port->port_usb->send_modem_ctrl_bits)
@@ -687,6 +720,7 @@ int gsmd_connect(struct gserial *gser, u8 portno)
 	gser->notify_modem = gsmd_notify_modem;
 	port->nbytes_tomodem = 0;
 	port->nbytes_tolaptop = 0;
+	port->is_suspended = false;
 	spin_unlock_irqrestore(&port->port_lock, flags);
 
 	ret = usb_ep_enable(gser->in);
@@ -734,6 +768,7 @@ void gsmd_disconnect(struct gserial *gser, u8 portno)
 
 	spin_lock_irqsave(&port->port_lock, flags);
 	port->port_usb = 0;
+	port->is_suspended = false;
 	spin_unlock_irqrestore(&port->port_lock, flags);
 
 	/* disable endpoints, aborting down any active I/O */
@@ -1001,6 +1036,31 @@ free_smd_ports:
 	destroy_workqueue(gsmd_wq);
 
 	return ret;
+}
+
+void gsmd_suspend(struct gserial *gser, u8 portno)
+{
+	struct gsmd_port *port;
+
+	pr_debug("%s: gserial:%p portno:%u\n", __func__, gser, portno);
+
+	port = smd_ports[portno].port;
+	spin_lock(&port->port_lock);
+	port->is_suspended = true;
+	spin_unlock(&port->port_lock);
+}
+
+void gsmd_resume(struct gserial *gser, u8 portno)
+{
+	struct gsmd_port *port;
+
+	pr_debug("%s: gserial:%p portno:%u\n", __func__, gser, portno);
+
+	port = smd_ports[portno].port;
+	spin_lock(&port->port_lock);
+	port->is_suspended = false;
+	spin_unlock(&port->port_lock);
+	queue_work(gsmd_wq, &port->pull);
 }
 
 void gsmd_cleanup(struct usb_gadget *g, unsigned count)

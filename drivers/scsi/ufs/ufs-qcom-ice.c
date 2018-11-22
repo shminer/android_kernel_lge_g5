@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2014-2015, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2014-2016, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -54,16 +54,21 @@ void ufs_qcom_ice_print_regs(struct ufs_qcom_host *qcom_host)
 				(REG_UFS_QCOM_ICE_CTRL_INFO_2_n + 8 * i)));
 	}
 
+	if (qcom_host->ice.pdev && qcom_host->ice.vops &&
+	    qcom_host->ice.vops->debug)
+		qcom_host->ice.vops->debug(qcom_host->ice.pdev);
 }
 
-static void ufs_qcom_ice_error_cb(void *host_ctrl, enum ice_error_code evt)
+static void ufs_qcom_ice_error_cb(void *host_ctrl, u32 error)
 {
 	struct ufs_qcom_host *qcom_host = (struct ufs_qcom_host *)host_ctrl;
 
-	dev_err(qcom_host->hba->dev, "%s: Error in ice operation %d",
-		__func__, evt);
-	dev_err(qcom_host->hba->dev, " [CCAudit] %s: Error in ice operation %d",
-		__func__, evt);
+	dev_err(qcom_host->hba->dev, "%s: Error in ice operation 0x%x",
+		__func__, error);
+#ifdef CONFIG_MACH_LGE
+	dev_err(qcom_host->hba->dev, " [CCAudit] %s: Error in ice operation 0x%x",
+		__func__, error);
+#endif
 
 	if (qcom_host->ice.state == UFS_QCOM_ICE_STATE_ACTIVE)
 		qcom_host->ice.state = UFS_QCOM_ICE_STATE_DISABLED;
@@ -163,7 +168,35 @@ int ufs_qcom_ice_get_dev(struct ufs_qcom_host *qcom_host)
 
 out:
 	return err;
+}
 
+static void ufs_qcom_ice_cfg_work(struct work_struct *work)
+{
+	struct ice_data_setting ice_set;
+	struct ufs_qcom_host *qcom_host =
+		container_of(work, struct ufs_qcom_host, ice_cfg_work);
+
+	if (!qcom_host->ice.vops->config_start || !qcom_host->req_pending)
+		return;
+
+	memset(&ice_set, 0, sizeof(ice_set));
+
+	/*
+	 * config_start is called again as previous attempt returned -EAGAIN,
+	 * this call shall now take care of the necessary key setup.
+	 * 'ice_set' will not actually be used, instead the next call to
+	 * config_start() for this request, in the normal call flow, will
+	 * succeed as the key has now been setup.
+	 */
+	qcom_host->ice.vops->config_start(qcom_host->ice.pdev,
+		qcom_host->req_pending, &ice_set, false);
+
+	/*
+	 * Resume with requests processing. We assume config_start has been
+	 * successful, but even if it wasn't we still must resume in order to
+	 * allow for the request to be retried.
+	 */
+	ufshcd_scsi_unblock_requests(qcom_host->hba);
 }
 
 /**
@@ -192,6 +225,7 @@ int ufs_qcom_ice_init(struct ufs_qcom_host *qcom_host)
 	}
 
 	qcom_host->dbg_print_en |= UFS_QCOM_ICE_DEFAULT_DBG_PRINT_EN;
+	INIT_WORK(&qcom_host->ice_cfg_work, ufs_qcom_ice_cfg_work);
 
 out:
 	return err;
@@ -212,8 +246,44 @@ static inline bool ufs_qcom_is_data_cmd(char cmd_op, bool is_write)
 	return false;
 }
 
+int ufs_qcom_ice_req_setup(struct ufs_qcom_host *qcom_host,
+		struct scsi_cmnd *cmd, u8 *cc_index, bool *enable)
+{
+	struct ice_data_setting ice_set;
+	char cmd_op = cmd->cmnd[0];
+	int err;
+
+	if (!qcom_host->ice.pdev || !qcom_host->ice.vops) {
+		dev_dbg(qcom_host->hba->dev, "%s: ice device is not enabled\n",
+			__func__);
+		return 0;
+	}
+
+	if (qcom_host->ice.vops->config_start) {
+		memset(&ice_set, 0, sizeof(ice_set));
+		err = qcom_host->ice.vops->config_start(qcom_host->ice.pdev,
+			cmd->request, &ice_set, true);
+		if (err) {
+			dev_err(qcom_host->hba->dev,
+				"%s: error in ice_vops->config %d\n",
+				__func__, err);
+			return err;
+		}
+
+		if (ufs_qcom_is_data_cmd(cmd_op, true))
+			*enable = !ice_set.encr_bypass;
+		else if (ufs_qcom_is_data_cmd(cmd_op, false))
+			*enable = !ice_set.decr_bypass;
+
+		if (ice_set.crypto_data.key_index >= 0)
+			*cc_index = (u8)ice_set.crypto_data.key_index;
+	}
+	return 0;
+}
+
 /**
- * ufs_qcom_ice_cfg() - configures UFS's ICE registers for an ICE transaction
+ * ufs_qcom_ice_cfg_start() - starts configuring UFS's ICE registers
+ *							  for an ICE transaction
  * @qcom_host:	Pointer to a UFS QCom internal host structure.
  *		qcom_host, qcom_host->hba and qcom_host->hba->dev should all
  *		be valid pointers.
@@ -223,7 +293,8 @@ static inline bool ufs_qcom_is_data_cmd(char cmd_op, bool is_write)
  * Return: -EINVAL in-case of an error
  *         0 otherwise
  */
-int ufs_qcom_ice_cfg(struct ufs_qcom_host *qcom_host, struct scsi_cmnd *cmd)
+int ufs_qcom_ice_cfg_start(struct ufs_qcom_host *qcom_host,
+		struct scsi_cmnd *cmd)
 {
 	struct device *dev = qcom_host->hba->dev;
 	int err = 0;
@@ -258,13 +329,26 @@ int ufs_qcom_ice_cfg(struct ufs_qcom_host *qcom_host, struct scsi_cmnd *cmd)
 	}
 
 	memset(&ice_set, 0, sizeof(ice_set));
-	if (qcom_host->ice.vops->config) {
-		err = qcom_host->ice.vops->config(qcom_host->ice.pdev,
-							req, &ice_set);
-
+	if (qcom_host->ice.vops->config_start) {
+		err = qcom_host->ice.vops->config_start(qcom_host->ice.pdev,
+							req, &ice_set, true);
 		if (err) {
-			dev_err(dev, "%s: error in ice_vops->config %d\n",
-				__func__, err);
+			/*
+			 * config_start() returns -EAGAIN when a key slot is
+			 * available but still not configured. As configuration
+			 * requires a non-atomic context, this means we should
+			 * call the function again from the worker thread to do
+			 * the configuration. For this request the error will
+			 * propagate so it will be re-queued and until the
+			 * configuration is is completed we block further
+			 * request processing.
+			 */
+			if (err == -EAGAIN) {
+				qcom_host->req_pending = req;
+				if (schedule_work(&qcom_host->ice_cfg_work))
+					ufshcd_scsi_block_requests(
+							qcom_host->hba);
+			}
 			goto out;
 		}
 	}
@@ -328,6 +412,36 @@ int ufs_qcom_ice_cfg(struct ufs_qcom_host *qcom_host, struct scsi_cmnd *cmd)
 	mb();
 out:
 	return err;
+}
+
+/**
+ * ufs_qcom_ice_cfg_end() - finishes configuring UFS's ICE registers
+ *							for an ICE transaction
+ * @qcom_host:	Pointer to a UFS QCom internal host structure.
+ *				qcom_host, qcom_host->hba and
+ *				qcom_host->hba->dev should all
+ *				be valid pointers.
+ * @cmd:	Pointer to a valid scsi command. cmd->request should also be
+ *              a valid pointer.
+ *
+ * Return: -EINVAL in-case of an error
+ *         0 otherwise
+ */
+int ufs_qcom_ice_cfg_end(struct ufs_qcom_host *qcom_host, struct request *req)
+{
+	int err = 0;
+	struct device *dev = qcom_host->hba->dev;
+
+	if (qcom_host->ice.vops->config_end) {
+		err = qcom_host->ice.vops->config_end(req);
+		if (err) {
+			dev_err(dev, "%s: error in ice_vops->config_end %d\n",
+				__func__, err);
+			return err;
+		}
+	}
+
+	return 0;
 }
 
 /**
