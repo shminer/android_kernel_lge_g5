@@ -12,14 +12,6 @@ config FB_MSM_MDSS_HDMI_PANEL
 	The MDSS HDMI Panel provides support for transmitting TMDS signals of
 	MDSS frame buffer data to connected hdmi compliant TVs, monitors etc.
 
-config FB_MSM_MDSS_KCAL_CTRL
-	depends on FB_MSM_MDSS
-	bool "MDSS color control"
-	default n
-	---help---
-	  Enable sysfs for rgb/lut control for mdss-mdp display controllers
-	  in the MDSS sub-system.
-
 config FB_MSM_MDSS_HDMI_MHL_SII8334
 	depends on FB_MSM_MDSS_HDMI_PANEL
 	bool 'MHL SII8334 support '
@@ -70,6 +62,13 @@ config FB_MSM_MDSS_XLOG_DEBUG
 	features to: Dump MDSS registers during driver errors, panic
 	driver during fatal errors and enable some display-driver logging
 	into an internal buffer (this avoids logging overhead).
+	
+config FB_MSM_MDSS_KCAL_CTRL
+       depends on FB_MSM_MDSS
+       bool "MDSS color control"
+       ---help---
+         Enable sysfs for post-processing control of mdss-mdp5 display
+         controllers in MDSS.
 
 config FB_MSM_MDSS_FRC_DEBUG
 	depends on DEBUG_FS && FB_MSM_MDSS

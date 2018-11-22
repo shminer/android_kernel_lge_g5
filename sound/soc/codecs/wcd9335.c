@@ -48,6 +48,11 @@
 #include <linux/switch.h>
 #endif
 
+#ifdef CONFIG_SOUND_CONTROL
+#include <linux/sound_control.h>
+static struct snd_soc_codec *snd_control_codec;
+#endif
+
 #define TASHA_RX_PORT_START_NUMBER  16
 
 #define WCD9335_RATES_MASK (SNDRV_PCM_RATE_8000 | SNDRV_PCM_RATE_16000 |\
@@ -14019,6 +14024,22 @@ static struct regulator *tasha_codec_find_ondemand_regulator(
 	return NULL;
 }
 
+#ifdef CONFIG_SOUND_CONTROL
+unsigned int sound_control_write(unsigned int reg, int val)
+{
+	int ori_val;
+	unsigned int boost_val;
+
+	ori_val = snd_soc_read(snd_control_codec, reg);
+
+	boost_val = ori_val + val;
+
+	snd_soc_write(snd_control_codec, reg, boost_val);
+
+	return boost_val;
+}
+#endif
+
 static int tasha_codec_probe(struct snd_soc_codec *codec)
 {
 	struct wcd9xxx *control;
@@ -14028,6 +14049,11 @@ static int tasha_codec_probe(struct snd_soc_codec *codec)
 	int i, ret;
 	void *ptr = NULL;
 	struct regulator *supply;
+
+#ifdef CONFIG_SOUND_CONTROL
+	pr_info("soundcontrol codec probe...\n");
+	snd_control_codec = codec;
+#endif
 
 	control = dev_get_drvdata(codec->dev->parent);
 
