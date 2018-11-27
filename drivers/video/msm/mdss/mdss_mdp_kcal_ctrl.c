@@ -23,7 +23,7 @@
 
 #include "mdss_mdp.h"
 
-#define DEF_PCC 0x100
+#define DEF_PCC 0xf0
 #define DEF_PA 0xff
 #define PCC_ADJ 0x80
 
