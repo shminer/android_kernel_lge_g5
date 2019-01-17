@@ -505,11 +505,27 @@ static irqreturn_t broadcast_tdmb_spi_event_handler(int irq, void *handle)
 static int tdmb_pinctrl_init(void)
 {
     struct pinctrl *tdmb_pinctrl;
+    struct pinctrl_state *gpio_state_suspend;
     tdmb_pinctrl = devm_pinctrl_get(&(fc8080_ctrl_info.pdev->dev));
 
     if(IS_ERR_OR_NULL(tdmb_pinctrl)) {
         pr_err("%s: Getting pinctrl handle failed\n", __func__);
         return -EINVAL;
+    }
+    gpio_state_suspend
+     = pinctrl_lookup_state(tdmb_pinctrl, "gpio_tdmb_suspend");
+
+     if(IS_ERR_OR_NULL(gpio_state_suspend)) {
+         pr_err("%s: Failed to get the suspend state pinctrl handle\n", __func__);
+         return -EINVAL;
+    }
+
+    if(pinctrl_select_state(tdmb_pinctrl, gpio_state_suspend)) {
+        pr_err("%s: error on pinctrl_select_state for tdmb enable and irq pin\n", __func__);
+        return -EINVAL;
+    }
+    else {
+        printk("%s: success to set pinctrl_select_state for tdmb enable and irq pin\n", __func__);
     }
     return 0;
 }

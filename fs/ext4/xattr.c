@@ -1291,13 +1291,11 @@ int ext4_expand_extra_isize_ea(struct inode *inode, int new_extra_isize,
 	int s_min_extra_isize = le16_to_cpu(EXT4_SB(inode->i_sb)->s_es->s_min_extra_isize);
 
 	down_write(&EXT4_I(inode)->xattr_sem);
-	/*
-	 * Set EXT4_STATE_NO_EXPAND to avoid recursion when marking inode dirty
-	 */
-	ext4_set_inode_state(inode, EXT4_STATE_NO_EXPAND);
 retry:
-	if (EXT4_I(inode)->i_extra_isize >= new_extra_isize)
-		goto out;
+	if (EXT4_I(inode)->i_extra_isize >= new_extra_isize) {
+		up_write(&EXT4_I(inode)->xattr_sem);
+		return 0;
+	}
 
 	header = IHDR(inode, raw_inode);
 	entry = IFIRST(header);
@@ -1326,7 +1324,8 @@ retry:
 				(void *)header, total_ino,
 				inode->i_sb->s_blocksize);
 		EXT4_I(inode)->i_extra_isize = new_extra_isize;
-		goto out;
+		error = 0;
+		goto cleanup;
 	}
 
 	/*
@@ -1486,8 +1485,6 @@ retry:
 		kfree(bs);
 	}
 	brelse(bh);
-out:
-	ext4_clear_inode_state(inode, EXT4_STATE_NO_EXPAND);
 	up_write(&EXT4_I(inode)->xattr_sem);
 	return 0;
 
@@ -1499,10 +1496,6 @@ cleanup:
 	kfree(is);
 	kfree(bs);
 	brelse(bh);
-	/*
-	 * We deliberately leave EXT4_STATE_NO_EXPAND set here since inode
-	 * size expansion failed.
-	 */
 	up_write(&EXT4_I(inode)->xattr_sem);
 	return error;
 }

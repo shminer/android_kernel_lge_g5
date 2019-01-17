@@ -340,6 +340,7 @@ static void pdata_quirks_check(struct pdata_init *quirks)
 		if (of_machine_is_compatible(quirks->compatible)) {
 			if (quirks->fn)
 				quirks->fn();
+			break;
 		}
 		quirks++;
 	}

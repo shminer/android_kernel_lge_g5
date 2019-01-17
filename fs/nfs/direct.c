@@ -716,8 +716,10 @@ static void nfs_direct_write_completion(struct nfs_pgio_header *hdr)
 
 	spin_lock(&dreq->lock);
 
-	if (test_bit(NFS_IOHDR_ERROR, &hdr->flags))
+	if (test_bit(NFS_IOHDR_ERROR, &hdr->flags)) {
+		dreq->flags = 0;
 		dreq->error = hdr->error;
+	}
 	if (dreq->error == 0) {
 		dreq->count += hdr->good_bytes;
 		if (nfs_write_need_commit(hdr)) {

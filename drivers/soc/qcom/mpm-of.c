@@ -141,7 +141,7 @@ enum {
 #endif
 };
 
-static int msm_mpm_debug_mask = 0;
+static int msm_mpm_debug_mask = 1;
 #ifndef CONFIG_LGE_PM_DEBUG
 module_param_named(
 	debug_mask, msm_mpm_debug_mask, int, S_IRUGO | S_IWUSR | S_IWGRP
@@ -744,7 +744,7 @@ static void msm_mpm_work_fn(struct work_struct *work)
 	unsigned long flags;
 	while (1) {
 		bool allow;
-		wait_for_completion_interruptible(&wake_wq);
+		wait_for_completion(&wake_wq);
 		spin_lock_irqsave(&msm_mpm_lock, flags);
 		allow = msm_mpm_irqs_detectable(true) &&
 				msm_mpm_gpio_irqs_detectable(true);

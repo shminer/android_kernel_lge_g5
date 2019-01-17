@@ -1,3 +1,2 @@
 include h1_global_com_common
 include h1_common-perf
-include lge_perf

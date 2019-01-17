@@ -1458,7 +1458,7 @@ static struct se_portal_group *lio_target_tiqn_addtpg(
 			wwn, &tpg->tpg_se_tpg, tpg,
 			TRANSPORT_TPG_TYPE_NORMAL);
 	if (ret < 0)
-		goto free_out;
+		return NULL;
 
 	ret = iscsit_tpg_add_portal_group(tiqn, tpg);
 	if (ret != 0)
@@ -1470,7 +1470,6 @@ static struct se_portal_group *lio_target_tiqn_addtpg(
 	return &tpg->tpg_se_tpg;
 out:
 	core_tpg_deregister(&tpg->tpg_se_tpg);
-free_out:
 	kfree(tpg);
 	return NULL;
 }

@@ -35,7 +35,6 @@ struct netlink_sock {
 	size_t			max_recvmsg_len;
 	wait_queue_head_t	wait;
 	bool			cb_running;
-	int			dump_done_errno;
 	struct netlink_callback	cb;
 	struct mutex		*cb_mutex;
 	struct mutex		cb_def_mutex;

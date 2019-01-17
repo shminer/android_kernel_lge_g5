@@ -18,8 +18,6 @@
 #include <linux/videodev2.h>
 #include <linux/v4l2-subdev.h>
 #include <media/v4l2-dev.h>
-#include <media/v4l2-fh.h>
-#include <media/v4l2-ctrls.h>
 #include <media/v4l2-ioctl.h>
 
 static long native_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
@@ -592,7 +590,7 @@ struct v4l2_input32 {
 	__u32	     type;		/*  Type of input */
 	__u32	     audioset;		/*  Associated audios (bitfield) */
 	__u32        tuner;             /*  Associated tuner */
-	compat_u64   std;
+	v4l2_std_id  std;
 	__u32	     status;
 	__u32	     reserved[4];
 } __attribute__ ((packed));
@@ -632,39 +630,24 @@ struct v4l2_ext_control32 {
 	};
 } __attribute__ ((packed));
 
-/* Return true if this control is a pointer type. */
-static inline bool ctrl_is_pointer(struct file *file, u32 id)
+/* The following function really belong in v4l2-common, but that causes
+   a circular dependency between modules. We need to think about this, but
+   for now this will do. */
+
+/* Return non-zero if this control is a pointer type. Currently only
+   type STRING is a pointer type. */
+static inline int ctrl_is_pointer(u32 id)
 {
-	struct video_device *vdev = video_devdata(file);
-	struct v4l2_fh *fh = NULL;
-	struct v4l2_ctrl_handler *hdl = NULL;
-	struct v4l2_query_ext_ctrl qec = { id };
-	const struct v4l2_ioctl_ops *ops = vdev->ioctl_ops;
-
-	if (test_bit(V4L2_FL_USES_V4L2_FH, &vdev->flags))
-		fh = file->private_data;
-
-	if (fh && fh->ctrl_handler)
-		hdl = fh->ctrl_handler;
-	else if (vdev->ctrl_handler)
-		hdl = vdev->ctrl_handler;
-
-	if (hdl) {
-		struct v4l2_ctrl *ctrl = v4l2_ctrl_find(hdl, id);
-
-		return ctrl && ctrl->is_ptr;
+	switch (id) {
+	case V4L2_CID_RDS_TX_PS_NAME:
+	case V4L2_CID_RDS_TX_RADIO_TEXT:
+		return 1;
+	default:
+		return 0;
 	}
-
-	if (!ops || !ops->vidioc_query_ext_ctrl)
-		return false;
-
-	return !ops->vidioc_query_ext_ctrl(file, fh, &qec) &&
-		(qec.flags & V4L2_CTRL_FLAG_HAS_PAYLOAD);
 }
 
-static int get_v4l2_ext_controls32(struct file *file,
-				   struct v4l2_ext_controls *kp,
-				   struct v4l2_ext_controls32 __user *up)
+static int get_v4l2_ext_controls32(struct v4l2_ext_controls *kp, struct v4l2_ext_controls32 __user *up)
 {
 	struct v4l2_ext_control32 __user *ucontrols;
 	struct v4l2_ext_control __user *kcontrols;
@@ -697,7 +680,7 @@ static int get_v4l2_ext_controls32(struct file *file,
 			return -EFAULT;
 		if (get_user(id, &kcontrols->id))
 			return -EFAULT;
-		if (ctrl_is_pointer(file, id)) {
+		if (ctrl_is_pointer(id)) {
 			void __user *s;
 
 			if (get_user(p, &ucontrols->string))
@@ -712,9 +695,7 @@ static int get_v4l2_ext_controls32(struct file *file,
 	return 0;
 }
 
-static int put_v4l2_ext_controls32(struct file *file,
-				   struct v4l2_ext_controls *kp,
-				   struct v4l2_ext_controls32 __user *up)
+static int put_v4l2_ext_controls32(struct v4l2_ext_controls *kp, struct v4l2_ext_controls32 __user *up)
 {
 	struct v4l2_ext_control32 __user *ucontrols;
 	struct v4l2_ext_control __user *kcontrols =
@@ -747,7 +728,7 @@ static int put_v4l2_ext_controls32(struct file *file,
 		/* Do not modify the pointer when copying a pointer control.
 		   The contents of the pointer was changed, not the pointer
 		   itself. */
-		if (ctrl_is_pointer(file, id))
+		if (ctrl_is_pointer(id))
 			size -= sizeof(ucontrols->value64);
 		if (copy_in_user(ucontrols, kcontrols, size))
 			return -EFAULT;
@@ -779,8 +760,7 @@ static int put_v4l2_event32(struct v4l2_event *kp, struct v4l2_event32 __user *u
 		copy_to_user(&up->u, &kp->u, sizeof(kp->u)) ||
 		put_user(kp->pending, &up->pending) ||
 		put_user(kp->sequence, &up->sequence) ||
-		put_user(kp->timestamp.tv_sec, &up->timestamp.tv_sec) ||
-		put_user(kp->timestamp.tv_nsec, &up->timestamp.tv_nsec) ||
+		compat_put_timespec(&kp->timestamp, &up->timestamp) ||
 		put_user(kp->id, &up->id) ||
 		copy_to_user(up->reserved, kp->reserved, 8 * sizeof(__u32)))
 			return -EFAULT;
@@ -964,7 +944,7 @@ static long do_video_ioctl(struct file *file, unsigned int cmd, unsigned long ar
 	case VIDIOC_G_EXT_CTRLS:
 	case VIDIOC_S_EXT_CTRLS:
 	case VIDIOC_TRY_EXT_CTRLS:
-		err = get_v4l2_ext_controls32(file, &karg.v2ecs, up);
+		err = get_v4l2_ext_controls32(&karg.v2ecs, up);
 		compatible_arg = 0;
 		break;
 	case VIDIOC_DQEVENT:
@@ -984,9 +964,6 @@ static long do_video_ioctl(struct file *file, unsigned int cmd, unsigned long ar
 		set_fs(old_fs);
 	}
 
-	if (err == -ENOTTY)
-		return err;
-
 	/* Special case: even after an error we need to put the
 	   results back for these ioctls since the error_idx will
 	   contain information on which control failed. */
@@ -994,7 +971,7 @@ static long do_video_ioctl(struct file *file, unsigned int cmd, unsigned long ar
 	case VIDIOC_G_EXT_CTRLS:
 	case VIDIOC_S_EXT_CTRLS:
 	case VIDIOC_TRY_EXT_CTRLS:
-		if (put_v4l2_ext_controls32(file, &karg.v2ecs, up))
+		if (put_v4l2_ext_controls32(&karg.v2ecs, up))
 			err = -EFAULT;
 		break;
 	}
@@ -1032,7 +1009,6 @@ static long do_video_ioctl(struct file *file, unsigned int cmd, unsigned long ar
 		err = put_v4l2_create32(&karg.v2crt, up);
 		break;
 
-	case VIDIOC_PREPARE_BUF:
 	case VIDIOC_QUERYBUF:
 	case VIDIOC_QBUF:
 	case VIDIOC_DQBUF:

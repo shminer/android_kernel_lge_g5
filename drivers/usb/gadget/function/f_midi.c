@@ -32,7 +32,7 @@
 #include <linux/usb/audio.h>
 #include <linux/usb/midi.h>
 
-#include "../u_f.h"
+#include "u_f.h"
 
 MODULE_AUTHOR("Ben Williamson");
 MODULE_LICENSE("GPL v2");
@@ -231,7 +231,6 @@ static inline struct usb_request *midi_alloc_ep_req(struct usb_ep *ep,
 #endif
 	return alloc_ep_req(ep, length, length);
 }
-
 
 static void midi_free_ep_req(struct usb_ep *ep, struct usb_request *req)
 {

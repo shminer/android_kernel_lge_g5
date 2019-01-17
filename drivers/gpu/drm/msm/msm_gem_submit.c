@@ -34,10 +34,11 @@ static inline void __user *to_user_ptr(u64 address)
 }
 
 static struct msm_gem_submit *submit_create(struct drm_device *dev,
-		struct msm_gpu *gpu, uint32_t nr)
+		struct msm_gpu *gpu, uint32_t nr_cmds, uint32_t nr_bos)
 {
 	struct msm_gem_submit *submit;
-	uint64_t sz = sizeof(*submit) + ((u64)nr * sizeof(submit->bos[0]));
+	uint64_t sz = sizeof(*submit) + (nr_bos * sizeof(submit->bos[0])) +
+		(nr_cmds * sizeof(submit->cmd[0]));
 
 	if (sz > SIZE_MAX)
 		return NULL;
@@ -50,6 +51,10 @@ static struct msm_gem_submit *submit_create(struct drm_device *dev,
 		/* initially, until copy_from_user() and bo lookup succeeds: */
 		submit->nr_bos = 0;
 		submit->nr_cmds = 0;
+
+		submit->cmd = (void *)submit + sizeof(*submit);
+		submit->bos = (void *)submit->cmd +
+			(nr_cmds * sizeof(submit->cmd[0]));
 
 		INIT_LIST_HEAD(&submit->bo_list);
 		ww_acquire_init(&submit->ticket, &reservation_ww_class);
@@ -323,7 +328,7 @@ static int submit_reloc(struct msm_gem_submit *submit, struct msm_gem_object *ob
 	return 0;
 }
 
-static void submit_cleanup(struct msm_gem_submit *submit, bool fail)
+static void submit_cleanup(struct msm_gem_submit *submit, int fail)
 {
 	unsigned i;
 
@@ -335,7 +340,8 @@ static void submit_cleanup(struct msm_gem_submit *submit, bool fail)
 	}
 
 	ww_acquire_fini(&submit->ticket);
-	kfree(submit);
+	if (fail)
+		kfree(submit);
 }
 
 int msm_ioctl_gem_submit(struct drm_device *dev, void *data,
@@ -357,13 +363,12 @@ int msm_ioctl_gem_submit(struct drm_device *dev, void *data,
 
 	gpu = priv->gpu;
 
-	if (args->nr_cmds > MAX_CMDS)
-		return -EINVAL;
-
 	mutex_lock(&dev->struct_mutex);
 
-	submit = submit_create(dev, gpu, args->nr_bos);
+	submit = submit_create(dev, gpu, args->nr_cmds, args->nr_bos);
 	if (!submit) {
+		DRM_ERROR("Create submit error, nr_cmds=%u, nr_bos=%u\n",
+				args->nr_cmds, args->nr_bos);
 		ret = -ENOMEM;
 		goto out;
 	}
@@ -381,7 +386,8 @@ int msm_ioctl_gem_submit(struct drm_device *dev, void *data,
 		void __user *userptr =
 			to_user_ptr(args->cmds + (i * sizeof(submit_cmd)));
 		struct msm_gem_object *msm_obj;
-		uint32_t iova;
+		uint64_t iova;
+		size_t size;
 
 		ret = copy_from_user(&submit_cmd, userptr, sizeof(submit_cmd));
 		if (ret) {
@@ -413,9 +419,12 @@ int msm_ioctl_gem_submit(struct drm_device *dev, void *data,
 			goto out;
 		}
 
-		if ((submit_cmd.size + submit_cmd.submit_offset) >=
-				msm_obj->base.size) {
-			DRM_ERROR("invalid cmdstream size: %u\n", submit_cmd.size);
+		size = submit_cmd.size + submit_cmd.submit_offset;
+
+		if (!submit_cmd.size || (size < submit_cmd.size) ||
+			(size > msm_obj->base.size)) {
+			DRM_ERROR("invalid cmdstream offset/size: %u/%u\n",
+				submit_cmd.submit_offset, submit_cmd.size);
 			ret = -EINVAL;
 			goto out;
 		}
@@ -441,8 +450,8 @@ int msm_ioctl_gem_submit(struct drm_device *dev, void *data,
 	args->fence = submit->fence;
 
 out:
-	if (submit)
-		submit_cleanup(submit, !!ret);
+	submit_cleanup(submit, ret);
+
 	mutex_unlock(&dev->struct_mutex);
 	return ret;
 }

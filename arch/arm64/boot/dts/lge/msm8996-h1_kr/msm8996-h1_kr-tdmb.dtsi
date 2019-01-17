@@ -103,12 +103,12 @@
 		// [Fixed] Specifies maximum SPI clock frequency of DMB chipset(38.4 MHz). (ref. FC8080 datasheet)
 		spi-max-frequency = <38400000>;
 
+		pinctrl-names = "gpio_tdmb_suspend";
 		/* [Modified] List of phandles, each pointing at a pin configuration node within a pin controller.
 			The list of names to assign states, List entry 0,1,2... define the name for integer state ID 0,1,2...
 			Ex. control cases are INT(tdmb_int), EN(tdmb_ctrl), ANT SW(tdmb_ant) LNA Gain Ctrl(tdmb_lna_ctrl) LNA EN(tdmb_lna_en)*/
-		pinctrl-names = "tdmb_int", "tdmb_ctrl";
-		pinctrl-0 = <&tdmb_int>;
-		pinctrl-1 = <&tdmb_ctrl>;
+		pinctrl-0 = <&tdmb_int &tdmb_ctrl>;
+
 
 		/* [Modified] when using clock buffer,
 			 you should check which clock buffer used for dmb device */
