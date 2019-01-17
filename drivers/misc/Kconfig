@@ -619,6 +619,13 @@ config LGE_IRRC
 	help
 	  If you say yes here you get support for IrRC
 
+config SOUND_CONTROL
+	tristate "wcd9335 volume boost"
+	depends on SND_SOC_WCD9335
+	default y
+	help
+	  If you say yes here you get sound control for wcd9335
+
 source "drivers/misc/c2port/Kconfig"
 source "drivers/misc/eeprom/Kconfig"
 source "drivers/misc/cb710/Kconfig"
