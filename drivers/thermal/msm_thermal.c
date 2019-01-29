@@ -82,6 +82,14 @@
 #define THERM_DDR_SLAVE_ID   512
 #define THERM_DDR_IB_VOTE_REQ   366000000
 
+static unsigned debug = 0;
+
+#define dprintk(msg...)		\
+do {				\
+	if (debug)		\
+		pr_info(msg);	\
+} while (0)
+
 #define VALIDATE_AND_SET_MASK(_node, _key, _mask, _cpu) \
 	do { \
 		if (of_property_read_bool(_node, _key)) \
@@ -3959,6 +3967,73 @@ init_freq_thread:
 	}
 }
 
+/* Ioctl override */
+static unsigned int c0_ioctl_user_max_freq_limit = 0;
+static unsigned int c0_ioctl_user_min_freq_limit = 0;
+static unsigned int c1_ioctl_user_max_freq_limit = 0;
+static unsigned int c1_ioctl_user_min_freq_limit = 0;
+
+module_param_named(c0_ioctl_user_max_freq_limit, 
+					c0_ioctl_user_max_freq_limit, uint, 0644);
+
+module_param_named(c0_ioctl_user_min_freq_limit, 
+					c0_ioctl_user_min_freq_limit, uint, 0644);
+
+module_param_named(c1_ioctl_user_max_freq_limit, 
+					c1_ioctl_user_max_freq_limit, uint, 0644);
+
+module_param_named(c1_ioctl_user_min_freq_limit, 
+					c1_ioctl_user_min_freq_limit, uint, 0644);
+
+static unsigned int msm_thermal_engine_ioctl_user_limit(uint32_t cpu, 
+									uint32_t freq, bool is_max)
+{
+	unsigned int out = 0;
+
+	if (is_max) {
+		if(cpu < 2)	{
+			if(!c0_ioctl_user_max_freq_limit)
+				return freq;
+
+			if(freq < c0_ioctl_user_max_freq_limit)
+				out = c0_ioctl_user_max_freq_limit;
+			else
+				return freq;
+		}else{
+			if(!c1_ioctl_user_max_freq_limit)
+				return freq;
+
+			if(freq < c1_ioctl_user_max_freq_limit)
+				out = c1_ioctl_user_max_freq_limit;
+			else
+				return freq;
+		}
+	}else{
+		if(cpu < 2)	{
+			if(!c0_ioctl_user_min_freq_limit)
+				return freq;
+
+			if(freq > c0_ioctl_user_min_freq_limit)
+				out = c0_ioctl_user_min_freq_limit;
+			else
+			 	return freq;			
+		}else{
+			if(!c1_ioctl_user_min_freq_limit)
+				return freq;
+
+			if(freq > c1_ioctl_user_min_freq_limit)
+				out = c1_ioctl_user_min_freq_limit;
+			else
+			 	return freq;
+		}
+	}
+
+	dprintk("Thermal-engine ioctl is overrided, set cpu%u %sfreq to %u\n",
+			cpu, (is_max) ? "Max" : "Min", out);
+
+	return out;
+}
+
 int msm_thermal_get_freq_plan_size(uint32_t cluster, unsigned int *table_len)
 {
 	uint32_t i = 0;
@@ -4134,6 +4209,7 @@ int msm_thermal_set_cluster_freq(uint32_t cluster, uint32_t freq, bool is_max)
 	for_each_cpu_mask(i, cluster_ptr->cluster_cores) {
 		uint32_t *freq_ptr = (is_max) ? &cpus[i].user_max_freq
 					: &cpus[i].user_min_freq;
+		freq = msm_thermal_engine_ioctl_user_limit(i, freq, is_max);
 		if (*freq_ptr == freq)
 			continue;
 		notify = true;
@@ -4168,6 +4244,9 @@ int msm_thermal_set_frequency(uint32_t cpu, uint32_t freq, bool is_max)
 
 	pr_debug("Userspace requested %s frequency %u for CPU%u\n",
 			(is_max) ? "Max" : "Min", freq, cpu);
+
+	freq = msm_thermal_engine_ioctl_user_limit(cpu, freq, is_max);
+
 	if (is_max) {
 		if (cpus[cpu].user_max_freq == freq)
 			goto set_freq_exit;
@@ -4933,6 +5012,32 @@ static struct kernel_param_ops module_ops = {
 
 module_param_cb(enabled, &module_ops, &enabled, 0644);
 MODULE_PARM_DESC(enabled, "enforce thermal limit on cpu");
+
+/* Debug */
+module_param_named(thermal_debug_mode, debug, uint, 0664);
+
+/* Poll ms */
+module_param_named(poll_ms, msm_thermal_info.poll_ms, uint, 0664);
+
+/* Temp Threshold */
+module_param_named(temp_threshold, msm_thermal_info.limit_temp_degC,
+			int, 0664);
+module_param_named(core_limit_temp_degC, msm_thermal_info.core_limit_temp_degC,
+		   uint, 0644);
+module_param_named(hotplug_temp_degC, msm_thermal_info.hotplug_temp_degC,
+		   uint, 0644);
+module_param_named(freq_mitig_temp_degc,
+		   msm_thermal_info.freq_mitig_temp_degc, uint, 0644);
+module_param_named(thermal_limit_low, limit_idx_low, 
+			int, 0664);
+
+/* Control Mask */
+module_param_named(freq_control_mask,
+		   msm_thermal_info.bootup_freq_control_mask, uint, 0644);
+module_param_named(core_control_mask, msm_thermal_info.core_control_mask,
+			uint, 0664);
+module_param_named(freq_mitig_control_mask,
+		   msm_thermal_info.freq_mitig_control_mask, uint, 0644);
 
 static ssize_t show_cc_enabled(struct kobject *kobj,
 		struct kobj_attribute *attr, char *buf)
